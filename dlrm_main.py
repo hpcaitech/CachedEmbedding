@@ -387,7 +387,7 @@ class TrainValTestResults:
 
 
 def trace_handler(p):
-    output = p.key_averages().table(sort_by="cpu_time_total", row_limit=10)
+    output = p.key_averages().table(sort_by="cuda_time_total", row_limit=10)
     if dist.get_rank() == 0:
         print(output)
         # p.export_chrome_trace("tmp/trace_" + str(p.step_num) + ".json")
@@ -494,6 +494,8 @@ def main(argv: List[str]) -> None:
     """
     args = parse_args(argv)
     if args.kaggle:
+        global TOTAL_TRAINING_SAMPLES
+        TOTAL_TRAINING_SAMPLES = 45840617
         setattr(args, 'num_embeddings_per_feature', NUM_EMBEDDINGS_PER_FEATURE)
 
     rank = int(os.environ["LOCAL_RANK"])
