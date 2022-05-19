@@ -33,6 +33,7 @@ from torchrec.optim.keyed import CombinedOptimizer, KeyedOptimizerWrapper
 from tqdm import tqdm
 from fbgemm_gpu.split_embedding_configs import EmbOptimType as OptimType
 
+from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
 # OSS import
 try:
@@ -221,6 +222,7 @@ def _evaluate(
     iterator: Iterator[Batch],
     next_iterator: Iterator[Batch],
     stage: str,
+    prof=None
 ) -> Tuple[float, float]:
     """
     Evaluates model. Computes and prints metrics including AUROC and Accuracy. Helper
@@ -291,6 +293,7 @@ def _train(
     validation_freq_within_epoch: Optional[int],
     limit_train_batches: Optional[int],
     limit_val_batches: Optional[int],
+    prof=None
 ) -> None:
     """
     Trains model for 1 epoch. Helper function for train_val_test.
@@ -352,6 +355,7 @@ def _train(
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
             train_pipeline.progress(combined_iterator)
+            prof.step()
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point
             ):  # progress made through the epoch
@@ -380,6 +384,13 @@ class TrainValTestResults:
     val_aurocs: List[float] = field(default_factory=list)
     test_accuracy: Optional[float] = None
     test_auroc: Optional[float] = None
+
+
+def trace_handler(p):
+    output = p.key_averages().table(sort_by="cuda_time_total", row_limit=10)
+    if dist.get_rank() == 0:
+        print(output)
+        # p.export_chrome_trace("tmp/trace_" + str(p.step_num) + ".json")
 
 
 def train_val_test(
@@ -411,46 +422,59 @@ def train_val_test(
 
     train_iterator = iter(train_dataloader)
     test_iterator = iter(test_dataloader)
-    for epoch in range(args.epochs):
-        val_iterator = iter(val_dataloader)
-        _train(
-            train_pipeline,
-            train_iterator,
-            val_iterator,
-            val_dataloader,
-            epoch,
-            args.epochs,
-            args.change_lr,
-            args.lr_change_point,
-            args.lr_after_change_point,
-            args.validation_freq_within_epoch,
-            args.limit_train_batches,
-            args.limit_val_batches,
-        )
-        train_iterator = iter(train_dataloader)
-        val_next_iterator = (
-            test_iterator if epoch == args.epochs - 1 else train_iterator
-        )
-        val_accuracy, val_auroc = _evaluate(
-            args.limit_val_batches,
-            train_pipeline,
-            val_iterator,
-            val_next_iterator,
-            "val",
-        )
+    with profile(
+            activities=[ProfilerActivity.CUDA],
+            schedule=schedule(
+                wait=0, warmup=len(train_dataloader)-3, active=2, repeat=1
+            ),
+            on_trace_ready=trace_handler,
+            record_shapes=True
+    ) as prof:
+        for epoch in range(args.epochs):
+            val_iterator = iter(val_dataloader)
+            with record_function("Training"):
+                _train(
+                    train_pipeline,
+                    train_iterator,
+                    val_iterator,
+                    val_dataloader,
+                    epoch,
+                    args.epochs,
+                    args.change_lr,
+                    args.lr_change_point,
+                    args.lr_after_change_point,
+                    args.validation_freq_within_epoch,
+                    args.limit_train_batches,
+                    args.limit_val_batches,
+                    prof
+                )
+            train_iterator = iter(train_dataloader)
+            val_next_iterator = (
+                test_iterator if epoch == args.epochs - 1 else train_iterator
+            )
 
-        train_val_test_results.val_accuracies.append(val_accuracy)
-        train_val_test_results.val_aurocs.append(val_auroc)
+            with record_function("Evaluation"):
+                val_accuracy, val_auroc = _evaluate(
+                    args.limit_val_batches,
+                    train_pipeline,
+                    val_iterator,
+                    val_next_iterator,
+                    "val",
+                )
 
-    test_accuracy, test_auroc = _evaluate(
-        args.limit_test_batches,
-        train_pipeline,
-        test_iterator,
-        iter(test_dataloader),
-        "test",
-    )
-    train_val_test_results.test_accuracy = test_accuracy
-    train_val_test_results.test_auroc = test_auroc
+            train_val_test_results.val_accuracies.append(val_accuracy)
+            train_val_test_results.val_aurocs.append(val_auroc)
+            # prof.step()
+
+        test_accuracy, test_auroc = _evaluate(
+            args.limit_test_batches,
+            train_pipeline,
+            test_iterator,
+            iter(test_dataloader),
+            "test",
+        )
+        train_val_test_results.test_accuracy = test_accuracy
+        train_val_test_results.test_auroc = test_auroc
 
     return train_val_test_results
 
