@@ -387,7 +387,7 @@ class TrainValTestResults:
 
 
 def trace_handler(p):
-    output = p.key_averages().table(sort_by="cuda_time_total", row_limit=10)
+    output = p.key_averages().table(sort_by="cpu_time_total", row_limit=10)
     if dist.get_rank() == 0:
         print(output)
         # p.export_chrome_trace("tmp/trace_" + str(p.step_num) + ".json")
@@ -423,44 +423,41 @@ def train_val_test(
     train_iterator = iter(train_dataloader)
     test_iterator = iter(test_dataloader)
     with profile(
-            activities=[ProfilerActivity.CUDA],
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             schedule=schedule(
                 wait=0, warmup=len(train_dataloader)-3, active=2, repeat=1
             ),
             on_trace_ready=trace_handler,
-            record_shapes=True
     ) as prof:
         for epoch in range(args.epochs):
             val_iterator = iter(val_dataloader)
-            with record_function("Training"):
-                _train(
-                    train_pipeline,
-                    train_iterator,
-                    val_iterator,
-                    val_dataloader,
-                    epoch,
-                    args.epochs,
-                    args.change_lr,
-                    args.lr_change_point,
-                    args.lr_after_change_point,
-                    args.validation_freq_within_epoch,
-                    args.limit_train_batches,
-                    args.limit_val_batches,
-                    prof
-                )
+            _train(
+                train_pipeline,
+                train_iterator,
+                val_iterator,
+                val_dataloader,
+                epoch,
+                args.epochs,
+                args.change_lr,
+                args.lr_change_point,
+                args.lr_after_change_point,
+                args.validation_freq_within_epoch,
+                args.limit_train_batches,
+                args.limit_val_batches,
+                prof
+            )
             train_iterator = iter(train_dataloader)
             val_next_iterator = (
                 test_iterator if epoch == args.epochs - 1 else train_iterator
             )
 
-            with record_function("Evaluation"):
-                val_accuracy, val_auroc = _evaluate(
-                    args.limit_val_batches,
-                    train_pipeline,
-                    val_iterator,
-                    val_next_iterator,
-                    "val",
-                )
+            val_accuracy, val_auroc = _evaluate(
+                args.limit_val_batches,
+                train_pipeline,
+                val_iterator,
+                val_next_iterator,
+                "val",
+            )
 
             train_val_test_results.val_accuracies.append(val_accuracy)
             train_val_test_results.val_aurocs.append(val_auroc)
