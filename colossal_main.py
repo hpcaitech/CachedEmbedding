@@ -1,4 +1,9 @@
+from tqdm import tqdm
+import itertools
+
 import torch
+import torchmetrics as metrics
+from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
 from torchrec.datasets.criteo import (
     DEFAULT_CAT_NAMES,
@@ -14,11 +19,12 @@ from torchrec.optim.keyed import CombinedOptimizer, KeyedOptimizerWrapper
 from torchrec.distributed import TrainPipelineSparseDist
 
 import colossalai
+from colossalai.context.parallel_mode import ParallelMode
 from colossalai.core import global_context as gpc
 
-from data.colossal_dataloader import get_dataloader, STAGES
-from modules.dlrm_train import DLRMTrain
-from dlrm_main import train_val_test
+from data.colossal_dataloader import get_dataloader
+from dlrm_main import TrainValTestResults, trace_handler
+from models.dlrm import DLRM
 
 
 def parse_args():
@@ -99,12 +105,6 @@ def parse_args():
         "--batch_size", type=int, default=32, help="batch size to use for training"
     )
     parser.add_argument(
-        "--validation_freq_within_epoch",
-        type=int,
-        default=None,
-        help="Frequency at which validation will be run within an epoch.",
-    )
-    parser.add_argument(
         "--learning_rate",
         type=float,
         default=15.0,
@@ -155,11 +155,133 @@ def parse_args():
         map(int, args.num_embeddings_per_feature.split(","))
     )
 
-    # For compatibility with train_val_test
-    for stage in STAGES:
-        attr = f"limit_{stage}_batches"
-        setattr(args, attr, None)
     return args
+
+
+def _train(
+        engine,
+        data_loader,
+        epoch,
+        epochs,
+        change_lr,
+        lr_change_point,
+        lr_after_change_point,
+        device,
+        prof=None
+):
+    engine.train()
+    data_iter = iter(data_loader)
+    samples_per_trainer = len(data_loader) / gpc.get_world_size(ParallelMode.DATA) * epochs
+
+    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
+        try:
+            if gpc.get_global_rank() == 0:
+                print("pre")
+            batch = next(data_iter).to(device)
+            logits = engine(batch.dense_features, batch.sparse_features).squeeze()
+            if gpc.get_global_rank() == 0:
+                print("loss")
+            loss = engine.criterion(logits, batch.labels.float())
+
+            engine.zero_grad()
+            engine.backward(loss)
+            engine.step()
+
+            prof.step()
+
+            if change_lr and (
+                (it * (epoch + 1) / samples_per_trainer) > lr_change_point
+            ):  # progress made through the epoch
+                print(f"Changing learning rate to: {lr_after_change_point}")
+                optimizer = engine.optimizer
+                lr = lr_after_change_point
+                for g in optimizer.param_groups:
+                    g["lr"] = lr
+        except StopIteration:
+            break
+
+
+def _evaluate(
+        engine,
+        data_loader,
+        device,
+        stage
+):
+    engine.eval()
+    auroc = metrics.AUROC(compute_on_step=False).to(device)
+    accuracy = metrics.Accuracy(compute_on_step=False).to(device)
+    data_iter = iter(data_loader)
+
+    for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
+        try:
+            batch = next(data_iter).to(device)
+            logits = engine(batch.dense_features, batch.sparse_features).squeeze().detach()
+            preds = torch.sigmoid(logits)
+
+            labels = batch.labels.detach()
+            auroc(preds, labels)
+            accuracy(preds, labels)
+        except StopIteration:
+            break
+
+    auroc_result = auroc.compute().item()
+    accuracy_result = accuracy.compute().item()
+    if gpc.get_global_rank() == 0:
+        print(f"AUROC over {stage} set: {auroc_result}.")
+        print(f"Accuracy over {stage} set: {accuracy_result}.")
+    return auroc_result, accuracy_result
+
+
+def train_val_test(
+        args,
+        engine,
+        train_dataloader,
+        val_dataloader,
+        test_dataloader,
+        device
+):
+    train_val_test_results = TrainValTestResults()
+    # device = torch.device(f"cuda:{gpc.get_local_rank(ParallelMode.DATA)}")
+    with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=schedule(
+                wait=0, warmup=len(train_dataloader) - 3, active=2, repeat=1
+            ),
+            on_trace_ready=trace_handler,
+    ) as prof:
+        for epoch in range(args.epochs):
+            _train(
+                engine,
+                train_dataloader,
+                epoch,
+                args.epochs,
+                args.change_lr,
+                args.lr_change_point,
+                args.lr_after_change_point,
+                device,
+                prof
+            )
+
+            val_accuracy, val_auroc = _evaluate(
+                engine,
+                val_dataloader,
+                device,
+                "val"
+            )
+
+            train_val_test_results.val_accuracies.append(val_accuracy)
+            train_val_test_results.val_aurocs.append(val_auroc)
+
+        test_accuracy, test_auroc = _evaluate(
+            engine,
+            test_dataloader,
+            device,
+            "test"
+        )
+        train_val_test_results.test_accuracy = test_accuracy
+        train_val_test_results.test_auroc = test_auroc
+
+    return train_val_test_results
 
 
 def main():
@@ -169,19 +291,16 @@ def main():
     colossalai.launch_from_torch(config=args.config_path, verbose=False)
 
     logger = colossalai.logging.get_dist_logger()
-    logger.info(f"launch rank {gpc.get_global_rank()}, Done")
+    logger.info(f"launch rank {gpc.get_global_rank()}, Done, DP rank: {gpc.get_local_rank(ParallelMode.DATA)} / "
+                f"{gpc.get_world_size(ParallelMode.DATA)}")
 
-    logger.info('Build data loader', ranks=[0])
-
-    # TODO: check IterDataPipe dataloader
     train_dataloader = get_dataloader(args, 'train')
     val_dataloader = get_dataloader(args, "val")
     test_dataloader = get_dataloader(args, "test")
 
     logger.info(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
-                f"test batches: {len(test_dataloader)}")
+                f"test batches: {len(test_dataloader)}", ranks=[0])
 
-    logger.info('Build model', ranks=[0])
     # TODO: device rank in different groups
     device = torch.device(f"cuda:{gpc.get_global_rank()}")
 
@@ -198,12 +317,12 @@ def main():
     ebc = EmbeddingBagCollection(tables=eb_configs, device=torch.device("meta"))
 
     # TODO: check Model
-    train_model = DLRMTrain(
+    train_model = DLRM(
         embedding_bag_collection=ebc,
         dense_in_features=len(DEFAULT_INT_NAMES),
         dense_arch_layer_sizes=list(map(int, args.dense_arch_layer_sizes.split(","))),
         over_arch_layer_sizes=list(map(int, args.over_arch_layer_sizes.split(","))),
-        dense_device=device,
+        dense_device=device,  # TODO: dense devices in the DP group
     )
 
     # TODO: check DistributedModelParallel
@@ -216,29 +335,48 @@ def main():
     ]
     model = DistributedModelParallel(
         module=train_model,
-        device=device,
+        device=device,  # TODO: shard devices across the global group
         sharders=sharders,
     )
+    logger.info(f"Model plan: {model.plan}", ranks=[0])
 
+    # optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
     def optimizer_with_params():
         if args.adagrad:
             return lambda params: torch.optim.Adagrad(params, lr=args.learning_rate)
         else:
             return lambda params: torch.optim.SGD(params, lr=args.learning_rate)
 
+    # TODO: optimizer
     dense_optimizer = KeyedOptimizerWrapper(
         dict(model.named_parameters()),  # why dense? what about spares?
         optimizer_with_params(),
     )
     optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
 
-    train_pipeline = TrainPipelineSparseDist(
-        model,
-        optimizer,
-        device,
-    )
+    criterion = torch.nn.BCEWithLogitsLoss()
+
+    engine, _, _, _ = colossalai.initialize(model, optimizer, criterion)
+
+    data_iter = iter(train_dataloader)
+    batch = next(data_iter).to(device)
+    logger.info(f"Batch: {batch}", ranks=[0])
+    logits = engine(batch.dense_features, batch.sparse_features).squeeze()
+    logger.info(f"Logits: {logits}", ranks=[0])
+    loss = engine.criterion(logits, batch.labels.float())
+    logger.info(f"loss: {loss}", ranks=[0])
+    engine.backward(loss)
+    engine.step()
+    logger.info("Test Done", ranks=[0])
+    exit(0)
+    # TODO: pipeline
+    # train_pipeline = TrainPipelineSparseDist(
+    #     model,
+    #     optimizer,
+    #     device,
+    # )
     train_val_test(
-        args, train_pipeline, train_dataloader, val_dataloader, test_dataloader
+        args, engine, train_dataloader, val_dataloader, test_dataloader, device
     )
 
 

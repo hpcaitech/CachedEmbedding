@@ -28,9 +28,8 @@ def get_dataloader(args, stage):
     def is_final_day(s: str) -> bool:
         return f"day_{(7 if args.kaggle else DAYS) - 1}" in s
 
-    # TODO: colossalai's rank
-    rank = gpc.get_global_rank()
-    world_size = gpc.get_world_size(ParallelMode.GLOBAL)
+    rank = gpc.get_local_rank(ParallelMode.DATA)
+    world_size = gpc.get_world_size(ParallelMode.DATA)
     if stage == "train":
         # Train set gets all data except from the final day.
         files = list(filter(lambda s: not is_final_day(s), files))
