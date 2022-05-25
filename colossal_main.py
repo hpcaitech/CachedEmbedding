@@ -1,5 +1,7 @@
 from tqdm import tqdm
 import itertools
+import psutil
+from sklearn.metrics import roc_auc_score
 
 import torch
 import torchmetrics as metrics
@@ -21,10 +23,13 @@ from torchrec.distributed import TrainPipelineSparseDist
 import colossalai
 from colossalai.context.parallel_mode import ParallelMode
 from colossalai.core import global_context as gpc
+from colossalai.utils import ColoInitContext
+from colossalai.utils.cuda import get_current_device
+from colossalai.tensor import ColoTensor, TensorSpec, ComputePattern, ParallelAction, DistSpecManager, distspec
 
 from data.colossal_dataloader import get_dataloader
 from dlrm_main import TrainValTestResults, trace_handler
-from models.dlrm import DLRM
+from models.colossal_dlrm import DLRM, reshape_spare_features
 
 
 def parse_args():
@@ -166,7 +171,6 @@ def _train(
         change_lr,
         lr_change_point,
         lr_after_change_point,
-        device,
         prof=None
 ):
     engine.train()
@@ -175,12 +179,8 @@ def _train(
 
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
-            if gpc.get_global_rank() == 0:
-                print("pre")
-            batch = next(data_iter).to(device)
-            logits = engine(batch.dense_features, batch.sparse_features).squeeze()
-            if gpc.get_global_rank() == 0:
-                print("loss")
+            batch = next(data_iter).to(get_current_device())
+            logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze()
             loss = engine.criterion(logits, batch.labels.float())
 
             engine.zero_grad()
@@ -204,18 +204,17 @@ def _train(
 def _evaluate(
         engine,
         data_loader,
-        device,
         stage
 ):
     engine.eval()
-    auroc = metrics.AUROC(compute_on_step=False).to(device)
-    accuracy = metrics.Accuracy(compute_on_step=False).to(device)
+    auroc = metrics.AUROC(compute_on_step=False).to(get_current_device())
+    accuracy = metrics.Accuracy(compute_on_step=False).to(get_current_device())
     data_iter = iter(data_loader)
 
     for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
         try:
-            batch = next(data_iter).to(device)
-            logits = engine(batch.dense_features, batch.sparse_features).squeeze().detach()
+            batch = next(data_iter).to(get_current_device())
+            logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze().detach()
             preds = torch.sigmoid(logits)
 
             labels = batch.labels.detach()
@@ -238,7 +237,6 @@ def train_val_test(
         train_dataloader,
         val_dataloader,
         test_dataloader,
-        device
 ):
     train_val_test_results = TrainValTestResults()
     # device = torch.device(f"cuda:{gpc.get_local_rank(ParallelMode.DATA)}")
@@ -258,14 +256,12 @@ def train_val_test(
                 args.change_lr,
                 args.lr_change_point,
                 args.lr_after_change_point,
-                device,
                 prof
             )
 
             val_accuracy, val_auroc = _evaluate(
                 engine,
                 val_dataloader,
-                device,
                 "val"
             )
 
@@ -275,13 +271,17 @@ def train_val_test(
         test_accuracy, test_auroc = _evaluate(
             engine,
             test_dataloader,
-            device,
             "test"
         )
         train_val_test_results.test_accuracy = test_accuracy
         train_val_test_results.test_auroc = test_auroc
 
     return train_val_test_results
+
+
+def get_mem_info(prefix=''):
+    return f'{prefix}GPU memory usage: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, ' \
+           f'CPU memory usage: {psutil.Process().memory_info().rss / 1024**3:.2f} GB'
 
 
 def main():
@@ -301,82 +301,38 @@ def main():
     logger.info(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
                 f"test batches: {len(test_dataloader)}", ranks=[0])
 
-    # TODO: device rank in different groups
-    device = torch.device(f"cuda:{gpc.get_global_rank()}")
+    with ColoInitContext(device=get_current_device()):
+        model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
+                     len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
+                     list(map(int, args.over_arch_layer_sizes.split(","))))
+    logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
 
-    # TODO: check EmbeddingBagCollection
-    eb_configs = [
-        EmbeddingBagConfig(
-            name=f"t_{feature_name}",
-            embedding_dim=args.embedding_dim,
-            num_embeddings=args.num_embeddings_per_feature[feature_idx],
-            feature_names=[feature_name],
-        )
-        for feature_idx, feature_name in enumerate(DEFAULT_CAT_NAMES)
-    ]
-    ebc = EmbeddingBagCollection(tables=eb_configs, device=torch.device("meta"))
+    spec = TensorSpec(
+        distspec.shard(gpc.get_group(ParallelMode.PARALLEL_1D), [0], [gpc.get_world_size(ParallelMode.PARALLEL_1D)]),
+        ParallelAction(ComputePattern.TP1D))
+    with DistSpecManager.no_grad():
+        # Here only sets embedding to be model parallelized to align with torchrec
+        model.sparse_arch.embed.weight.set_spec(spec)
 
-    # TODO: check Model
-    train_model = DLRM(
-        embedding_bag_collection=ebc,
-        dense_in_features=len(DEFAULT_INT_NAMES),
-        dense_arch_layer_sizes=list(map(int, args.dense_arch_layer_sizes.split(","))),
-        over_arch_layer_sizes=list(map(int, args.over_arch_layer_sizes.split(","))),
-        dense_device=device,  # TODO: dense devices in the DP group
-    )
-
-    # TODO: check DistributedModelParallel
-    fused_params = {
-        "learning_rate": args.learning_rate,
-        "optimizer": OptimType.EXACT_ROWWISE_ADAGRAD if args.adagrad else OptimType.EXACT_SGD,
-    }
-    sharders = [
-        EmbeddingBagCollectionSharder(fused_params=fused_params),
-    ]
-    model = DistributedModelParallel(
-        module=train_model,
-        device=device,  # TODO: shard devices across the global group
-        sharders=sharders,
-    )
-    logger.info(f"Model plan: {model.plan}", ranks=[0])
-
-    # optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
-    def optimizer_with_params():
-        if args.adagrad:
-            return lambda params: torch.optim.Adagrad(params, lr=args.learning_rate)
-        else:
-            return lambda params: torch.optim.SGD(params, lr=args.learning_rate)
-
-    # TODO: optimizer
-    dense_optimizer = KeyedOptimizerWrapper(
-        dict(model.named_parameters()),  # why dense? what about spares?
-        optimizer_with_params(),
-    )
-    optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
-
+    # TODO: check ColoOptimizer
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
     criterion = torch.nn.BCEWithLogitsLoss()
 
     engine, _, _, _ = colossalai.initialize(model, optimizer, criterion)
 
-    data_iter = iter(train_dataloader)
-    batch = next(data_iter).to(device)
-    logger.info(f"Batch: {batch}", ranks=[0])
-    logits = engine(batch.dense_features, batch.sparse_features).squeeze()
-    logger.info(f"Logits: {logits}", ranks=[0])
-    loss = engine.criterion(logits, batch.labels.float())
-    logger.info(f"loss: {loss}", ranks=[0])
-    engine.backward(loss)
-    engine.step()
-    logger.info("Test Done", ranks=[0])
-    exit(0)
-    # TODO: pipeline
-    # train_pipeline = TrainPipelineSparseDist(
-    #     model,
-    #     optimizer,
-    #     device,
-    # )
+    # data_iter = iter(train_dataloader)
+    # batch = next(data_iter).to(get_current_device())
+    # logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze()
+    # logger.info(f"Logits: {logits}", ranks=[0])
+    # loss = engine.criterion(logits, batch.labels.float())
+    # logger.info(f"loss: {loss}", ranks=[0])
+    # engine.backward(loss)
+    # engine.step()
+    # logger.info("Test Done", ranks=[0])
+    # exit(0)
+
     train_val_test(
-        args, engine, train_dataloader, val_dataloader, test_dataloader, device
+        args, engine, train_dataloader, val_dataloader, test_dataloader
     )
 
 
