@@ -12,13 +12,6 @@ from torchrec.datasets.criteo import (
     DEFAULT_INT_NAMES,
     TOTAL_TRAINING_SAMPLES,
 )
-from torchrec.modules.embedding_configs import EmbeddingBagConfig
-from torchrec import EmbeddingBagCollection
-from torchrec.distributed.embeddingbag import EmbeddingBagCollectionSharder
-from fbgemm_gpu.split_embedding_configs import EmbOptimType as OptimType
-from torchrec.distributed.model_parallel import DistributedModelParallel
-from torchrec.optim.keyed import CombinedOptimizer, KeyedOptimizerWrapper
-from torchrec.distributed import TrainPipelineSparseDist
 
 import colossalai
 from colossalai.context.parallel_mode import ParallelMode
@@ -207,10 +200,13 @@ def _evaluate(
         stage
 ):
     engine.eval()
+    # To enable torchmetrics,
+    # modify colossalai/utils/model/colo_init_context.py line#72:
+    #   change `ColoTensor` to `ColoParameter`
     auroc = metrics.AUROC(compute_on_step=False).to(get_current_device())
     accuracy = metrics.Accuracy(compute_on_step=False).to(get_current_device())
     data_iter = iter(data_loader)
-
+    # pred_buffer, label_buffer = [], []
     for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
         try:
             batch = next(data_iter).to(get_current_device())
@@ -220,12 +216,16 @@ def _evaluate(
             labels = batch.labels.detach()
             auroc(preds, labels)
             accuracy(preds, labels)
+            # pred_buffer.extend(preds.tolist())
+            # label_buffer.extend(labels.tolist())
         except StopIteration:
             break
 
     auroc_result = auroc.compute().item()
     accuracy_result = accuracy.compute().item()
+    # valid_auc = roc_auc_score(label_buffer, pred_buffer)
     if gpc.get_global_rank() == 0:
+        # print(f"Valid AUROC: {valid_auc}")
         print(f"AUROC over {stage} set: {auroc_result}.")
         print(f"Accuracy over {stage} set: {accuracy_result}.")
     return auroc_result, accuracy_result

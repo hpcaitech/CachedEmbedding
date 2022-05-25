@@ -13,7 +13,7 @@ from torchrec.datasets.criteo import BinaryCriteoUtils, CAT_FEATURE_COUNT
 
 def main(data_dir, output_dir, days=7):
     STAGES = ("labels", "dense", "sparse")
-    files = [os.path.join(data_dir, f"train_{split}.npy") for split in STAGES]
+    files = [os.path.join(data_dir, f"train.txt_{split}.npy") for split in STAGES]
     total_rows = BinaryCriteoUtils.get_shape_from_npy(files[0])[0]
 
     indices = list(range(0, total_rows, total_rows//days))

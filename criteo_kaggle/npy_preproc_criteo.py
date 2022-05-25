@@ -58,7 +58,7 @@ def tsv_to_npys(
     del labels
 
     # Why log +3?
-    dense_np += 3
+    dense_np -= (dense_np.min() - 2)
     dense_np = np.log(dense_np, dtype=np.float32)
 
     labels_np = labels_np.reshape((-1, 1))
