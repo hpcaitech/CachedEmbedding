@@ -1,6 +1,5 @@
 from tqdm import tqdm
 import itertools
-import psutil
 from sklearn.metrics import roc_auc_score
 
 import torch
@@ -21,7 +20,7 @@ from colossalai.utils.cuda import get_current_device
 from colossalai.tensor import ColoTensor, TensorSpec, ComputePattern, ParallelAction, DistSpecManager, distspec
 
 from data.colossal_dataloader import get_dataloader
-from dlrm_main import TrainValTestResults, trace_handler
+from utils import TrainValTestResults, trace_handler, get_mem_info
 from models.colossal_dlrm import DLRM, reshape_spare_features
 
 
@@ -166,6 +165,7 @@ def _train(
         lr_after_change_point,
         prof=None
 ):
+    logger = colossalai.logging.get_dist_logger()
     engine.train()
     data_iter = iter(data_loader)
     samples_per_trainer = len(data_loader) / gpc.get_world_size(ParallelMode.DATA) * epochs
@@ -173,19 +173,27 @@ def _train(
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
             batch = next(data_iter).to(get_current_device())
-            logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze()
+            with record_function("Forward pass"):
+                logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze()
             loss = engine.criterion(logits, batch.labels.float())
 
+            if it == len(data_loader) - 3:
+                logger.info(f"{get_mem_info('After forward:  ')}")
+
             engine.zero_grad()
-            engine.backward(loss)
-            engine.step()
+            with record_function("Backward pass"):
+                engine.backward(loss)
+
+            with record_function("Optimization"):
+                engine.step()
 
             prof.step()
 
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point
             ):  # progress made through the epoch
-                print(f"Changing learning rate to: {lr_after_change_point}")
+                logger.info(f"Changing learning rate to: {lr_after_change_point}", ranks=[0])
+                change_lr = False
                 optimizer = engine.optimizer
                 lr = lr_after_change_point
                 for g in optimizer.param_groups:
@@ -207,19 +215,20 @@ def _evaluate(
     accuracy = metrics.Accuracy(compute_on_step=False).to(get_current_device())
     data_iter = iter(data_loader)
     # pred_buffer, label_buffer = [], []
-    for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
-        try:
-            batch = next(data_iter).to(get_current_device())
-            logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze().detach()
-            preds = torch.sigmoid(logits)
+    with torch.no_grad():
+        for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
+            try:
+                batch = next(data_iter).to(get_current_device())
+                logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze().detach()
+                preds = torch.sigmoid(logits)
 
-            labels = batch.labels.detach()
-            auroc(preds, labels)
-            accuracy(preds, labels)
-            # pred_buffer.extend(preds.tolist())
-            # label_buffer.extend(labels.tolist())
-        except StopIteration:
-            break
+                labels = batch.labels.detach()
+                auroc(preds, labels)
+                accuracy(preds, labels)
+                # pred_buffer.extend(preds.tolist())
+                # label_buffer.extend(labels.tolist())
+            except StopIteration:
+                break
 
     auroc_result = auroc.compute().item()
     accuracy_result = accuracy.compute().item()
@@ -243,8 +252,9 @@ def train_val_test(
     with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             schedule=schedule(
-                wait=0, warmup=len(train_dataloader) - 3, active=2, repeat=1
+                wait=0, warmup=len(train_dataloader) - 2, active=2, repeat=1
             ),
+            profile_memory=True,
             on_trace_ready=trace_handler,
     ) as prof:
         for epoch in range(args.epochs):
@@ -279,11 +289,6 @@ def train_val_test(
     return train_val_test_results
 
 
-def get_mem_info(prefix=''):
-    return f'{prefix}GPU memory usage: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, ' \
-           f'CPU memory usage: {psutil.Process().memory_info().rss / 1024**3:.2f} GB'
-
-
 def main():
     args = parse_args()
 
@@ -292,7 +297,7 @@ def main():
 
     logger = colossalai.logging.get_dist_logger()
     logger.info(f"launch rank {gpc.get_global_rank()}, Done, DP rank: {gpc.get_local_rank(ParallelMode.DATA)} / "
-                f"{gpc.get_world_size(ParallelMode.DATA)}")
+                f"{gpc.get_world_size(ParallelMode.DATA)}, TP size: {gpc.get_world_size(ParallelMode.PARALLEL_1D)}")
 
     train_dataloader = get_dataloader(args, 'train')
     val_dataloader = get_dataloader(args, "val")
@@ -305,7 +310,7 @@ def main():
         model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
                      len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
                      list(map(int, args.over_arch_layer_sizes.split(","))))
-    logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
+    logger.info(f"{get_mem_info('After model Init:  ')}")
 
     spec = TensorSpec(
         distspec.shard(gpc.get_group(ParallelMode.PARALLEL_1D), [0], [gpc.get_world_size(ParallelMode.PARALLEL_1D)]),

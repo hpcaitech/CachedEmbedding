@@ -18,7 +18,10 @@ class EmbeddingBag(nn.Module):
 
         tot_features = sum(num_embeddings_per_feature)
         # TODO: Other mode
-        tot_features += tot_features % gpc.get_world_size(ParallelMode.PARALLEL_1D)
+        tp_size = gpc.get_world_size(ParallelMode.PARALLEL_1D)
+        if tot_features % tp_size != 0:
+            tot_features += (tp_size - tot_features % tp_size)
+
         self.embed = nn.Embedding(tot_features, embedding_dim)
         offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
         # TODO: check device
