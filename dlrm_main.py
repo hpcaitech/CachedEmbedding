@@ -32,6 +32,10 @@ from torchrec.optim.keyed import CombinedOptimizer, KeyedOptimizerWrapper
 from tqdm import tqdm
 from fbgemm_gpu.split_embedding_configs import EmbOptimType as OptimType
 
+from torchrec.distributed.planner import EmbeddingShardingPlanner, Topology
+from torchrec.distributed.types import ShardingEnv, ShardingType
+from torchrec.distributed.planner.types import ParameterConstraints
+
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
 # OSS import
@@ -558,12 +562,38 @@ def main(argv: List[str]) -> None:
 
     print(f"{get_mem_info('After model init:  ')}")
 
+    # Torchrec Planner
+    env = ShardingEnv.from_process_group(dist.GroupMember.WORLD)
+    topology = Topology(
+        world_size=env.world_size,
+        compute_device="cuda",
+        hbm_cap=70*1024**3,  # GPU mem
+        ddr_cap=300*1024*3,  # CPU mem
+        intra_host_bw=1000*1024**3/1000,  # Device to Device bandwidth
+        # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
+        batch_size=args.batch_size
+    )
+    constraints = {
+        f"t_{feature_name}": ParameterConstraints(
+            sharding_types=[ShardingType.TABLE_WISE.value]  # if num_embeddings < 1e5 else ShardingType.ROW_WISE.value],
+        ) for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, DEFAULT_CAT_NAMES)
+    }
+    planner = EmbeddingShardingPlanner(
+        topology=topology,
+        constraints=constraints,
+    )
+    plan = planner.collective_plan(train_model, sharders, env.process_group)
     model = DistributedModelParallel(
         module=train_model,
         device=device,
         sharders=cast(List[ModuleSharder[nn.Module]], sharders),
+        plan=plan
     )
     print(f"{get_mem_info('After model parallel:  ')}")
+
+    if dist.get_rank() == 0:
+        print(f"Plan: {model.plan}")
+
     def optimizer_with_params():
         if args.adagrad:
             return lambda params: torch.optim.Adagrad(params, lr=args.learning_rate)
