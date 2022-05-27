@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.profiler import record_function
 
 from modules.colossal_embedding import EmbeddingBag
 from models.dlrm import DenseArch, OverArch, InteractionArch, choose
@@ -36,10 +37,15 @@ class DLRM(nn.Module):
         )
 
     def forward(self, dense_features, sparse_features):
-        embedded_dense = self.dense_arch(dense_features)
-        embedded_sparse = self.sparse_arch(sparse_features)
-        concat_dense = self.inter_arch(
-            dense_features=embedded_dense, sparse_features=embedded_sparse
-        )
-        logits = self.over_arch(concat_dense)
+        with record_function("Embedding lookup:"):
+            embedded_dense = self.dense_arch(dense_features)
+        with record_function("Dense MLP:"):
+            embedded_sparse = self.sparse_arch(sparse_features)
+
+        with record_function("Feature interaction:"):
+            concat_dense = self.inter_arch(
+                dense_features=embedded_dense, sparse_features=embedded_sparse
+            )
+        with record_function("Output MLP:"):
+            logits = self.over_arch(concat_dense)
         return logits

@@ -9,7 +9,6 @@ import argparse
 import itertools
 import os
 import sys
-from dataclasses import dataclass, field
 from typing import cast, Iterator, List, Optional, Tuple
 
 import torch
@@ -32,6 +31,10 @@ from torchrec.modules.embedding_configs import EmbeddingBagConfig
 from torchrec.optim.keyed import CombinedOptimizer, KeyedOptimizerWrapper
 from tqdm import tqdm
 from fbgemm_gpu.split_embedding_configs import EmbOptimType as OptimType
+
+from torchrec.distributed.planner import EmbeddingShardingPlanner, Topology
+from torchrec.distributed.types import ShardingEnv, ShardingType
+from torchrec.distributed.planner.types import ParameterConstraints
 
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
@@ -56,6 +59,8 @@ try:
     from .modules.dlrm_train import DLRMTrain  # noqa F811
 except ImportError:
     pass
+
+from utils import TrainValTestResults, get_mem_info, trace_handler
 
 TRAIN_PIPELINE_STAGES = 3  # Number of stages in TrainPipelineSparseDist.
 NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
@@ -293,7 +298,8 @@ def _train(
     validation_freq_within_epoch: Optional[int],
     limit_train_batches: Optional[int],
     limit_val_batches: Optional[int],
-    prof=None
+    prof=None,
+    num_batches=0
 ) -> None:
     """
     Trains model for 1 epoch. Helper function for train_val_test.
@@ -355,6 +361,8 @@ def _train(
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
             train_pipeline.progress(combined_iterator)
+            if it == (num_batches - 3):
+                print(f"{get_mem_info('Training:  ')}")
             prof.step()
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point
@@ -376,21 +384,6 @@ def _train(
                 train_pipeline._model.train()
         except StopIteration:
             break
-
-
-@dataclass
-class TrainValTestResults:
-    val_accuracies: List[float] = field(default_factory=list)
-    val_aurocs: List[float] = field(default_factory=list)
-    test_accuracy: Optional[float] = None
-    test_auroc: Optional[float] = None
-
-
-def trace_handler(p):
-    output = p.key_averages().table(sort_by="cuda_time_total", row_limit=10)
-    if dist.get_rank() == 0:
-        print(output)
-        # p.export_chrome_trace("tmp/trace_" + str(p.step_num) + ".json")
 
 
 def train_val_test(
@@ -444,7 +437,8 @@ def train_val_test(
                 args.validation_freq_within_epoch,
                 args.limit_train_batches,
                 args.limit_val_batches,
-                prof
+                prof,
+                len(train_dataloader)
             )
             train_iterator = iter(train_dataloader)
             val_next_iterator = (
@@ -566,11 +560,39 @@ def main(argv: List[str]) -> None:
         EmbeddingBagCollectionSharder(fused_params=fused_params),
     ]
 
+    print(f"{get_mem_info('After model init:  ')}")
+
+    # Torchrec Planner
+    env = ShardingEnv.from_process_group(dist.GroupMember.WORLD)
+    topology = Topology(
+        world_size=env.world_size,
+        compute_device="cuda",
+        hbm_cap=70*1024**3,  # GPU mem
+        ddr_cap=300*1024*3,  # CPU mem
+        intra_host_bw=1000*1024**3/1000,  # Device to Device bandwidth
+        # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
+        batch_size=args.batch_size
+    )
+    constraints = {
+        f"t_{feature_name}": ParameterConstraints(
+            sharding_types=[ShardingType.TABLE_WISE.value]  # if num_embeddings < 1e5 else ShardingType.ROW_WISE.value],
+        ) for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, DEFAULT_CAT_NAMES)
+    }
+    planner = EmbeddingShardingPlanner(
+        topology=topology,
+        constraints=constraints,
+    )
+    plan = planner.collective_plan(train_model, sharders, env.process_group)
     model = DistributedModelParallel(
         module=train_model,
         device=device,
         sharders=cast(List[ModuleSharder[nn.Module]], sharders),
+        plan=plan
     )
+    print(f"{get_mem_info('After model parallel:  ')}")
+
+    if dist.get_rank() == 0:
+        print(f"Plan: {model.plan}")
 
     def optimizer_with_params():
         if args.adagrad:
