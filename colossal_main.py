@@ -3,6 +3,7 @@ import itertools
 from sklearn.metrics import roc_auc_score
 
 import torch
+import torch.distributed as dist
 import torchmetrics as metrics
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
@@ -255,6 +256,7 @@ def train_val_test(
                 wait=0, warmup=len(train_dataloader) - 2, active=2, repeat=1
             ),
             profile_memory=True,
+            # with_stack=True,
             on_trace_ready=trace_handler,
     ) as prof:
         for epoch in range(args.epochs):
@@ -326,15 +328,25 @@ def main():
 
     engine, _, _, _ = colossalai.initialize(model, optimizer, criterion)
 
-    # data_iter = iter(train_dataloader)
-    # batch = next(data_iter).to(get_current_device())
-    # logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze()
-    # logger.info(f"Logits: {logits}", ranks=[0])
-    # loss = engine.criterion(logits, batch.labels.float())
-    # logger.info(f"loss: {loss}", ranks=[0])
-    # engine.backward(loss)
-    # engine.step()
-    # logger.info("Test Done", ranks=[0])
+    # with profile(
+    #         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    #         with_stack=True,
+    # ) as prof:
+    #     data_iter = iter(train_dataloader)
+    #     batch = next(data_iter).to(get_current_device())
+    #     logits = model(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze()
+    #     logger.info(f"Logits: {logits}", ranks=[0])
+    #     loss = criterion(logits, batch.labels.float())
+    #     logger.info(f"loss: {loss}", ranks=[0])
+    #     loss.backward()
+    #     optimizer.step()
+    #     logger.info("Test Done", ranks=[0])
+    # stats = prof.key_averages(group_by_stack_n=6)
+    # stats_str = "CPU time total\n" + f"{stats.table(sort_by='cpu_time_total', row_limit=20)}" + "\n"
+    # stats_str += "Self CPU time total\n" + f"{stats.table(sort_by='self_cpu_time_total', row_limit=20)}" + "\n"
+    #
+    # if dist.get_rank() == 0:
+    #     print(stats_str)
     # exit(0)
 
     train_val_test(

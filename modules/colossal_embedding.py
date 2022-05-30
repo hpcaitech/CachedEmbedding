@@ -17,9 +17,13 @@ class EmbeddingBag(nn.Module):
         super(EmbeddingBag, self).__init__()
 
         tot_features = sum(num_embeddings_per_feature)
-        # TODO: Other mode
-        tp_size = gpc.get_world_size(ParallelMode.PARALLEL_1D)
-        if tot_features % tp_size != 0:
+
+        tp_size = None
+        try:
+            tp_size = gpc.get_world_size(ParallelMode.PARALLEL_1D)
+        except Exception:
+            pass
+        if tp_size is not None and tot_features % tp_size != 0:
             tot_features += (tp_size - tot_features % tp_size)
 
         self.embed = nn.Embedding(tot_features, embedding_dim)
