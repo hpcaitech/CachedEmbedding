@@ -296,8 +296,9 @@ def main():
     colossalai.launch_from_torch(config=args.config_path, verbose=False)
 
     logger = colossalai.logging.get_dist_logger()
-    logger.info(f"launch rank {gpc.get_global_rank()}, Done, DP rank: {gpc.get_local_rank(ParallelMode.DATA)} / "
-                f"{gpc.get_world_size(ParallelMode.DATA)}, TP size: {gpc.get_world_size(ParallelMode.PARALLEL_1D)}")
+    logger.info(f"launch rank {gpc.get_global_rank()}, Done, "
+                f"DP size: {gpc.get_world_size(ParallelMode.DATA)}, "
+                f"TP size: {gpc.get_world_size(ParallelMode.PARALLEL_1D)}")
 
     train_dataloader = get_dataloader(args, 'train')
     val_dataloader = get_dataloader(args, "val")

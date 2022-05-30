@@ -20,7 +20,12 @@ class TrainValTestResults:
 
 
 def trace_handler(p):
-    output = p.key_averages().table(sort_by="cpu_time_total", row_limit=20)
+    stats = p.key_averages()
     if dist.get_rank() == 0:
-        print(output)
+        stats_str = "CPU Time Total:\n" + f"{stats.table(sort_by='cpu_time_total', row_limit=20)}" + "\n"
+        stats_str += "Self CPU Time Total:\n" + f"{stats.table(sort_by='self_cpu_time_total', row_limit=20)}" + "\n"
+        stats_str += "CUDA Time Total:\n" + f"{stats.table(sort_by='cuda_time_total', row_limit=20)}" + "\n"
+        stats_str += "Self CUDA Time Total:\n" + f"{stats.table(sort_by='self_cuda_time_total', row_limit=20)}" + "\n"
+
+        print(stats_str)
         # p.export_chrome_trace("tmp/trace_" + str(p.step_num) + ".json")
