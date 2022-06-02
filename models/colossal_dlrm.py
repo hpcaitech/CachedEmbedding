@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.profiler import record_function
 
-from modules.colossal_embedding import EmbeddingBag
+from modules.colossal_embedding import EmbeddingCollection
 from models.dlrm import DenseArch, OverArch, InteractionArch, choose
 
 
@@ -18,23 +18,25 @@ class DLRM(nn.Module):
                  num_sparse_features,
                  dense_in_features,
                  dense_arch_layer_sizes,
-                 over_arch_layer_sizes
+                 over_arch_layer_sizes,
+                 sparse_device,
+                 dense_device
                  ):
         super(DLRM, self).__init__()
 
-        self.sparse_arch = EmbeddingBag(num_embeddings_per_feature, embedding_dim)
+        self.sparse_arch = EmbeddingCollection(num_embeddings_per_feature, embedding_dim, sparse_device)
         self.dense_arch = DenseArch(
             in_features=dense_in_features,
             layer_sizes=dense_arch_layer_sizes
-        )
-        self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features)
+        ).to(dense_device)
+        self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features).to(dense_device)
         over_in_features = (
                 embedding_dim + choose(num_sparse_features, 2) + num_sparse_features
         )
         self.over_arch = OverArch(
             in_features=over_in_features,
             layer_sizes=over_arch_layer_sizes,
-        )
+        ).to(dense_device)
 
     def forward(self, dense_features, sparse_features):
         with record_function("Embedding lookup:"):
@@ -49,3 +51,6 @@ class DLRM(nn.Module):
         with record_function("Output MLP:"):
             logits = self.over_arch(concat_dense)
         return logits
+
+    def use_sparse_cpu(self):
+        self.sparse_arch.cpu()

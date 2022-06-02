@@ -1,9 +1,11 @@
+import numpy as np
 from tqdm import tqdm
 import itertools
 from sklearn.metrics import roc_auc_score
 
 import torch
 import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 import torchmetrics as metrics
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
@@ -19,6 +21,8 @@ from colossalai.core import global_context as gpc
 from colossalai.utils import ColoInitContext
 from colossalai.utils.cuda import get_current_device
 from colossalai.tensor import ColoTensor, TensorSpec, ComputePattern, ParallelAction, DistSpecManager, distspec
+from colossalai.engine import Engine
+from colossalai.nn.optimizer.colossalai_optimizer import ColossalaiOptimizer
 
 from data.colossal_dataloader import get_dataloader
 from utils import TrainValTestResults, trace_handler, get_mem_info
@@ -89,6 +93,10 @@ def parse_args():
         default=64,
         help="Size of each embedding.",
     )
+    parser.add_argument(
+        "--use_cpu",
+        action='store_true'
+    )
 
     # Training
     parser.add_argument(
@@ -156,6 +164,16 @@ def parse_args():
     return args
 
 
+def put_data_to_device(batch, use_cpu):
+    device = get_current_device()
+    dense_feature, labels = batch.dense_features.to(device), batch.labels.to(device)
+    if use_cpu:
+        sparse_features = reshape_spare_features(batch.sparse_features)
+    else:
+        sparse_features = reshape_spare_features(batch.sparse_features.to(device))
+    return dense_feature, sparse_features, labels
+
+
 def _train(
         engine,
         data_loader,
@@ -164,7 +182,8 @@ def _train(
         change_lr,
         lr_change_point,
         lr_after_change_point,
-        prof=None
+        prof=None,
+        use_cpu=False,
 ):
     logger = colossalai.logging.get_dist_logger()
     engine.train()
@@ -173,11 +192,11 @@ def _train(
 
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
-            batch = next(data_iter).to(get_current_device())
+            dense, sparse, labels = put_data_to_device(next(data_iter), use_cpu)
             with record_function("Forward pass"):
-                logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze()
-            loss = engine.criterion(logits, batch.labels.float())
-
+                logits = engine(dense, sparse).squeeze()
+            loss = engine.criterion(logits, labels.float())
+            # logger.info(f"it: {it}, loss: {loss.item()}, device: {loss.device}")
             if it == len(data_loader) - 3:
                 logger.info(f"{get_mem_info('After forward:  ')}")
 
@@ -206,7 +225,8 @@ def _train(
 def _evaluate(
         engine,
         data_loader,
-        stage
+        stage,
+        use_cpu=False
 ):
     engine.eval()
     # To enable torchmetrics,
@@ -219,11 +239,11 @@ def _evaluate(
     with torch.no_grad():
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
             try:
-                batch = next(data_iter).to(get_current_device())
-                logits = engine(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze().detach()
+                dense, sparse, labels = put_data_to_device(next(data_iter), use_cpu)
+                logits = engine(dense, sparse).squeeze().detach()
                 preds = torch.sigmoid(logits)
 
-                labels = batch.labels.detach()
+                labels = labels.detach()
                 auroc(preds, labels)
                 accuracy(preds, labels)
                 # pred_buffer.extend(preds.tolist())
@@ -268,13 +288,15 @@ def train_val_test(
                 args.change_lr,
                 args.lr_change_point,
                 args.lr_after_change_point,
-                prof
+                prof,
+                args.use_cpu
             )
 
             val_accuracy, val_auroc = _evaluate(
                 engine,
                 val_dataloader,
-                "val"
+                "val",
+                args.use_cpu
             )
 
             train_val_test_results.val_accuracies.append(val_accuracy)
@@ -283,7 +305,8 @@ def train_val_test(
         test_accuracy, test_auroc = _evaluate(
             engine,
             test_dataloader,
-            "test"
+            "test",
+            args.use_cpu
         )
         train_val_test_results.test_accuracy = test_accuracy
         train_val_test_results.test_auroc = test_auroc
@@ -300,7 +323,7 @@ def main():
     logger = colossalai.logging.get_dist_logger()
     logger.info(f"launch rank {gpc.get_global_rank()}, Done, "
                 f"DP size: {gpc.get_world_size(ParallelMode.DATA)}, "
-                f"TP size: {gpc.get_world_size(ParallelMode.PARALLEL_1D)}")
+                f"MP size: {gpc.get_world_size(ParallelMode.MODEL)}")
 
     train_dataloader = get_dataloader(args, 'train')
     val_dataloader = get_dataloader(args, "val")
@@ -309,37 +332,60 @@ def main():
     logger.info(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
                 f"test batches: {len(test_dataloader)}", ranks=[0])
 
-    with ColoInitContext(device=get_current_device()):
-        model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
-                     len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
-                     list(map(int, args.over_arch_layer_sizes.split(","))))
-    logger.info(f"{get_mem_info('After model Init:  ')}")
+    device = get_current_device()
+    sparse_device = torch.device('cpu') if args.use_cpu else device
+    model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
+                 len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
+                 list(map(int, args.over_arch_layer_sizes.split(","))), sparse_device, device)
+    # with ColoInitContext(device=get_current_device()):
+    #     model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
+    #                  len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
+    #                  list(map(int, args.over_arch_layer_sizes.split(","))))
+    logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
 
-    spec = TensorSpec(
-        distspec.shard(gpc.get_group(ParallelMode.PARALLEL_1D), [0], [gpc.get_world_size(ParallelMode.PARALLEL_1D)]),
-        ParallelAction(ComputePattern.TP1D))
-    with DistSpecManager.no_grad():
-        # Here only sets embedding to be model parallelized to align with torchrec
-        model.sparse_arch.embed.weight.set_spec(spec)
+    # spec = TensorSpec(
+    #     distspec.shard(gpc.get_group(ParallelMode.PARALLEL_1D), [0], [gpc.get_world_size(ParallelMode.PARALLEL_1D)]),
+    #     ParallelAction(ComputePattern.TP1D))
+    # with DistSpecManager.no_grad():
+    #     # Here only sets embedding to be model parallelized to align with torchrec
+    #     model.sparse_arch.embed.weight.set_spec(spec)
+    # logger.info(f"{get_mem_info('After model spec:  ')}")
 
     # TODO: check ColoOptimizer
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
+    optimizer = ColossalaiOptimizer(torch.optim.SGD(model.parameters(), lr=args.learning_rate))
     criterion = torch.nn.BCEWithLogitsLoss()
 
-    engine, _, _, _ = colossalai.initialize(model, optimizer, criterion)
+    # engine, _, _, _ = colossalai.initialize(model, optimizer, criterion)
+    model = DDP(model,
+                process_group=gpc.get_group(ParallelMode.DATA),
+                device_ids=None,
+                find_unused_parameters=True,
+                broadcast_buffers=False)
+    engine = Engine(model, optimizer, criterion)
 
+    logger.info(f"{get_mem_info('After colossalai init:  ')}", ranks=[0])
+    for name, param in model.module.named_parameters():
+        logger.info(f"{name} : shape {param.shape}, device {param.data.device}", ranks=[0])
+
+    # Sanity Check
+    # rank = gpc.get_local_rank(ParallelMode.DATA)
+    # # offsets = torch.tensor([0, *np.cumsum(args.num_embeddings_per_feature)[:-1]]).unsqueeze(0)
     # with profile(
     #         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
     #         with_stack=True,
     # ) as prof:
     #     data_iter = iter(train_dataloader)
-    #     batch = next(data_iter).to(get_current_device())
-    #     logits = model(batch.dense_features, reshape_spare_features(batch.sparse_features)).squeeze()
-    #     logger.info(f"Logits: {logits}", ranks=[0])
-    #     loss = criterion(logits, batch.labels.float())
-    #     logger.info(f"loss: {loss}", ranks=[0])
-    #     loss.backward()
-    #     optimizer.step()
+    #     batch = next(data_iter)
+    #     dense_features, sparse_features, labels = put_data_to_device(batch, args.use_cpu)
+    #     logger.info(f"Rank: {rank}, sparse feature: {sparse_features}")
+    #
+    #     logits = engine(dense_features, sparse_features).squeeze()
+    #     logger.info(f"Rank: {rank}, Logits: {logits}")
+    #
+    #     loss = engine.criterion(logits, labels.float())
+    #     logger.info(f"Rank: {rank}, loss: {loss}")
+    #     engine.backward(loss)
+    #     engine.step()
     #     logger.info("Test Done", ranks=[0])
     # stats = prof.key_averages(group_by_stack_n=6)
     # stats_str = "CPU time total\n" + f"{stats.table(sort_by='cpu_time_total', row_limit=20)}" + "\n"
