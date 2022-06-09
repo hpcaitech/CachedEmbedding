@@ -103,7 +103,7 @@ class SparseArch(nn.Module):
         for name in self.sparse_feature_names:
             sparse_values.append(sparse[name])
 
-        return torch.cat(sparse_values, dim=1).reshape(B, self.F, self.D)
+        return torch.cat(sparse_values, dim=1).view(B, self.F, self.D)
 
     @property
     def sparse_feature_names(self) -> List[str]:

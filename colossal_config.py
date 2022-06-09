@@ -10,3 +10,5 @@ parallel = dict(
         size=2
     )
 )
+
+inspect_time = True

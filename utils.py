@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 import psutil
-
+from contextlib import contextmanager
+from colossalai.utils import Timer
+from colossalai.logging import get_dist_logger
 import torch
 import torch.distributed as dist
 
@@ -29,3 +31,12 @@ def trace_handler(p):
 
         print(stats_str)
         # p.export_chrome_trace("tmp/trace_" + str(p.step_num) + ".json")
+
+
+@contextmanager
+def get_time_elapsed(logger, repr: str):
+    timer = Timer()
+    timer.start()
+    yield
+    elapsed = timer.stop()
+    logger.info(f"Time elapsed for {repr}: {elapsed:.4f}s", ranks=[0])
