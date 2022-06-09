@@ -11,14 +11,10 @@ from modules.colossal_functional import copy_to_gpu, copy_to_cpu
 
 
 class EmbeddingCollection(nn.Embedding):
-    def __init__(self, num_embeddings_per_feature, embedding_dim, device):
+    def __init__(self, num_embeddings_per_feature, embedding_dim):
         tot_features = sum(num_embeddings_per_feature)
-        tp_size = None
-        try:
-            tp_size = gpc.get_world_size(ParallelMode.PARALLEL_1D)
-        except Exception:
-            pass
-        if tp_size is not None and tot_features % tp_size != 0:
+        tp_size = gpc.tensor_parallel_size
+        if tot_features % tp_size != 0:
             tot_features += (tp_size - tot_features % tp_size)
         super().__init__(tot_features, embedding_dim)
 
@@ -29,19 +25,15 @@ class EmbeddingCollection(nn.Embedding):
             False
         )
 
-        if device is None:
-            raise ValueError("Please explicitly set the device")
-        self._use_cpu = False if device.type == 'cuda' else True
-
-        self.to(device)
+        # if device is None:
+        #     raise ValueError("Please explicitly set the device")
+        # self._use_cpu = False if device.type == 'cuda' else True
+        #
+        # self.to(device)
 
     def forward(self, x):
-        if self._use_cpu and x.device.type != 'cpu':
-            x = copy_to_cpu(x)
-
         embedding = super().forward(x+self.offsets)
-
-        if self._use_cpu:
+        if self.offsets.device.type == 'cpu':
             embedding = copy_to_gpu(embedding)
         return embedding
 

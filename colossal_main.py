@@ -5,7 +5,6 @@ from sklearn.metrics import roc_auc_score
 
 import torch
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 import torchmetrics as metrics
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
@@ -18,11 +17,13 @@ from torchrec.datasets.criteo import (
 import colossalai
 from colossalai.context.parallel_mode import ParallelMode
 from colossalai.core import global_context as gpc
-from colossalai.utils import ColoInitContext
+from colossalai.utils.model.colo_init_context import ColoInitContext
 from colossalai.utils.cuda import get_current_device
-from colossalai.tensor import ColoTensor, TensorSpec, ComputePattern, ParallelAction, DistSpecManager, distspec
+from colossalai.tensor import ParallelAction, ComputePattern
 from colossalai.engine import Engine
 from colossalai.nn.optimizer.colossalai_optimizer import ColossalaiOptimizer
+from colossalai.nn.parallel import ColoDDP
+from colossalai.nn.parallel.layers import init_colo_module
 
 from data.colossal_dataloader import get_dataloader
 from utils import TrainValTestResults, trace_handler, get_mem_info
@@ -333,67 +334,61 @@ def main():
                 f"test batches: {len(test_dataloader)}", ranks=[0])
 
     device = get_current_device()
-    sparse_device = torch.device('cpu') if args.use_cpu else device
-    model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
-                 len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
-                 list(map(int, args.over_arch_layer_sizes.split(","))), sparse_device, device)
-    # with ColoInitContext(device=get_current_device()):
-    #     model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
-    #                  len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
-    #                  list(map(int, args.over_arch_layer_sizes.split(","))))
+    with ColoInitContext(device=device):
+        model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
+                     len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
+                     list(map(int, args.over_arch_layer_sizes.split(","))))
+        # if not args.use_cpu:
+        #     model.sparse_arch.offsets = model.sparse_arch.offsets.to(device)
     logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
 
-    # spec = TensorSpec(
-    #     distspec.shard(gpc.get_group(ParallelMode.PARALLEL_1D), [0], [gpc.get_world_size(ParallelMode.PARALLEL_1D)]),
-    #     ParallelAction(ComputePattern.TP1D))
-    # with DistSpecManager.no_grad():
-    #     # Here only sets embedding to be model parallelized to align with torchrec
-    #     model.sparse_arch.embed.weight.set_spec(spec)
-    # logger.info(f"{get_mem_info('After model spec:  ')}")
+    real_model = model
+    if gpc.data_parallel_size > 1:
+        model = ColoDDP(model)
+        real_model = model.module
 
-    # TODO: check ColoOptimizer
-    optimizer = ColossalaiOptimizer(torch.optim.SGD(model.parameters(), lr=args.learning_rate))
-    criterion = torch.nn.BCEWithLogitsLoss()
+    init_colo_module(real_model.sparse_arch, ParallelAction(ComputePattern.TP1D), recursive=True, mode='row')
 
-    # engine, _, _, _ = colossalai.initialize(model, optimizer, criterion)
-    model = DDP(model,
-                process_group=gpc.get_group(ParallelMode.DATA),
-                device_ids=None,
-                find_unused_parameters=True,
-                broadcast_buffers=False)
-    engine = Engine(model, optimizer, criterion)
+    if args.use_cpu:
+        real_model.sparse_arch.to('cpu')
+        if gpc.tensor_parallel_size > 1:
+            gloo_group_tp = gpc.get_cpu_group(ParallelMode.PARALLEL_1D)
+            real_model.sparse_arch.weight.spec.dist_spec.process_group = gloo_group_tp
 
     logger.info(f"{get_mem_info('After colossalai init:  ')}", ranks=[0])
-    for name, param in model.module.named_parameters():
+    for name, param in real_model.named_parameters():
         logger.info(f"{name} : shape {param.shape}, device {param.data.device}", ranks=[0])
 
-    # Sanity Check
-    # rank = gpc.get_local_rank(ParallelMode.DATA)
-    # # offsets = torch.tensor([0, *np.cumsum(args.num_embeddings_per_feature)[:-1]]).unsqueeze(0)
-    # with profile(
-    #         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-    #         with_stack=True,
-    # ) as prof:
-    #     data_iter = iter(train_dataloader)
-    #     batch = next(data_iter)
-    #     dense_features, sparse_features, labels = put_data_to_device(batch, args.use_cpu)
-    #     logger.info(f"Rank: {rank}, sparse feature: {sparse_features}")
-    #
-    #     logits = engine(dense_features, sparse_features).squeeze()
-    #     logger.info(f"Rank: {rank}, Logits: {logits}")
-    #
-    #     loss = engine.criterion(logits, labels.float())
-    #     logger.info(f"Rank: {rank}, loss: {loss}")
-    #     engine.backward(loss)
-    #     engine.step()
-    #     logger.info("Test Done", ranks=[0])
-    # stats = prof.key_averages(group_by_stack_n=6)
-    # stats_str = "CPU time total\n" + f"{stats.table(sort_by='cpu_time_total', row_limit=20)}" + "\n"
-    # stats_str += "Self CPU time total\n" + f"{stats.table(sort_by='self_cpu_time_total', row_limit=20)}" + "\n"
-    #
-    # if dist.get_rank() == 0:
-    #     print(stats_str)
-    # exit(0)
+    # TODO: check ColoOptimizer
+    optimizer = ColossalaiOptimizer(optim=torch.optim.SGD(model.parameters(), lr=args.learning_rate))
+    criterion = torch.nn.BCEWithLogitsLoss()
+    engine = Engine(model, optimizer, criterion)
+
+    # Sanity Check & Time inspection
+    if gpc.config.inspect_time:
+        from utils import get_time_elapsed
+
+        data_iter = iter(train_dataloader)
+
+        for i in range(3):
+            batch = next(data_iter)
+            optimizer.zero_grad()
+            with get_time_elapsed(logger, f"{i}-th data movement"):
+                dense_features, sparse_features, labels = put_data_to_device(batch, args.use_cpu)
+
+            with get_time_elapsed(logger, f"{i}-th forward pass"):
+                logits = model(dense_features, sparse_features).squeeze()
+
+            loss = criterion(logits, labels.float())
+            logger.info(f"{i}-th loss: {loss}")
+
+            with get_time_elapsed(logger, f"{i}-th backward pass"):
+                loss.backward()
+
+            with get_time_elapsed(logger, f"{i}-th optimization"):
+                optimizer.step()
+
+        exit(0)
 
     train_val_test(
         args, engine, train_dataloader, val_dataloader, test_dataloader
