@@ -3,21 +3,19 @@ from functools import partial
 import torch
 import torch.multiprocessing as mp
 
-import colossalai
 from colossalai.utils import free_port, get_current_device
 from colossalai.testing import rerun_if_address_is_in_use
 
-import sys
-sys.path.append('..')
-from modules.embeddings import VocabParallelEmbedding
-from utils import get_rank, get_world_size
+from recsys import launch
+from recsys import distributed_manager as dist_manager
+from recsys.modules.embeddings import VocabParallelEmbedding
 
 
 def run_embedding(use_cpu, padding_idx):
-    rank = get_rank()
+    rank = dist_manager.get_rank()
     # assert get_current_device().index == rank  # not equal
-    world_size = get_world_size()
-    device = torch.device('cpu', rank) if use_cpu else get_current_device()
+    world_size = dist_manager.get_world_size()
+    device = torch.device('cpu', rank) if use_cpu else torch.device('cuda', torch.cuda.current_device())
 
     torch_model = torch.nn.Embedding(16, 2, padding_idx=padding_idx).to(device)
     weight = torch_model.weight.detach().requires_grad_(True)
@@ -29,13 +27,15 @@ def run_embedding(use_cpu, padding_idx):
     torch_model_chunk = torch.split(weight, weight.shape[0]//world_size, 0)[rank]
     assert torch.allclose(torch_model_chunk.detach(), model.weight.detach())
 
-    # torch.manual_seed(rank+42)
-    torch.manual_seed(42)
     data = torch.randint(0, 16, size=(2, 2), device=device)
     print(f"Rank: {rank}, data: {data}")
 
     x = model(data)
     torch_x = torch_model(data)
+    torch_model_weight_chunk = torch.split(torch_model.weight.detach(), torch_model.weight.shape[0]//world_size, 0)[rank]
+    print(f"Rank: {rank}, model output: {x}, ref output: {torch_x}")
+    print(f"Rank: {rank}, model weight: {model.weight}, ref weight: {torch_model_weight_chunk}")
+    assert torch.allclose(model.weight.detach(), torch_model_weight_chunk)
     assert torch.allclose(x, torch_x)
 
     grad = torch.rand_like(x)
@@ -46,13 +46,7 @@ def run_embedding(use_cpu, padding_idx):
 
 
 def run(rank, world_size, port, use_cpu, padding_idx):
-    colossalai.launch(config=dict(),
-                      rank=rank,
-                      world_size=world_size,
-                      host='localhost',
-                      port=port,
-                      backend='nccl',
-                      verbose=False)
+    launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     run_embedding(use_cpu, padding_idx)
 
 
@@ -66,4 +60,4 @@ def test_embedding(world_size, use_cpu, padding_idx):
 
 
 if __name__ == "__main__":
-    test_embedding(4, True, 0)
+    test_embedding(4, True, None)

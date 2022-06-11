@@ -2,7 +2,8 @@
 import torch
 import torch.nn.functional as F
 
-from utils import get_world_size, get_rank, get_group, get_cpu_group
+from .. import distributed_manager as dist_manager
+from .. import ParallelMode
 
 
 def get_vocab_range(num_embeddings, rank, world_size):
@@ -20,7 +21,7 @@ class VocabParallelEmbedding(torch.nn.Module):
 
     def __init__(self, num_embeddings, embedding_dim,
                  padding_idx=None, max_norm=None, norm_type=2., scale_grad_by_freq=False, sparse=False,
-                 _weight=None, device=None, dtype=None,
+                 _weight=None, device=None, dtype=None, parallel_mode=None,
                  init_method=torch.nn.init.xavier_normal_):  # I suppose this init method aligns with tensorflow?
         super(VocabParallelEmbedding, self).__init__()
         self.num_embeddings = num_embeddings
@@ -39,12 +40,13 @@ class VocabParallelEmbedding(torch.nn.Module):
         self.scale_grad_by_freq = scale_grad_by_freq
         self.sparse = sparse
 
-        self.rank = get_rank()
-        self.tp_world_size = get_world_size()
+        self.parallel_mode = ParallelMode.DEFAULT if parallel_mode is None else parallel_mode
+        self.rank = dist_manager.get_rank(self.parallel_mode)
+        self.world_size = dist_manager.get_world_size(self.parallel_mode)
 
         self.vocab_start_index, self.vocab_end_index = get_vocab_range(num_embeddings,
                                                                        self.rank,
-                                                                       self.tp_world_size)
+                                                                       self.world_size)
         self.num_embeddings_per_partition = self.vocab_end_index - self.vocab_start_index
 
         # padding works
@@ -69,7 +71,7 @@ class VocabParallelEmbedding(torch.nn.Module):
             self.weight = torch.nn.Parameter(chunk)
 
     def forward(self, input_):
-        if self.tp_world_size > 1:
+        if self.world_size > 1:
             # Build the mask.
             input_mask = (input_ < self.vocab_start_index) | (input_ >= self.vocab_end_index)
             # Mask the input.
@@ -89,31 +91,32 @@ class VocabParallelEmbedding(torch.nn.Module):
                                       self.sparse)
 
         # Mask the output embedding.
-        if self.tp_world_size > 1:
+        if self.world_size > 1:
             output_parallel[input_mask, :] = 0.0
         # Reduce across all the model parallel GPUs.
-        output = reduce_forward(output_parallel)
+        output = reduce_forward(output_parallel, self.parallel_mode)
         return output
 
 
 class _ReduceForward(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, x):
-        if get_world_size() == 1:
+    def forward(ctx, x, parallel_mode):
+        if dist_manager.get_world_size(parallel_mode) == 1:
             return x
 
-        process_group = get_cpu_group() if x.device.type == 'cpu' else get_group()
+        process_group = dist_manager.get_cpu_group(parallel_mode) \
+            if x.device.type == 'cpu' else dist_manager.get_group(parallel_mode)
         torch.distributed.all_reduce(x, group=process_group)
         return x
 
     @staticmethod
     def backward(ctx, grad):
-        return grad
+        return grad, None
 
 
-def reduce_forward(x):
-    return _ReduceForward.apply(x)
+def reduce_forward(x, parallel_mode):
+    return _ReduceForward.apply(x, parallel_mode)
 
 
 class VocabParallelEmbeddingBag(torch.nn.Module):
