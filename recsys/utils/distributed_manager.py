@@ -2,7 +2,6 @@ from enum import Enum
 import random
 import numpy as np
 import torch
-from colossalai.logging import get_dist_logger
 
 
 class ParallelMode(Enum):
@@ -18,8 +17,6 @@ class DistributedManager:
         self.process_groups = dict()
         self.cpu_process_groups = dict()
         self.ranks_in_group = dict()
-
-        self.logger = get_dist_logger()
 
     def init_default_process_group(self, rank, world_size, host, port, backend):
         init_method = f"tcp://{host}:{port}"
