@@ -7,14 +7,14 @@ from colossalai.utils import free_port
 from colossalai.testing import rerun_if_address_is_in_use
 
 from recsys import launch, disable_existing_loggers
-from recsys import DISTMGR as dist_manager
+from recsys import DISTMGR
 from recsys.modules.embeddings import VocabParallelEmbedding, ColumnParallelEmbeddingBag
 
 
 def embedding(use_cpu, padding_idx):
-    rank = dist_manager.get_rank()
+    rank = DISTMGR.get_rank()
     # assert get_current_device().index == rank  # not equal
-    world_size = dist_manager.get_world_size()
+    world_size = DISTMGR.get_world_size()
     device = torch.device('cpu', rank) if use_cpu else torch.device('cuda', torch.cuda.current_device())
 
     torch_model = torch.nn.Embedding(16, 2, padding_idx=padding_idx).to(device)
@@ -47,8 +47,8 @@ def embedding(use_cpu, padding_idx):
 
 
 def embedding_bag(use_cpu, padding_idx, reduction_op, embedding_dim):
-    rank = dist_manager.get_rank()
-    world_size = dist_manager.get_world_size()
+    rank = DISTMGR.get_rank()
+    world_size = DISTMGR.get_world_size()
     device = torch.device('cpu', rank) if use_cpu else torch.device('cuda', torch.cuda.current_device())
 
     num_embeddings, embedding_dim = 16, embedding_dim
