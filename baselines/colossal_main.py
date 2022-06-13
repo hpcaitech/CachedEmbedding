@@ -34,7 +34,7 @@ def parse_args():
     parser = colossalai.get_default_parser()
 
     # ColossalAI config
-    parser.add_argument('--config_path', default='./colossal_config.py', type=str)
+    parser.add_argument('--config_path', default='baselines/colossal_config.py', type=str)
 
     # Dataset
     parser.add_argument("--kaggle", action='store_true')
@@ -49,17 +49,17 @@ def parse_args():
         dest="mmap_mode",
         action="store_true",
         help="--mmap_mode mmaps the dataset."
-             " That is, the dataset is kept on disk but is accessed as if it were in memory."
-             " --mmap_mode is intended mostly for faster debugging. Use --mmap_mode to bypass"
-             " preloading the dataset when preloading takes too long or when there is "
-             " insufficient memory available to load the full dataset.",
+        " That is, the dataset is kept on disk but is accessed as if it were in memory."
+        " --mmap_mode is intended mostly for faster debugging. Use --mmap_mode to bypass"
+        " preloading the dataset when preloading takes too long or when there is "
+        " insufficient memory available to load the full dataset.",
     )
     parser.add_argument(
         "--in_memory_binary_criteo_path",
         type=str,
         default=None,
         help="Path to a folder containing the binary (npy) files for the Criteo dataset."
-             " When supplied, InMemoryBinaryCriteoIterDataPipe is used.",
+        " When supplied, InMemoryBinaryCriteoIterDataPipe is used.",
     )
     parser.add_argument(
         "--shuffle_batches",
@@ -74,7 +74,7 @@ def parse_args():
         type=str,
         default=None,
         help="Comma separated max_ind_size per sparse feature. The number of embeddings"
-             " in each embedding table. 26 values are expected for the Criteo dataset.",
+        " in each embedding table. 26 values are expected for the Criteo dataset.",
     )
     parser.add_argument(
         "--dense_arch_layer_sizes",
@@ -94,10 +94,7 @@ def parse_args():
         default=64,
         help="Size of each embedding.",
     )
-    parser.add_argument(
-        "--use_cpu",
-        action='store_true'
-    )
+    parser.add_argument("--use_cpu", action='store_true')
 
     # Training
     parser.add_argument(
@@ -105,12 +102,8 @@ def parse_args():
         type=int,
         help="Random seed for reproducibility.",
     )
-    parser.add_argument(
-        "--epochs", type=int, default=1, help="number of epochs to train"
-    )
-    parser.add_argument(
-        "--batch_size", type=int, default=32, help="batch size to use for training"
-    )
+    parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
+    parser.add_argument("--batch_size", type=int, default=32, help="batch size to use for training")
     parser.add_argument(
         "--learning_rate",
         type=float,
@@ -128,8 +121,8 @@ def parse_args():
         type=float,
         default=0.80,
         help="The point through training at which learning rate should change to the value set by"
-             " lr_after_change_point. The default value is 0.80 which means that 80% through the total iterations (totaled"
-             " across all epochs), the learning rate will change.",
+        " lr_after_change_point. The default value is 0.80 which means that 80% through the total iterations (totaled"
+        " across all epochs), the learning rate will change.",
     )
     parser.add_argument(
         "--lr_after_change_point",
@@ -158,9 +151,7 @@ def parse_args():
         global TOTAL_TRAINING_SAMPLES
         TOTAL_TRAINING_SAMPLES = 45840617
         setattr(args, 'num_embeddings_per_feature', NUM_EMBEDDINGS_PER_FEATURE)
-    args.num_embeddings_per_feature = list(
-        map(int, args.num_embeddings_per_feature.split(","))
-    )
+    args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
 
     return args
 
@@ -176,15 +167,15 @@ def put_data_to_device(batch, use_cpu):
 
 
 def _train(
-        engine,
-        data_loader,
-        epoch,
-        epochs,
-        change_lr,
-        lr_change_point,
-        lr_after_change_point,
-        prof=None,
-        use_cpu=False,
+    engine,
+    data_loader,
+    epoch,
+    epochs,
+    change_lr,
+    lr_change_point,
+    lr_after_change_point,
+    prof=None,
+    use_cpu=False,
 ):
     logger = colossalai.logging.get_dist_logger()
     engine.train()
@@ -211,8 +202,7 @@ def _train(
             prof.step()
 
             if change_lr and (
-                (it * (epoch + 1) / samples_per_trainer) > lr_change_point
-            ):  # progress made through the epoch
+                (it * (epoch + 1) / samples_per_trainer) > lr_change_point):    # progress made through the epoch
                 logger.info(f"Changing learning rate to: {lr_after_change_point}", ranks=[0])
                 change_lr = False
                 optimizer = engine.optimizer
@@ -223,12 +213,7 @@ def _train(
             break
 
 
-def _evaluate(
-        engine,
-        data_loader,
-        stage,
-        use_cpu=False
-):
+def _evaluate(engine, data_loader, stage, use_cpu=False):
     engine.eval()
     # To enable torchmetrics,
     # modify colossalai/utils/model/colo_init_context.py line#72:
@@ -263,52 +248,31 @@ def _evaluate(
 
 
 def train_val_test(
-        args,
-        engine,
-        train_dataloader,
-        val_dataloader,
-        test_dataloader,
+    args,
+    engine,
+    train_dataloader,
+    val_dataloader,
+    test_dataloader,
 ):
     train_val_test_results = TrainValTestResults()
     # device = torch.device(f"cuda:{gpc.get_local_rank(ParallelMode.DATA)}")
     with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            schedule=schedule(
-                wait=0, warmup=len(train_dataloader) - 2, active=2, repeat=1
-            ),
+            schedule=schedule(wait=0, warmup=len(train_dataloader) - 2, active=2, repeat=1),
             profile_memory=True,
-            # with_stack=True,
+    # with_stack=True,
             on_trace_ready=trace_handler,
     ) as prof:
         for epoch in range(args.epochs):
-            _train(
-                engine,
-                train_dataloader,
-                epoch,
-                args.epochs,
-                args.change_lr,
-                args.lr_change_point,
-                args.lr_after_change_point,
-                prof,
-                args.use_cpu
-            )
+            _train(engine, train_dataloader, epoch, args.epochs, args.change_lr, args.lr_change_point,
+                   args.lr_after_change_point, prof, args.use_cpu)
 
-            val_accuracy, val_auroc = _evaluate(
-                engine,
-                val_dataloader,
-                "val",
-                args.use_cpu
-            )
+            val_accuracy, val_auroc = _evaluate(engine, val_dataloader, "val", args.use_cpu)
 
             train_val_test_results.val_accuracies.append(val_accuracy)
             train_val_test_results.val_aurocs.append(val_auroc)
 
-        test_accuracy, test_auroc = _evaluate(
-            engine,
-            test_dataloader,
-            "test",
-            args.use_cpu
-        )
+        test_accuracy, test_auroc = _evaluate(engine, test_dataloader, "test", args.use_cpu)
         train_val_test_results.test_accuracy = test_accuracy
         train_val_test_results.test_auroc = test_auroc
 
@@ -330,8 +294,10 @@ def main():
     val_dataloader = get_dataloader(args, "val")
     test_dataloader = get_dataloader(args, "test")
 
-    logger.info(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
-                f"test batches: {len(test_dataloader)}", ranks=[0])
+    logger.info(
+        f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
+        f"test batches: {len(test_dataloader)}",
+        ranks=[0])
 
     device = get_current_device()
     with ColoInitContext(device=device):
@@ -390,9 +356,7 @@ def main():
 
         exit(0)
 
-    train_val_test(
-        args, engine, train_dataloader, val_dataloader, test_dataloader
-    )
+    train_val_test(args, engine, train_dataloader, val_dataloader, test_dataloader)
 
 
 if __name__ == '__main__':

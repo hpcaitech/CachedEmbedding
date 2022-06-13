@@ -5,6 +5,7 @@ from colossalai.utils.cuda import get_current_device
 
 
 class _CopyInputToCPU(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, input_):
         # logger.debug(f"Copy input to cpu and {input_.dtype}.")
@@ -18,6 +19,7 @@ class _CopyInputToCPU(torch.autograd.Function):
 
 
 class _CopyActToGPU(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, input_):
         return input_.to(get_current_device())

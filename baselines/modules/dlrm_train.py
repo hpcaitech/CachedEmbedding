@@ -73,9 +73,7 @@ class DLRMTrain(nn.Module):
         )
         self.loss_fn: nn.Module = nn.BCEWithLogitsLoss()
 
-    def forward(
-        self, batch: Batch
-    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def forward(self, batch: Batch) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         logits = self.model(batch.dense_features, batch.sparse_features)
         logits = logits.squeeze()
         loss = self.loss_fn(logits, batch.labels.float())
