@@ -1,6 +1,6 @@
 import torch
 
-from .. import distributed_manager as dist_manager
+from .. import DISTMGR as dist_manager
 
 
 def _reduce(x, parallel_mode):
@@ -36,9 +36,7 @@ def _tensor_gather(x, parallel_mode, dim):
     process_group = dist_manager.get_cpu_group(parallel_mode) \
         if x.device.type == 'cpu' else dist_manager.get_group(parallel_mode)
 
-    tensor_list = [
-        None if i != rank else x for i in range(world_size)
-    ]
+    tensor_list = [None if i != rank else x for i in range(world_size)]
     torch.distributed.all_gather_object(tensor_list, x, group=process_group)
     result = torch.cat([each.to(x.device) for each in tensor_list], dim=dim).contiguous()
 

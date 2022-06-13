@@ -3,11 +3,11 @@ from functools import partial
 import torch
 import torch.multiprocessing as mp
 
-from colossalai.utils import free_port, get_current_device
+from colossalai.utils import free_port
 from colossalai.testing import rerun_if_address_is_in_use
 
 from recsys import launch, disable_existing_loggers
-from recsys import distributed_manager as dist_manager
+from recsys import DISTMGR as dist_manager
 from recsys.modules.embeddings import VocabParallelEmbedding, ColumnParallelEmbeddingBag
 
 
@@ -24,7 +24,7 @@ def embedding(use_cpu, padding_idx):
     assert model.weight.device.type == device.type
     assert model.weight.shape[0] == weight.shape[0] // world_size
 
-    torch_model_chunk = torch.split(weight, weight.shape[0]//world_size, 0)[rank]
+    torch_model_chunk = torch.split(weight, weight.shape[0] // world_size, 0)[rank]
     assert torch.allclose(torch_model_chunk.detach(), model.weight.detach())
 
     data = torch.randint(0, 16, size=(2, 2), device=device)
@@ -32,7 +32,8 @@ def embedding(use_cpu, padding_idx):
 
     x = model(data)
     torch_x = torch_model(data)
-    torch_model_weight_chunk = torch.split(torch_model.weight.detach(), torch_model.weight.shape[0]//world_size, 0)[rank]
+    torch_model_weight_chunk = torch.split(torch_model.weight.detach(), torch_model.weight.shape[0] // world_size,
+                                           0)[rank]
     print(f"Rank: {rank}, model output: {x}, ref output: {torch_x}")
     print(f"Rank: {rank}, model weight: {model.weight}, ref weight: {torch_model_weight_chunk}")
     assert torch.allclose(model.weight.detach(), torch_model_weight_chunk)
@@ -41,7 +42,7 @@ def embedding(use_cpu, padding_idx):
     grad = torch.rand_like(x)
     x.backward(grad)
     torch_x.backward(grad)
-    torch_grad_chunk = torch.split(torch_model.weight.grad, weight.shape[0]//world_size, 0)[rank]
+    torch_grad_chunk = torch.split(torch_model.weight.grad, weight.shape[0] // world_size, 0)[rank]
     assert torch.allclose(model.weight.grad, torch_grad_chunk)
 
 
@@ -51,11 +52,14 @@ def embedding_bag(use_cpu, padding_idx, reduction_op, embedding_dim):
     device = torch.device('cpu', rank) if use_cpu else torch.device('cuda', torch.cuda.current_device())
 
     num_embeddings, embedding_dim = 16, embedding_dim
-    torch_model = torch.nn.EmbeddingBag(num_embeddings, embedding_dim,
-                                        padding_idx=padding_idx, mode=reduction_op).to(device)
+    torch_model = torch.nn.EmbeddingBag(num_embeddings, embedding_dim, padding_idx=padding_idx,
+                                        mode=reduction_op).to(device)
     weight = torch_model.weight.detach().requires_grad_(True)
-    model = ColumnParallelEmbeddingBag(num_embeddings, embedding_dim,
-                                       padding_idx=padding_idx, mode=reduction_op, _weight=weight).to(device)
+    model = ColumnParallelEmbeddingBag(num_embeddings,
+                                       embedding_dim,
+                                       padding_idx=padding_idx,
+                                       mode=reduction_op,
+                                       _weight=weight).to(device)
     # Check device type
     assert model.weight.device.type == device.type
 
@@ -72,7 +76,7 @@ def embedding_bag(use_cpu, padding_idx, reduction_op, embedding_dim):
     assert torch.allclose(torch_model_weight, model.weight.detach())
 
     # 1D inputs
-    inputs = torch.randint(low=0, high=num_embeddings, size=(5, ), device=device)
+    inputs = torch.randint(low=0, high=num_embeddings, size=(5,), device=device)
     offsets = torch.tensor([0, 4], dtype=torch.long, device=device)
 
     torch_res = torch_model(inputs, offsets)
@@ -126,8 +130,7 @@ def run_embedding_bag(rank, world_size, port, use_cpu, padding_idx, reduction_op
 @pytest.mark.parametrize('padding_idx', [None, 0])
 @rerun_if_address_is_in_use()
 def test_embedding(world_size, use_cpu, padding_idx):
-    run_func = partial(run_embedding, world_size=world_size, port=free_port(),
-                       use_cpu=use_cpu, padding_idx=padding_idx)
+    run_func = partial(run_embedding, world_size=world_size, port=free_port(), use_cpu=use_cpu, padding_idx=padding_idx)
     mp.spawn(run_func, nprocs=world_size)
 
 
@@ -138,8 +141,13 @@ def test_embedding(world_size, use_cpu, padding_idx):
 @rerun_if_address_is_in_use()
 def test_embedding_bag(world_size, use_cpu, padding_idx, reduction_op):
     embedding_dim = 7
-    run_func = partial(run_embedding_bag, world_size=world_size, port=free_port(),
-                       use_cpu=use_cpu, padding_idx=padding_idx, reduction_op=reduction_op, embedding_dim=embedding_dim)
+    run_func = partial(run_embedding_bag,
+                       world_size=world_size,
+                       port=free_port(),
+                       use_cpu=use_cpu,
+                       padding_idx=padding_idx,
+                       reduction_op=reduction_op,
+                       embedding_dim=embedding_dim)
     mp.spawn(run_func, nprocs=world_size)
 
 

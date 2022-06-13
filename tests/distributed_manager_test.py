@@ -9,8 +9,7 @@ from colossalai.testing import rerun_if_address_is_in_use
 from colossalai.utils import free_port
 
 from recsys import launch
-from recsys import distributed_manager as dist_manager
-
+from recsys import DISTMGR as dist_manager
 
 SIZE = 8
 

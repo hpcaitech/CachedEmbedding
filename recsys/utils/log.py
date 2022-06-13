@@ -2,8 +2,7 @@ import logging
 from typing import List, Optional
 import inspect
 
-from .distributed_manager import ParallelMode, distributed_manager as dist_manager
-
+from .distributed_manager import ParallelMode, DISTMGR as dist_manager
 
 _SYS = 'recsys'
 _FORMAT = '%(name)s - %(levelname)s: %(message)s'
@@ -124,7 +123,10 @@ class DistributedLogger:
         # self._log('info', message_prefix, parallel_mode, ranks)
         self._log('info', message, parallel_mode, ranks)
 
-    def warning(self, message: str, parallel_mode: ParallelMode = ParallelMode.DEFAULT, ranks: List[int] = None) -> None:
+    def warning(self,
+                message: str,
+                parallel_mode: ParallelMode = ParallelMode.DEFAULT,
+                ranks: List[int] = None) -> None:
         """Log a warning message.
 
         Args:
