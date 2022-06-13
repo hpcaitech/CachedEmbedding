@@ -34,7 +34,7 @@ def run_embedding_collection(inputs, num_embeddings_per_feature, use_cpu):
     target_weight_grad = target.weight.grad.detach()
     if use_cpu:
         target_weight_grad = target_weight_grad.cpu()
-    assert torch.allclose(model.weight.grad.detach(), target_weight_grad)
+    assert torch.allclose(model.weight.grad.detach().to_dense(), target_weight_grad)
 
 
 def run_dist(rank, world_size, port, use_cpu):

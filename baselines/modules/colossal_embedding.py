@@ -17,7 +17,7 @@ class EmbeddingCollection(nn.Embedding):
         tp_size = gpc.tensor_parallel_size
         if tot_features % tp_size != 0:
             tot_features += (tp_size - tot_features % tp_size)
-        super().__init__(tot_features, embedding_dim)
+        super().__init__(tot_features, embedding_dim, sparse=True)
 
         offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
         self.register_buffer('offsets', torch.from_numpy(offsets).unsqueeze(0).requires_grad_(False), False)
