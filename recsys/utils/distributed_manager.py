@@ -2,6 +2,7 @@ from enum import Enum
 import random
 import numpy as np
 import torch
+from recsys.utils.singleton_meta import SingletonMeta
 
 
 class ParallelMode(Enum):
@@ -11,7 +12,7 @@ class ParallelMode(Enum):
     TENSOR_PARALLEL = "tensor_parallel"
 
 
-class DistributedManager:
+class DistributedManager(metaclass=SingletonMeta):
 
     def __init__(self):
         self.process_groups = dict()
@@ -67,4 +68,4 @@ class DistributedManager:
         torch.manual_seed(seed)
 
 
-distributed_manager = DistributedManager()
+DISTMGR = DistributedManager()

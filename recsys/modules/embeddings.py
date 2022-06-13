@@ -2,7 +2,7 @@
 import torch
 import torch.nn.functional as F
 
-from .. import distributed_manager as dist_manager
+from .. import DISTMGR
 from .. import ParallelMode, distributed_logger as logger
 from .functional import reduce_forward, tensor_gather_forward_split_backward, gather_forward_split_backward
 
@@ -20,10 +20,19 @@ class VocabParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the vocabulary dimension.
     """
 
-    def __init__(self, num_embeddings, embedding_dim,
-                 padding_idx=None, max_norm=None, norm_type=2., scale_grad_by_freq=False, sparse=False,
-                 _weight=None, device=None, dtype=None, parallel_mode=None,
-                 init_method=torch.nn.init.xavier_normal_):  # I suppose this init method aligns with tensorflow?
+    def __init__(self,
+                 num_embeddings,
+                 embedding_dim,
+                 padding_idx=None,
+                 max_norm=None,
+                 norm_type=2.,
+                 scale_grad_by_freq=False,
+                 sparse=False,
+                 _weight=None,
+                 device=None,
+                 dtype=None,
+                 parallel_mode=None,
+                 init_method=torch.nn.init.xavier_normal_):    # I suppose this init method aligns with tensorflow?
         super(VocabParallelEmbedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -42,12 +51,10 @@ class VocabParallelEmbedding(torch.nn.Module):
         self.sparse = sparse
 
         self.parallel_mode = ParallelMode.DEFAULT if parallel_mode is None else parallel_mode
-        self.rank = dist_manager.get_rank(self.parallel_mode)
-        self.world_size = dist_manager.get_world_size(self.parallel_mode)
+        self.rank = DISTMGR.get_rank(self.parallel_mode)
+        self.world_size = DISTMGR.get_world_size(self.parallel_mode)
 
-        self.vocab_start_index, self.vocab_end_index = get_vocab_range(num_embeddings,
-                                                                       self.rank,
-                                                                       self.world_size)
+        self.vocab_start_index, self.vocab_end_index = get_vocab_range(num_embeddings, self.rank, self.world_size)
         self.num_embeddings_per_partition = self.vocab_end_index - self.vocab_start_index
 
         # padding works
@@ -57,9 +64,8 @@ class VocabParallelEmbedding(torch.nn.Module):
             self.actual_padding_idx = None
 
         if _weight is None:
-            self.weight = torch.nn.Parameter(torch.empty(
-                self.num_embeddings_per_partition, self.embedding_dim, device=device, dtype=dtype
-            ))
+            self.weight = torch.nn.Parameter(
+                torch.empty(self.num_embeddings_per_partition, self.embedding_dim, device=device, dtype=dtype))
 
             # TODO: check RNG states
             init_method(self.weight)
@@ -83,13 +89,8 @@ class VocabParallelEmbedding(torch.nn.Module):
             masked_input = input_
 
         # Get the embeddings.
-        output_parallel = F.embedding(masked_input,
-                                      self.weight,
-                                      self.actual_padding_idx,
-                                      self.max_norm,
-                                      self.norm_type,
-                                      self.scale_grad_by_freq,
-                                      self.sparse)
+        output_parallel = F.embedding(masked_input, self.weight, self.actual_padding_idx, self.max_norm, self.norm_type,
+                                      self.scale_grad_by_freq, self.sparse)
 
         # Mask the output embedding.
         if self.world_size > 1:
@@ -106,10 +107,20 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
     by the world size of the process group
     """
 
-    def __init__(self, num_embeddings, embedding_dim,
-                 padding_idx=None, max_norm=None, norm_type=2., scale_grad_by_freq=False, sparse=False,
-                 mode='mean', include_last_offset=False,
-                 _weight=None, device=None, dtype=None, parallel_mode=None,
+    def __init__(self,
+                 num_embeddings,
+                 embedding_dim,
+                 padding_idx=None,
+                 max_norm=None,
+                 norm_type=2.,
+                 scale_grad_by_freq=False,
+                 sparse=False,
+                 mode='mean',
+                 include_last_offset=False,
+                 _weight=None,
+                 device=None,
+                 dtype=None,
+                 parallel_mode=None,
                  init_method=torch.nn.init.xavier_normal_):
         super(ColumnParallelEmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
@@ -134,20 +145,18 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
 
         # Comm settings
         self.parallel_mode = ParallelMode.DEFAULT if parallel_mode is None else parallel_mode
-        self.rank = dist_manager.get_rank(self.parallel_mode)
-        self.world_size = dist_manager.get_world_size(self.parallel_mode)
+        self.rank = DISTMGR.get_rank(self.parallel_mode)
+        self.world_size = DISTMGR.get_world_size(self.parallel_mode)
 
-        self.chunk_start_index, self.chunk_end_index, divisible = self.get_partition(embedding_dim,
-                                                                                     self.rank,
-                                                                                     self.world_size)
+        self.chunk_start_index, self.chunk_end_index, divisible = self.get_partition(
+            embedding_dim, self.rank, self.world_size)
         self.embedding_dim_per_partition = self.chunk_end_index - self.chunk_start_index
         self.comm_func = gather_forward_split_backward if divisible else tensor_gather_forward_split_backward
 
         # Init weight
         if _weight is None:
-            self.weight = torch.nn.Parameter(torch.empty(
-                self.num_embeddings, self.embedding_dim_per_partition, device=device, dtype=dtype
-            ))
+            self.weight = torch.nn.Parameter(
+                torch.empty(self.num_embeddings, self.embedding_dim_per_partition, device=device, dtype=dtype))
 
             # TODO: check RNG states
             init_method(self.weight)
@@ -172,28 +181,21 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
         threshold = embedding_dim % world_size
         # if embedding dim is divisible by world size
         if threshold == 0:
-            return rank * chunk_size, (rank+1) * chunk_size, True
+            return rank * chunk_size, (rank + 1) * chunk_size, True
 
         logger.warning(
             f"Embedding dimension {embedding_dim} is not divisible by world size {world_size}. "
             f"torch.distributed.all_gather_object introducing additional copy operations is enabled",
-            ranks=[0]
-        )
+            ranks=[0])
 
         # align with the split strategy of torch.tensor_split
         size_list = [chunk_size + 1 if i < threshold else chunk_size for i in range(world_size)]
         offset = sum(size_list[:rank])
-        return offset, offset+size_list[rank], False
+        return offset, offset + size_list[rank], False
 
     def forward(self, input_, offsets=None, per_sample_weights=None):
-        output_parallel = F.embedding_bag(input_, self.weight, offsets,
-                                          self.max_norm,
-                                          self.norm_type,
-                                          self.scale_grad_by_freq,
-                                          self.mode,
-                                          self.sparse,
-                                          per_sample_weights,
-                                          self.include_last_offset,
-                                          self.padding_idx)
+        output_parallel = F.embedding_bag(input_, self.weight, offsets, self.max_norm, self.norm_type,
+                                          self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
+                                          self.include_last_offset, self.padding_idx)
         output = self.comm_func(output_parallel, self.parallel_mode, dim=1)
         return output
