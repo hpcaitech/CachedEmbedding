@@ -46,13 +46,13 @@ class DLRM(nn.Module):
             if gpc.config.inspect_time else nullcontext()
         with ctx1:
             with record_function("Embedding lookup:"):
-                embedded_dense = self.dense_arch(dense_features)
+                embedded_sparse = self.sparse_arch(sparse_features)
 
         ctx2 = get_time_elapsed(logger, "dense operations in forward pass") \
             if gpc.config.inspect_time else nullcontext()
         with ctx2:
             with record_function("Dense MLP:"):
-                embedded_sparse = self.sparse_arch(sparse_features)
+                embedded_dense = self.dense_arch(dense_features)
 
             with record_function("Feature interaction:"):
                 concat_dense = self.inter_arch(

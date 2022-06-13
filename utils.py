@@ -6,6 +6,8 @@ from colossalai.utils import Timer
 from colossalai.logging import get_dist_logger
 import torch
 import torch.distributed as dist
+from colossalai.core import global_context as gpc
+from colossalai.context.parallel_mode import ParallelMode
 
 
 def get_mem_info(prefix=''):
@@ -40,3 +42,23 @@ def get_time_elapsed(logger, repr: str):
     yield
     elapsed = timer.stop()
     logger.info(f"Time elapsed for {repr}: {elapsed:.4f}s", ranks=[0])
+
+
+# TODO: only consider the DP process group
+def get_world_size():
+    return gpc.data_parallel_size
+
+
+def get_rank():
+    if gpc.data_parallel_size == 1:
+        return 0
+    else:
+        return gpc.get_local_rank(ParallelMode.DATA)
+
+
+def get_group():
+    return gpc.get_group(ParallelMode.DATA)
+
+
+def get_cpu_group():
+    return gpc.get_cpu_group(ParallelMode.DATA)
