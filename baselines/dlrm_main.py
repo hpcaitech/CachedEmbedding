@@ -52,17 +52,16 @@ except ImportError:
 
 # internal import
 try:
-    from .data.dlrm_dataloader import (  # noqa F811
-        get_dataloader,
-        STAGES,
+    from .data.dlrm_dataloader import (    # noqa F811
+        get_dataloader, STAGES,
     )
-    from .modules.dlrm_train import DLRMTrain  # noqa F811
+    from .modules.dlrm_train import DLRMTrain    # noqa F811
 except ImportError:
     pass
 
 from utils import TrainValTestResults, get_mem_info, trace_handler
 
-TRAIN_PIPELINE_STAGES = 3  # Number of stages in TrainPipelineSparseDist.
+TRAIN_PIPELINE_STAGES = 3    # Number of stages in TrainPipelineSparseDist.
 NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
                              '27,14992,5461306,10,5652,2173,4,7046547,18,15,286181,105,142572'  # For criteo kaggle
 
@@ -70,12 +69,8 @@ NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="torchrec dlrm example trainer")
     parser.add_argument("--kaggle", action='store_true')
-    parser.add_argument(
-        "--epochs", type=int, default=1, help="number of epochs to train"
-    )
-    parser.add_argument(
-        "--batch_size", type=int, default=32, help="batch size to use for training"
-    )
+    parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
+    parser.add_argument("--batch_size", type=int, default=32, help="batch size to use for training")
     parser.add_argument(
         "--limit_train_batches",
         type=int,
@@ -221,14 +216,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _evaluate(
-    limit_batches: Optional[int],
-    train_pipeline: TrainPipelineSparseDist,
-    iterator: Iterator[Batch],
-    next_iterator: Iterator[Batch],
-    stage: str,
-    prof=None
-) -> Tuple[float, float]:
+def _evaluate(limit_batches: Optional[int],
+              train_pipeline: TrainPipelineSparseDist,
+              iterator: Iterator[Batch],
+              next_iterator: Iterator[Batch],
+              stage: str,
+              prof=None) -> Tuple[float, float]:
     """
     Evaluates model. Computes and prints metrics including AUROC and Accuracy. Helper
     function for train_val_test.
@@ -260,9 +253,7 @@ def _evaluate(
     # producing results for the TRAIN_PIPELINE_STAGES - 1 buffered batches (as opposed
     # to the last TRAIN_PIPELINE_STAGES - 1 batches from iterator).
     combined_iterator = itertools.chain(
-        iterator
-        if limit_batches is None
-        else itertools.islice(iterator, limit_batches),
+        iterator if limit_batches is None else itertools.islice(iterator, limit_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
     auroc = metrics.AUROC(compute_on_step=False).to(device)
@@ -285,22 +276,20 @@ def _evaluate(
     return auroc_result, accuracy_result
 
 
-def _train(
-    train_pipeline: TrainPipelineSparseDist,
-    iterator: Iterator[Batch],
-    next_iterator: Iterator[Batch],
-    within_epoch_val_dataloader: DataLoader,
-    epoch: int,
-    epochs: int,
-    change_lr: bool,
-    lr_change_point: float,
-    lr_after_change_point: float,
-    validation_freq_within_epoch: Optional[int],
-    limit_train_batches: Optional[int],
-    limit_val_batches: Optional[int],
-    prof=None,
-    num_batches=0
-) -> None:
+def _train(train_pipeline: TrainPipelineSparseDist,
+           iterator: Iterator[Batch],
+           next_iterator: Iterator[Batch],
+           within_epoch_val_dataloader: DataLoader,
+           epoch: int,
+           epochs: int,
+           change_lr: bool,
+           lr_change_point: float,
+           lr_after_change_point: float,
+           validation_freq_within_epoch: Optional[int],
+           limit_train_batches: Optional[int],
+           limit_val_batches: Optional[int],
+           prof=None,
+           num_batches=0) -> None:
     """
     Trains model for 1 epoch. Helper function for train_val_test.
 
@@ -350,9 +339,7 @@ def _train(
     # producing results for the TRAIN_PIPELINE_STAGES - 1 buffered batches (as opposed
     # to the last TRAIN_PIPELINE_STAGES - 1 batches from iterator).
     combined_iterator = itertools.chain(
-        iterator
-        if limit_train_batches is None
-        else itertools.islice(iterator, limit_train_batches),
+        iterator if limit_train_batches is None else itertools.islice(iterator, limit_train_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
     samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
@@ -365,8 +352,7 @@ def _train(
                 print(f"{get_mem_info('Training:  ')}")
             prof.step()
             if change_lr and (
-                (it * (epoch + 1) / samples_per_trainer) > lr_change_point
-            ):  # progress made through the epoch
+                (it * (epoch + 1) / samples_per_trainer) > lr_change_point):    # progress made through the epoch
                 print(f"Changing learning rate to: {lr_after_change_point}")
                 optimizer = train_pipeline._optimizer
                 lr = lr_after_change_point
@@ -417,33 +403,16 @@ def train_val_test(
     test_iterator = iter(test_dataloader)
     with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            schedule=schedule(
-                wait=0, warmup=len(train_dataloader)-3, active=2, repeat=1
-            ),
+            schedule=schedule(wait=0, warmup=len(train_dataloader) - 3, active=2, repeat=1),
             on_trace_ready=trace_handler,
     ) as prof:
         for epoch in range(args.epochs):
             val_iterator = iter(val_dataloader)
-            _train(
-                train_pipeline,
-                train_iterator,
-                val_iterator,
-                val_dataloader,
-                epoch,
-                args.epochs,
-                args.change_lr,
-                args.lr_change_point,
-                args.lr_after_change_point,
-                args.validation_freq_within_epoch,
-                args.limit_train_batches,
-                args.limit_val_batches,
-                prof,
-                len(train_dataloader)
-            )
+            _train(train_pipeline, train_iterator, val_iterator, val_dataloader, epoch, args.epochs, args.change_lr,
+                   args.lr_change_point, args.lr_after_change_point, args.validation_freq_within_epoch,
+                   args.limit_train_batches, args.limit_val_batches, prof, len(train_dataloader))
             train_iterator = iter(train_dataloader)
-            val_next_iterator = (
-                test_iterator if epoch == args.epochs - 1 else train_iterator
-            )
+            val_next_iterator = (test_iterator if epoch == args.epochs - 1 else train_iterator)
 
             val_accuracy, val_auroc = _evaluate(
                 args.limit_val_batches,
@@ -505,9 +474,7 @@ def main(argv: List[str]) -> None:
         dist.init_process_group(backend=backend)
 
     if args.num_embeddings_per_feature is not None:
-        args.num_embeddings_per_feature = list(
-            map(int, args.num_embeddings_per_feature.split(","))
-        )
+        args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
         args.num_embeddings = None
 
     # TODO add CriteoIterDataPipe support and add random_dataloader arg
@@ -531,22 +498,16 @@ def main(argv: List[str]) -> None:
             name=f"t_{feature_name}",
             embedding_dim=args.embedding_dim,
             num_embeddings=none_throws(args.num_embeddings_per_feature)[feature_idx]
-            if args.num_embeddings is None
-            else args.num_embeddings,
+            if args.num_embeddings is None else args.num_embeddings,
             feature_names=[feature_name],
-        )
-        for feature_idx, feature_name in enumerate(DEFAULT_CAT_NAMES)
+        ) for feature_idx, feature_name in enumerate(DEFAULT_CAT_NAMES)
     ]
     sharded_module_kwargs = {}
     if args.over_arch_layer_sizes is not None:
-        sharded_module_kwargs["over_arch_layer_sizes"] = list(
-            map(int, args.over_arch_layer_sizes.split(","))
-        )
+        sharded_module_kwargs["over_arch_layer_sizes"] = list(map(int, args.over_arch_layer_sizes.split(",")))
 
     train_model = DLRMTrain(
-        embedding_bag_collection=EmbeddingBagCollection(
-            tables=eb_configs, device=torch.device("meta")
-        ),
+        embedding_bag_collection=EmbeddingBagCollection(tables=eb_configs, device=torch.device("meta")),
         dense_in_features=len(DEFAULT_INT_NAMES),
         dense_arch_layer_sizes=list(map(int, args.dense_arch_layer_sizes.split(","))),
         over_arch_layer_sizes=list(map(int, args.over_arch_layer_sizes.split(","))),
@@ -567,28 +528,27 @@ def main(argv: List[str]) -> None:
     topology = Topology(
         world_size=env.world_size,
         compute_device="cuda",
-        hbm_cap=70*1024**3,  # GPU mem
-        ddr_cap=300*1024*3,  # CPU mem
-        intra_host_bw=1000*1024**3/1000,  # Device to Device bandwidth
-        # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
-        batch_size=args.batch_size
-    )
+        hbm_cap=70 * 1024**3,    # GPU mem
+        ddr_cap=300 * 1024 * 3,    # CPU mem
+        intra_host_bw=1000 * 1024**3 / 1000,    # Device to Device bandwidth
+    # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
+        batch_size=args.batch_size)
     constraints = {
-        f"t_{feature_name}": ParameterConstraints(
-            sharding_types=[ShardingType.TABLE_WISE.value]  # if num_embeddings < 1e5 else ShardingType.ROW_WISE.value],
-        ) for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, DEFAULT_CAT_NAMES)
+        f"t_{feature_name}":
+        ParameterConstraints(sharding_types=[ShardingType.TABLE_WISE.value
+                                            ]    # if num_embeddings < 1e5 else ShardingType.ROW_WISE.value],
+                            )
+        for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, DEFAULT_CAT_NAMES)
     }
     planner = EmbeddingShardingPlanner(
         topology=topology,
         constraints=constraints,
     )
     plan = planner.collective_plan(train_model, sharders, env.process_group)
-    model = DistributedModelParallel(
-        module=train_model,
-        device=device,
-        sharders=cast(List[ModuleSharder[nn.Module]], sharders),
-        plan=plan
-    )
+    model = DistributedModelParallel(module=train_model,
+                                     device=device,
+                                     sharders=cast(List[ModuleSharder[nn.Module]], sharders),
+                                     plan=plan)
     print(f"{get_mem_info('After model parallel:  ')}")
 
     if dist.get_rank() == 0:
@@ -601,7 +561,7 @@ def main(argv: List[str]) -> None:
             return lambda params: torch.optim.SGD(params, lr=args.learning_rate)
 
     dense_optimizer = KeyedOptimizerWrapper(
-        dict(model.named_parameters()),  # why dense? what about spares?
+        dict(model.named_parameters()),    # why dense? what about spares?
         optimizer_with_params(),
     )
     optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
@@ -611,9 +571,7 @@ def main(argv: List[str]) -> None:
         optimizer,
         device,
     )
-    train_val_test(
-        args, train_pipeline, train_dataloader, val_dataloader, test_dataloader
-    )
+    train_val_test(args, train_pipeline, train_dataloader, val_dataloader, test_dataloader)
 
 
 if __name__ == "__main__":

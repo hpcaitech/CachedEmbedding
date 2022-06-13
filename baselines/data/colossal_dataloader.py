@@ -12,7 +12,6 @@ from torch.utils.data import DataLoader
 from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 
-
 STAGES = ["train", "val", "test"]
 
 
@@ -41,24 +40,20 @@ def get_dataloader(args, stage):
         world_size = world_size * 2
 
     stage_files = [
-        sorted(
-            map(
-                lambda x: os.path.join(args.in_memory_binary_criteo_path, x),
-                filter(lambda s: kind in s, files),
-            )
-        )
-        for kind in ["dense", "sparse", "labels"]
+        sorted(map(
+            lambda x: os.path.join(args.in_memory_binary_criteo_path, x),
+            filter(lambda s: kind in s, files),
+        )) for kind in ["dense", "sparse", "labels"]
     ]
 
     dataloader = DataLoader(
         InMemoryBinaryCriteoIterDataPipe(
-            *stage_files,  # pyre-ignore[6]
+            *stage_files,    # pyre-ignore[6]
             batch_size=args.batch_size,
             rank=rank,
             world_size=world_size,
             shuffle_batches=args.shuffle_batches,
-            hashes=args.num_embeddings_per_feature
-        ),
+            hashes=args.num_embeddings_per_feature),
         batch_size=None,
         pin_memory=args.pin_memory,
         collate_fn=lambda x: x,

@@ -11,10 +11,8 @@ from typing import List, Dict, Optional
 
 import torch
 import torchrec.distributed as trec_dist
-from torchrec.datasets.criteo import (  # noqa
-    DEFAULT_INT_NAMES,
-    DEFAULT_CAT_NAMES,
-    CAT_FEATURE_COUNT,
+from torchrec.datasets.criteo import (    # noqa
+    DEFAULT_INT_NAMES, DEFAULT_CAT_NAMES, CAT_FEATURE_COUNT,
 )
 from torchrec.inference.model_packager import load_pickle_config
 from torchrec.inference.modules import (
@@ -80,9 +78,7 @@ class DLRMPredictModule(PredictModule):
 
         self.id_list_features_keys: List[str] = id_list_features_keys
 
-    def predict_forward(
-        self, batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+    def predict_forward(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
         Args:
             batch (Dict[str, torch.Tensor]): currently expects input dense features
@@ -108,10 +104,9 @@ class DLRMPredictModule(PredictModule):
 
 
 class DLRMPredictFactory(PredictFactory):
+
     def __init__(self) -> None:
-        self.model_config: DLRMModelConfig = load_pickle_config(
-            "config.pkl", DLRMModelConfig
-        )
+        self.model_config: DLRMModelConfig = load_pickle_config("config.pkl", DLRMModelConfig)
 
     def create_predict_module(self, rank: int, world_size: int) -> torch.nn.Module:
         logging.basicConfig(level=logging.INFO)
@@ -124,13 +119,9 @@ class DLRMPredictFactory(PredictFactory):
                 name=f"t_{feature_name}",
                 embedding_dim=self.model_config.embedding_dim,
                 num_embeddings=self.model_config.num_embeddings_per_feature[feature_idx]
-                if self.model_config.num_embeddings is None
-                else self.model_config.num_embeddings,
+                if self.model_config.num_embeddings is None else self.model_config.num_embeddings,
                 feature_names=[feature_name],
-            )
-            for feature_idx, feature_name in enumerate(
-                self.model_config.id_list_features_keys
-            )
+            ) for feature_idx, feature_name in enumerate(self.model_config.id_list_features_keys)
         ]
         ebc = EmbeddingBagCollection(tables=eb_configs, device=torch.device("meta"))
 

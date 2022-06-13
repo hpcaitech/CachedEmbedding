@@ -7,10 +7,11 @@ from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 from colossalai.utils.cuda import get_current_device
 
-from modules.colossal_functional import copy_to_gpu, copy_to_cpu
+from .colossal_functional import copy_to_gpu
 
 
 class EmbeddingCollection(nn.Embedding):
+
     def __init__(self, num_embeddings_per_feature, embedding_dim):
         tot_features = sum(num_embeddings_per_feature)
         tp_size = gpc.tensor_parallel_size
@@ -19,11 +20,7 @@ class EmbeddingCollection(nn.Embedding):
         super().__init__(tot_features, embedding_dim)
 
         offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
-        self.register_buffer(
-            'offsets',
-            torch.from_numpy(offsets).unsqueeze(0).requires_grad_(False),
-            False
-        )
+        self.register_buffer('offsets', torch.from_numpy(offsets).unsqueeze(0).requires_grad_(False), False)
 
         # if device is None:
         #     raise ValueError("Please explicitly set the device")
@@ -32,7 +29,7 @@ class EmbeddingCollection(nn.Embedding):
         # self.to(device)
 
     def forward(self, x):
-        embedding = super().forward(x+self.offsets)
+        embedding = super().forward(x + self.offsets)
         if self.offsets.device.type == 'cpu':
             embedding = copy_to_gpu(embedding)
         return embedding
@@ -60,7 +57,7 @@ def main():
 
     model = EmbeddingCollection([6, 4], 2, device)
 
-    res = model(idx).view(2, -1)  # 2, 2 x 3
+    res = model(idx).view(2, -1)    # 2, 2 x 3
     logger.info(f"Rank: {gpc.get_global_rank()}, res: {res}")
 
     loss = torch.prod(res, dim=0).sum()

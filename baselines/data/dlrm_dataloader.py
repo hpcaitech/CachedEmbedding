@@ -23,17 +23,13 @@ from torchrec.datasets.random import RandomRecDataset
 STAGES = ["train", "val", "test"]
 
 
-def _get_random_dataloader(
-    args: argparse.Namespace,
-) -> DataLoader:
+def _get_random_dataloader(args: argparse.Namespace,) -> DataLoader:
     return DataLoader(
         RandomRecDataset(
             keys=DEFAULT_CAT_NAMES,
             batch_size=args.batch_size,
             hash_size=args.num_embeddings,
-            hash_sizes=args.num_embeddings_per_feature
-            if hasattr(args, "num_embeddings_per_feature")
-            else None,
+            hash_sizes=args.num_embeddings_per_feature if hasattr(args, "num_embeddings_per_feature") else None,
             manual_seed=args.seed if hasattr(args, "seed") else None,
             ids_per_feature=1,
             num_dense=len(DEFAULT_INT_NAMES),
@@ -63,32 +59,24 @@ def _get_in_memory_dataloader(
         # Validation set gets the first half of the final day's samples. Test set get
         # the other half.
         files = list(filter(is_final_day, files))
-        rank = (
-            dist.get_rank()
-            if stage == "val"
-            else dist.get_rank() + dist.get_world_size()
-        )
+        rank = (dist.get_rank() if stage == "val" else dist.get_rank() + dist.get_world_size())
         world_size = dist.get_world_size() * 2
 
     stage_files: List[List[str]] = [
-        sorted(
-            map(
-                lambda x: os.path.join(args.in_memory_binary_criteo_path, x),
-                filter(lambda s: kind in s, files),
-            )
-        )
-        for kind in ["dense", "sparse", "labels"]
+        sorted(map(
+            lambda x: os.path.join(args.in_memory_binary_criteo_path, x),
+            filter(lambda s: kind in s, files),
+        )) for kind in ["dense", "sparse", "labels"]
     ]
     dataloader = DataLoader(
         InMemoryBinaryCriteoIterDataPipe(
-            *stage_files,  # pyre-ignore[6]
+            *stage_files,    # pyre-ignore[6]
             batch_size=args.batch_size,
             rank=rank,
             world_size=world_size,
             shuffle_batches=args.shuffle_batches,
-            hashes=args.num_embeddings_per_feature
-            if args.num_embeddings is None
-            else ([args.num_embeddings] * CAT_FEATURE_COUNT),
+            hashes=args.num_embeddings_per_feature if args.num_embeddings is None else
+            ([args.num_embeddings] * CAT_FEATURE_COUNT),
         ),
         batch_size=None,
         pin_memory=args.pin_memory,
@@ -117,14 +105,9 @@ def get_dataloader(args: argparse.Namespace, backend: str, stage: str) -> DataLo
     if stage not in STAGES:
         raise ValueError(f"Supplied stage was {stage}. Must be one of {STAGES}.")
 
-    args.pin_memory = (
-        (backend == "nccl") if not hasattr(args, "pin_memory") else args.pin_memory
-    )
+    args.pin_memory = ((backend == "nccl") if not hasattr(args, "pin_memory") else args.pin_memory)
 
-    if (
-        not hasattr(args, "in_memory_binary_criteo_path")
-        or args.in_memory_binary_criteo_path is None
-    ):
+    if (not hasattr(args, "in_memory_binary_criteo_path") or args.in_memory_binary_criteo_path is None):
         return _get_random_dataloader(args)
     else:
         return _get_in_memory_dataloader(args, stage)

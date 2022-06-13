@@ -2,15 +2,14 @@ import os
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+
 matplotlib.use('Agg')
 
-import sys
-sys.path.append('.')
-from dlrm_main import NUM_EMBEDDINGS_PER_FEATURE
+from ..dlrm_main import NUM_EMBEDDINGS_PER_FEATURE
 
 
 def prepare_statistics(data):
-    bins = sorted(np.log(np.bincount(data)+1), reverse=True)  # plus 1 to avoid log(0)
+    bins = sorted(np.log(np.bincount(data) + 1), reverse=True)    # plus 1 to avoid log(0)
     return bins
 
 
