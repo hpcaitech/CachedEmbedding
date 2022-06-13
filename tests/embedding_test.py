@@ -17,9 +17,15 @@ def embedding(use_cpu, padding_idx):
     world_size = DISTMGR.get_world_size()
     device = torch.device('cpu', rank) if use_cpu else torch.device('cuda', torch.cuda.current_device())
 
-    torch_model = torch.nn.Embedding(16, 2, padding_idx=padding_idx).to(device)
-    weight = torch_model.weight.detach().requires_grad_(True)
-    model = VocabParallelEmbedding(16, 2, padding_idx=padding_idx, _weight=weight)
+    num_embedding = 4
+    embedding_size = 3
+    batch_size = 3
+    seq_len = 7
+    torch_model = torch.nn.Embedding(num_embedding, embedding_size, padding_idx=padding_idx).to(device)
+    # weight = torch_model.weight.detach().requires_grad_(True)
+    weight = torch_model.weight.clone().detach()
+    weight.requires_grad = True
+    model = VocabParallelEmbedding(num_embedding, embedding_size, padding_idx=padding_idx, _weight=weight)
     model.to(device)
     assert model.weight.device.type == device.type
     assert model.weight.shape[0] == weight.shape[0] // world_size
@@ -27,15 +33,15 @@ def embedding(use_cpu, padding_idx):
     torch_model_chunk = torch.split(weight, weight.shape[0] // world_size, 0)[rank]
     assert torch.allclose(torch_model_chunk.detach(), model.weight.detach())
 
-    data = torch.randint(0, 16, size=(2, 2), device=device)
-    print(f"Rank: {rank}, data: {data}")
+    data = torch.randint(0, num_embedding, size=(batch_size, seq_len), device=device)
+    # print(f"Rank: {rank}, data: {data}")
 
     x = model(data)
     torch_x = torch_model(data)
     torch_model_weight_chunk = torch.split(torch_model.weight.detach(), torch_model.weight.shape[0] // world_size,
                                            0)[rank]
-    print(f"Rank: {rank}, model output: {x}, ref output: {torch_x}")
-    print(f"Rank: {rank}, model weight: {model.weight}, ref weight: {torch_model_weight_chunk}")
+    # print(f"Rank: {rank}, model output: {x}, ref output: {torch_x}")
+    # print(f"Rank: {rank}, model weight: {model.weight}, ref weight: {torch_model_weight_chunk}")
     assert torch.allclose(model.weight.detach(), torch_model_weight_chunk)
     assert torch.allclose(x, torch_x)
 
@@ -49,12 +55,14 @@ def embedding(use_cpu, padding_idx):
 def embedding_bag(use_cpu, padding_idx, reduction_op, embedding_dim):
     rank = DISTMGR.get_rank()
     world_size = DISTMGR.get_world_size()
-    device = torch.device('cpu', rank) if use_cpu else torch.device('cuda', torch.cuda.current_device())
+    device = torch.device('cpu') if use_cpu else torch.device('cuda', torch.cuda.current_device())
 
-    num_embeddings, embedding_dim = 16, embedding_dim
+    num_embeddings = 4
     torch_model = torch.nn.EmbeddingBag(num_embeddings, embedding_dim, padding_idx=padding_idx,
                                         mode=reduction_op).to(device)
-    weight = torch_model.weight.detach().requires_grad_(True)
+    # weight = torch_model.weight.detach().requires_grad_(True)
+    weight = torch_model.weight.clone().detach()
+    weight.requires_grad = True
     model = ColumnParallelEmbeddingBag(num_embeddings,
                                        embedding_dim,
                                        padding_idx=padding_idx,
@@ -81,7 +89,7 @@ def embedding_bag(use_cpu, padding_idx, reduction_op, embedding_dim):
 
     torch_res = torch_model(inputs, offsets)
     model_res = model(inputs, offsets)
-    print(f"rank: {rank}, torch res: {torch_res}, model res: {model_res}")
+    # print(f"rank: {rank}, torch res: {torch_res}, model res: {model_res}")
     assert torch.allclose(torch_res.detach(), model_res.detach())
 
     grad = torch.rand_like(torch_res)
@@ -101,7 +109,7 @@ def embedding_bag(use_cpu, padding_idx, reduction_op, embedding_dim):
 
     torch_res = torch_model(inputs)
     model_res = model(inputs)
-    print(f"rank: {rank}, torch res: {torch_res}, model res: {model_res}")
+    # print(f"rank: {rank}, torch res: {torch_res}, model res: {model_res}")
     assert torch.allclose(torch_res.detach(), model_res.detach())
 
     grad = torch.rand_like(torch_res)
@@ -152,5 +160,5 @@ def test_embedding_bag(world_size, use_cpu, padding_idx, reduction_op):
 
 
 if __name__ == "__main__":
-    # test_embedding(4, True, None)
-    test_embedding_bag(4, False, None, 'sum', 8)
+    test_embedding(4, True, None)
+    # test_embedding_bag(4, False, None, 'sum', 8)
