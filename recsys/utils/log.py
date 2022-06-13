@@ -2,7 +2,7 @@ import logging
 from typing import List, Optional
 import inspect
 
-from .distributed_manager import ParallelMode, DISTMGR as dist_manager
+from .distributed_manager import ParallelMode, DISTMGR
 
 _SYS = 'recsys'
 _FORMAT = '%(name)s - %(levelname)s: %(message)s'
@@ -106,7 +106,7 @@ class DistributedLogger:
         if ranks is None:
             getattr(self._logger, level)(message)
         else:
-            local_rank = dist_manager.get_rank(parallel_mode)
+            local_rank = DISTMGR.get_rank(parallel_mode)
             if local_rank in ranks:
                 getattr(self._logger, level)(message)
 
