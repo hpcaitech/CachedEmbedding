@@ -62,12 +62,9 @@ def embedding_bag(use_cpu, padding_idx, reduction_op, embedding_dim):
                                         mode=reduction_op).to(device)
     # weight = torch_model.weight.detach().requires_grad_(True)
     weight = torch_model.weight.clone().detach()
-    weight.requires_grad = True
-    model = ColumnParallelEmbeddingBag(num_embeddings,
-                                       embedding_dim,
-                                       padding_idx=padding_idx,
-                                       mode=reduction_op,
-                                       _weight=weight).to(device)
+
+    model = ColumnParallelEmbeddingBag.from_pretrained(weight, freeze=False, padding_idx=padding_idx,
+                                                       mode=reduction_op).to(device)
     # Check device type
     assert model.weight.device.type == device.type
 

@@ -16,7 +16,6 @@ import torch
 import torch.multiprocessing as mp
 import pytest
 
-
 # class MyEmbedding(torch.nn.Embedding):
 #     def __init__(self, row, col):
 #         super(MyEmbedding, self).__init__(row, col)
@@ -41,6 +40,7 @@ import pytest
 
 
 class Net(torch.nn.Module):
+
     def __init__(self):
         super(Net, self).__init__()
         self.embed = torch.nn.Embedding(20, 4)

@@ -2,9 +2,14 @@
 import torch
 import torch.nn.functional as F
 
+from torch import Tensor
+from torch.nn.parameter import Parameter
+
 from .. import DISTMGR
 from .. import ParallelMode, distributed_logger as logger
 from .functional import reduce_forward, tensor_gather_forward_split_backward, gather_forward_split_backward
+
+from typing import Optional
 
 
 def get_vocab_range(num_embeddings, rank, world_size):
@@ -192,6 +197,37 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
         size_list = [chunk_size + 1 if i < threshold else chunk_size for i in range(world_size)]
         offset = sum(size_list[:rank])
         return offset, offset + size_list[rank], False
+
+    @classmethod
+    def from_pretrained(cls,
+                        embeddings: Tensor,
+                        freeze: bool = True,
+                        max_norm: Optional[float] = None,
+                        norm_type: float = 2.,
+                        scale_grad_by_freq: bool = False,
+                        mode: str = 'mean',
+                        sparse: bool = False,
+                        include_last_offset: bool = False,
+                        padding_idx: Optional[int] = None,
+                        parallel_mode=None,
+                        init_method=torch.nn.init.xavier_normal_) -> 'ColumnParallelEmbeddingBag':
+        assert embeddings.dim() == 2, \
+            'Embeddings parameter is expected to be 2-dimensional'
+        rows, cols = embeddings.shape
+        embeddingbag = cls(num_embeddings=rows,
+                           embedding_dim=cols,
+                           _weight=embeddings,
+                           max_norm=max_norm,
+                           norm_type=norm_type,
+                           scale_grad_by_freq=scale_grad_by_freq,
+                           mode=mode,
+                           sparse=sparse,
+                           include_last_offset=include_last_offset,
+                           padding_idx=padding_idx,
+                           parallel_mode=parallel_mode,
+                           init_method=init_method)
+        embeddingbag.weight.requires_grad = not freeze
+        return embeddingbag
 
     def forward(self, input_, offsets=None, per_sample_weights=None):
         output_parallel = F.embedding_bag(input_, self.weight, offsets, self.max_norm, self.norm_type,
