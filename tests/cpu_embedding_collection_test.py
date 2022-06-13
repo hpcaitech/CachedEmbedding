@@ -3,13 +3,13 @@ from functools import partial
 
 import numpy as np
 import torch
-import colossalai
 from colossalai.testing import rerun_if_address_is_in_use
 from colossalai.utils import free_port
-from colossalai.core import global_context as gpc
 from colossalai.utils.cuda import get_current_device
 
 from baselines.modules.colossal_embedding import EmbeddingCollection
+from recsys.utils.distributed_manager import DISTMGR
+from recsys.utils.launch import launch
 
 
 def run_embedding_collection(inputs, num_embeddings_per_feature, use_cpu):
@@ -38,17 +38,12 @@ def run_embedding_collection(inputs, num_embeddings_per_feature, use_cpu):
 
 
 def run_dist(rank, world_size, port, use_cpu):
-    colossalai.launch(config=dict(),
-                      rank=rank,
-                      world_size=world_size,
-                      host='localhost',
-                      port=port,
-                      backend='nccl',
-                      verbose=False)
+    launch(rank=rank, world_size=world_size, port=port, host='localhost', backend='nccl')
+    rank = DISTMGR.get_rank()
 
     num_embeddings_per_feature = [6, 4]
 
-    torch.manual_seed(gpc.get_global_rank() + 42)
+    torch.manual_seed(rank + 42)
     f1 = torch.randint(num_embeddings_per_feature[0], (2, 1))
     f2 = torch.randint(num_embeddings_per_feature[1], (2, 1))
     idx = torch.cat([f1, f2], dim=1)
@@ -65,4 +60,4 @@ def test_embedding(world_size, use_cpu):
 
 
 if __name__ == '__main__':
-    test_embedding(4)
+    test_embedding(4, use_cpu=True)
