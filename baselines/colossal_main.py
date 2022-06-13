@@ -199,7 +199,8 @@ def _train(
             with record_function("Optimization"):
                 engine.step()
 
-            prof.step()
+            if prof:
+                prof.step()
 
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point):    # progress made through the epoch
