@@ -6,7 +6,7 @@ from torch import Tensor
 from torch.nn.parameter import Parameter
 
 from .. import DISTMGR
-from .. import ParallelMode, distributed_logger as logger
+from .. import ParallelMode, DISTLogger as logger
 from .functional import reduce_forward, tensor_gather_forward_split_backward, gather_forward_split_backward
 
 from typing import Optional

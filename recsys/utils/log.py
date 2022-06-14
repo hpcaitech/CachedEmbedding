@@ -166,4 +166,4 @@ class DistributedLogger:
         self._log('error', message, parallel_mode, ranks)
 
 
-distributed_logger = get_distributed_logger()
+DISTLogger = get_distributed_logger()
