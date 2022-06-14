@@ -1,6 +1,18 @@
 import os
+import argparse
 
 from .distributed_manager import DISTMGR
+
+
+def get_default_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', type=str, help='the master address for distributed training')
+    parser.add_argument('--port', type=int, help='the master port for distributed training')
+    parser.add_argument('--world_size', type=int, help='world size for distributed training')
+    parser.add_argument('--rank', type=int, help='rank for the default process group')
+    parser.add_argument('--local_rank', type=int, help='local rank on the node')
+    parser.add_argument('--backend', type=str, default='nccl', help='backend for distributed communication')
+    return parser
 
 
 def launch(rank, world_size, host, port, backend, local_rank=None, seed=47):
