@@ -54,8 +54,8 @@ class SparseArch(nn.Module):
         sparse_dict = sparse_features.to_dict()
         flattened_sparse_features = torch.cat(
             [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
-        batch_offsets = sparse_features.offsets()[:
-                                                  -1]    # It's kind of weird, but necessary for decoding torchrec's KJT
+        # It's kind of weird, but necessary for decoding torchrec's KJT
+        batch_offsets = sparse_features.offsets()[:-1]
 
         batch_size = len(sparse_features.lengths()) // len(keys)
         flattened_sparse_embeddings = self.embed(flattened_sparse_features, batch_offsets)

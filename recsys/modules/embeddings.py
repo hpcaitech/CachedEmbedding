@@ -233,5 +233,8 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
         output_parallel = F.embedding_bag(input_, self.weight, offsets, self.max_norm, self.norm_type,
                                           self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
                                           self.include_last_offset, self.padding_idx)
+        if output_parallel.device.type == 'cpu':
+            # copy-before-transfer instead of transfer-before-copy
+            output_parallel = output_parallel.cuda()
         output = self.comm_func(output_parallel, self.parallel_mode, dim=1)
         return output
