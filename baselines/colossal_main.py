@@ -6,7 +6,7 @@ from sklearn.metrics import roc_auc_score
 import torch
 import torch.distributed as dist
 import torchmetrics as metrics
-from torch.profiler import profile, record_function, ProfilerActivity, schedule
+from torch.profiler import profile, record_function, ProfilerActivity, schedule, tensorboard_trace_handler
 
 from torchrec.datasets.criteo import (
     DEFAULT_CAT_NAMES,
@@ -32,6 +32,9 @@ from models.colossal_dlrm import DLRM, reshape_spare_features
 
 def parse_args():
     parser = colossalai.get_default_parser()
+
+    # tensorboard profiler
+    parser.add_argument('--profile_dir', type=str, default='log/debug')
 
     # ColossalAI config
     parser.add_argument('--config_path', default='baselines/colossal_config.py', type=str)
@@ -259,10 +262,9 @@ def train_val_test(
     # device = torch.device(f"cuda:{gpc.get_local_rank(ParallelMode.DATA)}")
     with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            schedule=schedule(wait=0, warmup=len(train_dataloader) - 2, active=2, repeat=1),
+            schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
             profile_memory=True,
-    # with_stack=True,
-            on_trace_ready=trace_handler,
+            on_trace_ready=tensorboard_trace_handler(args.profile_dir),
     ) as prof:
         for epoch in range(args.epochs):
             _train(engine, train_dataloader, epoch, args.epochs, args.change_lr, args.lr_change_point,
