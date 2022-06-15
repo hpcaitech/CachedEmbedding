@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# The infrastructures of DLRM are mainly inspired by TorchRec:
+# https://github.com/pytorch/torchrec/blob/main/torchrec/models/dlrm.py
+
 from typing import List, Optional
 from contextlib import nullcontext
 import numpy as np
@@ -42,7 +52,8 @@ class SparseArch(nn.Module):
                                                 embedding_dim,
                                                 sparse=sparse,
                                                 mode=reduction_mode,
-                                                parallel_mode=parallel_mode)
+                                                parallel_mode=parallel_mode,
+                                                include_last_offset=True)
 
         offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
         self.register_buffer('offsets', torch.from_numpy(offsets).requires_grad_(False), False)
@@ -54,8 +65,7 @@ class SparseArch(nn.Module):
         sparse_dict = sparse_features.to_dict()
         flattened_sparse_features = torch.cat(
             [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
-        # It's kind of weird, but necessary for decoding torchrec's KJT
-        batch_offsets = sparse_features.offsets()[:-1]
+        batch_offsets = sparse_features.offsets()
 
         batch_size = len(sparse_features.lengths()) // len(keys)
         flattened_sparse_embeddings = self.embed(flattened_sparse_features, batch_offsets)

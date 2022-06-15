@@ -157,5 +157,5 @@ def test_embedding_bag(world_size, use_cpu, padding_idx, reduction_op):
 
 
 if __name__ == "__main__":
-    test_embedding(4, True, None)
-    # test_embedding_bag(4, False, None, 'sum', 8)
+    #test_embedding(4, True, None)
+    test_embedding_bag(4, False, None, 'sum')
