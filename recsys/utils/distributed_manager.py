@@ -8,7 +8,7 @@ from recsys.utils.singleton_meta import SingletonMeta
 class ParallelMode(Enum):
     DEFAULT = 'default'
 
-    DATA_PARALLEL = "data_parallel"
+    DATA = "data_parallel"
     TENSOR_PARALLEL = "tensor_parallel"
 
 
@@ -36,6 +36,34 @@ class DistributedManager(metaclass=SingletonMeta):
         self.process_groups[name] = group
         self.cpu_process_groups[name] = cpu_group
         self.ranks_in_group[name] = ranks
+
+    def new_process_group(self, this_parallel_size, mode):
+        rank = self.get_rank()
+        world_size = self.get_world_size()
+
+        process_group = None
+        cpu_group = None
+        ranks_in_group = None
+
+        num_group = world_size // this_parallel_size
+
+        for i in range(num_group):
+            ranks = [i + j * num_group for j in range(this_parallel_size)]
+            group = torch.distributed.new_group(ranks)
+            group_cpu = torch.distributed.new_group(ranks, backend='gloo') \
+                if torch.distributed.get_backend() != 'gloo' else group
+
+            if rank in ranks:
+                process_group = group
+                cpu_group = group_cpu
+                ranks_in_group = ranks
+        self.add_process_group(mode, process_group, cpu_group, ranks_in_group)
+
+    def get_distributed_info(self):
+        info_str = "\n"
+        for key in self.process_groups:
+            info_str += f">>> Mode: {key}, Rank: {self.get_rank(key)}, world size: {self.get_world_size(key)}" + "\n"
+        return info_str
 
     def get_world_size(self, name=ParallelMode.DEFAULT):
         return torch.distributed.get_world_size(self.process_groups[name])
