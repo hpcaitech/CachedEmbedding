@@ -27,7 +27,7 @@ def ext_all_to_all(input_tensor) -> torch.Tensor:
     torch.distributed.all_to_all(output_tensor_list, input_tensor_list)
 
     out_tensor = torch.cat(output_tensor_list, dim=1)
-    assert out_tensor.size()[0] == B/world_size and out_tensor.size()[1] == H
+    assert out_tensor.size()[0] == B//world_size and out_tensor.size()[1] == H
 
 
     return out_tensor
