@@ -45,7 +45,8 @@ class SparseArch(nn.Module):
                  embedding_dim,
                  reduction_mode='sum',
                  parallel_mode=ParallelMode.DEFAULT,
-                 sparse=False):
+                 sparse=False,
+                 output_device_type=None):
         super(SparseArch, self).__init__()
 
         self.embed = ColumnParallelEmbeddingBag(sum(num_embeddings_per_feature),
@@ -53,7 +54,8 @@ class SparseArch(nn.Module):
                                                 sparse=sparse,
                                                 mode=reduction_mode,
                                                 parallel_mode=parallel_mode,
-                                                include_last_offset=True)
+                                                include_last_offset=True,
+                                                output_device_type=output_device_type)
 
         offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
         self.register_buffer('offsets', torch.from_numpy(offsets).requires_grad_(False), False)
@@ -243,7 +245,8 @@ class DLRM(nn.Module):
         self.sparse_arch = SparseArch(num_embeddings_per_feature,
                                       embedding_dim,
                                       parallel_mode=parallel_mode,
-                                      sparse=sparse).to(sparse_device)
+                                      sparse=sparse,
+                                      output_device_type=dense_device.type).to(sparse_device)
         self.dense_arch = DenseArch(in_features=dense_in_features, layer_sizes=dense_arch_layer_sizes).to(dense_device)
         self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features).to(dense_device)
         over_in_features = (embedding_dim + choose(num_sparse_features, 2) + num_sparse_features)
