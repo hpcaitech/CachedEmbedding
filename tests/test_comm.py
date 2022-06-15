@@ -37,8 +37,9 @@ def _test_all_to_all(use_cpu):
 
     B, H = 2 * world_size, 4 * world_size
 
+    torch.manual_seed(0+rank)
     input_tensor = torch.randn(B, H//world_size)
-    
+    print(rank, input_tensor)
     # size (B//N, H)
     output_tensor = ext_all_to_all(input_tensor)
 
