@@ -12,8 +12,23 @@ from recsys import launch
 from recsys import DISTMGR
 from recsys.utils.extended_distributed import ext_all_to_all
 
-SIZE = 8
 
+def _collect_tensors(tensor, dim):
+    rank = DISTMGR.get_rank()
+    world_size = DISTMGR.get_world_size()
+
+    tensor = tensor.cpu()
+    if rank == 0:
+        gather_list = [torch.empty_like(tensor) for i in range(world_size)]
+    else:
+        gather_list = []
+
+    torch.distributed.gather(tensor, gather_list, dst = 0, group = DISTMGR.get_cpu_group())
+    if rank == 0:
+        tensor_global = torch.cat(gather_list, dim=dim)
+    else:
+        tensor_global = None
+    return tensor_global
 
 def _test_all_to_all(use_cpu):
     device = torch.device('cpu') if use_cpu else torch.device('cuda', torch.cuda.current_device())
@@ -22,11 +37,16 @@ def _test_all_to_all(use_cpu):
 
     B, H = 2 * world_size, 4 * world_size
 
+    torch.manual_seed(0+rank)
     input_tensor = torch.randn(B, H//world_size)
-
+    print(rank, input_tensor)
+    # size (B//N, H)
     output_tensor = ext_all_to_all(input_tensor)
 
-
+    input_global = _collect_tensors(input_tensor, 1)
+    output_global = _collect_tensors(output_tensor, 0)
+    if rank == 0:
+        assert torch.allclose(input_global,output_global)
 
 
 def run(rank, world_size, port, use_cpu):
