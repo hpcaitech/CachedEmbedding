@@ -58,8 +58,8 @@ def hybrid_parallel(use_cpu):
     world_size = DISTMGR.get_world_size()
     group = DISTMGR.get_group() if not use_cpu else DISTMGR.get_cpu_group()
     device = torch.device('cpu') if use_cpu else torch.device('cuda', torch.cuda.current_device())
-    DISTMGR.set_seed(1234 + rank)
-    torch.manual_seed(1234 + rank)
+    DISTMGR.set_seed(1234)
+    torch.manual_seed(1234)
 
     num_embeddings, embedding_dim = world_size * 2, world_size * 2
     model = Net_1(num_embeddings, embedding_dim, is_partial_ddp=False, is_dist=True)
@@ -71,7 +71,7 @@ def hybrid_parallel(use_cpu):
                 process_group=group,
                 gradient_as_bucket_view=True,
                 broadcast_buffers=False,
-                # static_graph=Tru
+                # static_graph=True
                 )
 
     embed_weight_list = collect_weight(model.module.embed.weight.detach(), rank, world_size)
@@ -85,7 +85,7 @@ def hybrid_parallel(use_cpu):
             torch_model.linear.weight.copy_(model.module.linear.weight.detach())
             torch_model.linear.bias.copy_(model.module.linear.bias.detach())
 
-    DISTMGR.set_seed(4321 + rank)
+    DISTMGR.set_seed(4321)
 
     # Synthesize data for embedding bag:
     sparse_features = torch.randint(low=0, high=num_embeddings, size=(6,), dtype=torch.long, device=device)
@@ -142,7 +142,8 @@ def partial_ddp(use_cpu):
                 process_group=group,
                 gradient_as_bucket_view=True,
                 broadcast_buffers=False,
-                static_graph=True)
+                # static_graph=True
+                )
 
     linear_weight_list = collect_weight(model.module.linear.weight.detach(), rank, world_size)
     if rank == 0:
@@ -159,8 +160,8 @@ def partial_ddp(use_cpu):
         assert torch.allclose(torch_model.linear.weight.detach(), model.module.linear.weight.detach())
 
     # The randomly initialization of torch_model would affect the RNG states in rank 0, so we must reset it
-    DISTMGR.set_seed(1234 + rank)
-    torch.manual_seed(1234 + rank)
+    DISTMGR.set_seed(1234)
+    torch.manual_seed(1234)
     # Synthesize data for embedding bag:
     # Note: all ranks synthesize the same data because DISTMGR has set the same random seed for each rank
     #
