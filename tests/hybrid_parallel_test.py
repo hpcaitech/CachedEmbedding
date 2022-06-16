@@ -38,11 +38,13 @@ class Net_1(torch.nn.Module):
         return self.linear(embeddings)
 
 
-def collect_weight(tensor, rank, world_size, group):
+def collect_weight(tensor, rank, world_size):
+    tensor = tensor.cpu()
     gather_list = []
     if rank == 0:
         gather_list = [torch.empty_like(tensor) for i in range(world_size)]
 
+    group = DISTMGR.get_cpu_group()
     torch.distributed.gather(tensor, gather_list, dst=0, group=group)
 
     return gather_list
@@ -67,9 +69,10 @@ def hybrid_parallel(use_cpu):
                 process_group=group,
                 gradient_as_bucket_view=True,
                 broadcast_buffers=False,
-                static_graph=True)
+                # static_graph=Tru
+                )
 
-    embed_weight_list = collect_weight(model.module.embed.weight.detach(), rank, world_size, group)
+    embed_weight_list = collect_weight(model.module.embed.weight.detach(), rank, world_size)
     if rank == 0:
         global_embed_weight = torch.cat(embed_weight_list, dim=1)
         torch_model = Net_1(num_embeddings, embedding_dim, is_partial_ddp=True, is_dist=False).to(device)
@@ -91,19 +94,20 @@ def hybrid_parallel(use_cpu):
 
     global_grad = torch.rand(BATCH_SIZE, outputs.shape[1], dtype=outputs.dtype, device=outputs.device)
     grad = torch.tensor_split(global_grad, world_size, dim=0)[rank]
-    outputs.backward(grad)
-
+    # outputs.backward(grad)
+    outputs.sum().backward()
     print(f"Rank {rank}, model weight grad: {model.module.embed.weight.grad}")
 
-    embed_grad_list = collect_weight(model.module.embed.weight.grad.detach(), rank, world_size, group)
-    full_output_list = collect_weight(outputs.detach(), rank, world_size, group)
+    embed_grad_list = collect_weight(model.module.embed.weight.grad.detach(), rank, world_size)
+    full_output_list = collect_weight(outputs.detach(), rank, world_size)
     if rank == 0:
         torch_outputs = torch_model(sparse_features, offsets)
         full_outputs = torch.cat(full_output_list, dim=0)
-        assert torch.allclose(full_outputs, torch_outputs)
+        assert torch.allclose(full_outputs.cpu(), torch_outputs.detach().cpu())
 
-        torch_outputs.backward(global_grad)
-        assert torch.allclose(model.module.linear.weight.grad.detach() * world_size,
+        # torch_outputs.backward(global_grad)
+        torch_outputs.sum().backward()
+        assert torch.allclose(model.module.linear.weight.grad.detach(),
                               torch_model.linear.weight.grad.detach())
         assert torch.allclose(model.module.linear.bias.grad.detach() * world_size,
                               torch_model.linear.bias.grad.detach())
@@ -111,7 +115,7 @@ def hybrid_parallel(use_cpu):
         embed_grad = torch.cat(embed_grad_list, dim=1)
         print(f"model embed grad: {embed_grad}")
         print(f"target embed grad: {torch_model.embed.weight.grad}")
-        assert torch.allclose(embed_grad, torch_model.embed.weight.grad.detach())
+        assert torch.allclose(embed_grad.cpu(), torch_model.embed.weight.grad.detach().cpu())
 
 
 def partial_ddp(use_cpu):
@@ -138,7 +142,7 @@ def partial_ddp(use_cpu):
                 broadcast_buffers=False,
                 static_graph=True)
 
-    linear_weight_list = collect_weight(model.module.linear.weight.detach(), rank, world_size, group)
+    linear_weight_list = collect_weight(model.module.linear.weight.detach(), rank, world_size)
     if rank == 0:
         for i in range(len(linear_weight_list) - 1):
             assert torch.allclose(linear_weight_list[i], linear_weight_list[i + 1])
@@ -218,4 +222,4 @@ def test_hybrid_parallel(world_size, use_cpu):
 
 if __name__ == "__main__":
     # test_partial_ddp(4, True)
-    test_hybrid_parallel(4, False)
+    test_hybrid_parallel(2, False)
