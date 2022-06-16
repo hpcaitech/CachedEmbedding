@@ -100,3 +100,20 @@ class _GatherForwardSplitBackward(torch.autograd.Function):
 
 def gather_forward_split_backward(x, parallel_mode, dim):
     return _GatherForwardSplitBackward.apply(x, parallel_mode, dim)
+
+
+class _SplitForwardGatherBackward(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x, parallel_mode, dim):
+        ctx.parallel_mode = parallel_mode
+        ctx.dim = dim
+        return _tensor_split(x, parallel_mode, dim)
+
+    @staticmethod
+    def backward(ctx, grad):
+        return _gather(grad, ctx.parallel_mode, ctx.dim), None, None
+
+
+def split_forward_gather_backward(x, parallel_mode, dim):
+    return _SplitForwardGatherBackward.apply(x, parallel_mode, dim)

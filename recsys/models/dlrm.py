@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# The infrastructures of DLRM are mainly inspired by TorchRec:
+# https://github.com/pytorch/torchrec/blob/main/torchrec/models/dlrm.py
+
 from typing import List, Optional
 from contextlib import nullcontext
 import numpy as np
@@ -35,14 +45,17 @@ class SparseArch(nn.Module):
                  embedding_dim,
                  reduction_mode='sum',
                  parallel_mode=ParallelMode.DEFAULT,
-                 sparse=False):
+                 sparse=False,
+                 output_device_type=None):
         super(SparseArch, self).__init__()
 
         self.embed = ColumnParallelEmbeddingBag(sum(num_embeddings_per_feature),
                                                 embedding_dim,
                                                 sparse=sparse,
                                                 mode=reduction_mode,
-                                                parallel_mode=parallel_mode)
+                                                parallel_mode=parallel_mode,
+                                                include_last_offset=True,
+                                                output_device_type=output_device_type)
 
         offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
         self.register_buffer('offsets', torch.from_numpy(offsets).requires_grad_(False), False)
@@ -54,8 +67,7 @@ class SparseArch(nn.Module):
         sparse_dict = sparse_features.to_dict()
         flattened_sparse_features = torch.cat(
             [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
-        batch_offsets = sparse_features.offsets()[:
-                                                  -1]    # It's kind of weird, but necessary for decoding torchrec's KJT
+        batch_offsets = sparse_features.offsets()
 
         batch_size = len(sparse_features.lengths()) // len(keys)
         flattened_sparse_embeddings = self.embed(flattened_sparse_features, batch_offsets)
@@ -233,7 +245,8 @@ class DLRM(nn.Module):
         self.sparse_arch = SparseArch(num_embeddings_per_feature,
                                       embedding_dim,
                                       parallel_mode=parallel_mode,
-                                      sparse=sparse).to(sparse_device)
+                                      sparse=sparse,
+                                      output_device_type=dense_device.type).to(sparse_device)
         self.dense_arch = DenseArch(in_features=dense_in_features, layer_sizes=dense_arch_layer_sizes).to(dense_device)
         self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features).to(dense_device)
         over_in_features = (embedding_dim + choose(num_sparse_features, 2) + num_sparse_features)

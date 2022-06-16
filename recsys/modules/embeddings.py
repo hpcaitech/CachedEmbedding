@@ -126,6 +126,7 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
                  device=None,
                  dtype=None,
                  parallel_mode=None,
+                 output_device_type=None,
                  init_method=torch.nn.init.xavier_normal_):
         super(ColumnParallelEmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
@@ -173,6 +174,8 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
             chunk = torch.tensor_split(_weight, self.world_size, 1)[self.rank]
             assert list(chunk.shape) == [num_embeddings, self.embedding_dim_per_partition]
             self.weight = torch.nn.Parameter(chunk)
+
+        self.output_device_type = output_device_type
 
     @staticmethod
     def get_partition(embedding_dim, rank, world_size):
@@ -233,5 +236,8 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
         output_parallel = F.embedding_bag(input_, self.weight, offsets, self.max_norm, self.norm_type,
                                           self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
                                           self.include_last_offset, self.padding_idx)
+        if self.output_device_type == 'cuda' and output_parallel.device.type == 'cpu':
+            # copy-before-transfer instead of transfer-before-copy
+            output_parallel = output_parallel.cuda()
         output = self.comm_func(output_parallel, self.parallel_mode, dim=1)
         return output

@@ -32,7 +32,6 @@ def test_keyedjaggedtensor():
         lengths=torch.tensor(lengths, dtype=torch.long, device=device),
     )
     print(inputs)
-    print(f"Offsets: {inputs.offsets()}")
     keys = inputs.keys()
     assert len(keys) == len(feature_offsets)
 
