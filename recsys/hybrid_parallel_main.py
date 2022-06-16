@@ -177,7 +177,7 @@ def _train(model,
     model.train()
     data_iter = iter(data_loader)
     samples_per_trainer = len(data_loader) / dist_manager.get_world_size() * epochs
-    rank = dist_manager.get_rank(),
+    rank = dist_manager.get_rank()
     world_size = dist_manager.get_world_size()
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:

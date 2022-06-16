@@ -290,13 +290,15 @@ class FusedSparseModules(nn.Module):
         self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
                                                      embedding_dim,
                                                      fused_op=fused_op,
-                                                     reduction_mode=reduction_mode,
+                                                     mode=reduction_mode,
                                                      parallel_mode=parallel_mode,
                                                      sparse=sparse,
+                                                     include_last_offset=True,
                                                      output_device_type=output_device_type)
 
         offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
         self.register_buffer('offsets', torch.from_numpy(offsets).requires_grad_(False), False)
+        self.world_size = dist_manager.get_world_size(parallel_mode)
 
     def forward(self, sparse_features):
         keys = sparse_features.keys()
@@ -307,7 +309,7 @@ class FusedSparseModules(nn.Module):
             [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
         batch_offsets = sparse_features.offsets()
 
-        batch_size = len(sparse_features.lengths()) // len(keys)
+        batch_size = len(sparse_features.lengths()) // len(keys) // self.world_size
         flattened_sparse_embeddings = self.embed(flattened_sparse_features, batch_offsets)
         return flattened_sparse_embeddings.view(batch_size, len(keys), -1)
 
