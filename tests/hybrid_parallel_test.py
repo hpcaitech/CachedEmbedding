@@ -107,7 +107,7 @@ def hybrid_parallel(use_cpu):
 
         # torch_outputs.backward(global_grad)
         torch_outputs.sum().backward()
-        assert torch.allclose(model.module.linear.weight.grad.detach(),
+        assert torch.allclose(model.module.linear.weight.grad.detach() * world_size,
                               torch_model.linear.weight.grad.detach())
         assert torch.allclose(model.module.linear.bias.grad.detach() * world_size,
                               torch_model.linear.bias.grad.detach())
