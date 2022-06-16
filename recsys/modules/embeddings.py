@@ -7,7 +7,8 @@ from torch.nn.parameter import Parameter
 
 from .. import DISTMGR
 from .. import ParallelMode, DISTLogger as logger
-from .functional import reduce_forward, tensor_gather_forward_split_backward, gather_forward_split_backward
+from .functional import (reduce_forward, tensor_gather_forward_split_backward, gather_forward_split_backward,
+                         split_forward_gather_backward, dual_all_to_all)
 
 from typing import Optional
 
@@ -241,3 +242,39 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
             output_parallel = output_parallel.cuda()
         output = self.comm_func(output_parallel, self.parallel_mode, dim=1)
         return output
+
+
+class FusedHybridParallelEmbeddingBag(ColumnParallelEmbeddingBag):
+    """
+    For the hybrid parallelism where embedding params use model parallelism
+    while the subsequent dense modules use data parallelism
+
+    fused_op:
+        - all_to_all:
+        - gather_scatter:
+    """
+
+    def __init__(self, num_embeddings, embedding_dim, fused_op='all_to_all', *args, **kwargs):
+        fused_op = fused_op.lower()
+        assert fused_op in ['all_to_all', 'gather_scatter']
+
+        super(FusedHybridParallelEmbeddingBag, self).__init__(num_embeddings, embedding_dim, *args, **kwargs)
+
+        self.fused_op = fused_op
+
+    def forward(self, input_, offsets=None, per_sample_weights=None):
+        output_parallel = F.embedding_bag(input_, self.weight, offsets, self.max_norm, self.norm_type,
+                                          self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
+                                          self.include_last_offset, self.padding_idx)
+
+        if self.output_device_type == 'cuda' and output_parallel.device.type == 'cpu':
+            output_parallel = output_parallel.cuda()
+
+        if self.fused_op == 'all_to_all':
+            # TODO: check situations when the scatter dim is indivisible by world size
+            outputs = dual_all_to_all(output_parallel, self.parallel_mode, scatter_dim=0, gather_dim=1)
+        else:
+            outputs = self.comm_func(output_parallel, self.parallel_mode, dim=1)
+            outputs = split_forward_gather_backward(outputs, self.parallel_mode, dim=0)
+
+        return outputs
