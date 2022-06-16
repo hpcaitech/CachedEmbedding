@@ -96,8 +96,7 @@ def hybrid_parallel(use_cpu):
 
     global_grad = torch.rand(BATCH_SIZE, outputs.shape[1], dtype=outputs.dtype, device=outputs.device)
     grad = torch.tensor_split(global_grad, world_size, dim=0)[rank]
-    # outputs.backward(grad)
-    outputs.sum().backward()
+    outputs.backward(grad)
     print(f"Rank {rank}, model weight grad: {model.module.embed.weight.grad}")
 
     embed_grad_list = collect_weight(model.module.embed.weight.grad.detach(), rank, world_size)
@@ -107,8 +106,8 @@ def hybrid_parallel(use_cpu):
         full_outputs = torch.cat(full_output_list, dim=0)
         assert torch.allclose(full_outputs.cpu(), torch_outputs.detach().cpu())
 
-        # torch_outputs.backward(global_grad)
-        torch_outputs.sum().backward()
+        torch_outputs.backward(global_grad)
+
         assert torch.allclose(model.module.linear.weight.grad.detach() * world_size,
                               torch_model.linear.weight.grad.detach())
         assert torch.allclose(model.module.linear.bias.grad.detach() * world_size,
