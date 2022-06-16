@@ -27,8 +27,9 @@ class Net(torch.nn.Module):
 
 
 def _run_fwd_bwd(ddp_cls):
-    if DISTMGR.get_world_size() > 1:
+    if DISTMGR.get_world_size() <= 1:
         return
+    torch.manual_seed(0)
     model = Net().cuda()
     w1 = model.fc1.weight
     w2 = model.fc2.weight
@@ -45,6 +46,8 @@ def _run_fwd_bwd(ddp_cls):
     dist.all_gather(w2_grads, w2.grad)
     assert torch.equal(w2_grads[0], w2_grads[1])
 
+    return w1_grads[0], w2_grads[0]
+
 
 def run(rank, world_size, port):
     disable_existing_loggers()
@@ -52,9 +55,10 @@ def run(rank, world_size, port):
     assert DISTMGR.get_rank() == dist.get_rank()
     assert DISTMGR.get_world_size() == dist.get_world_size()
 
-    _run_fwd_bwd(MyDDP)
-    _run_fwd_bwd(TorchDDP)
-
+    ret1 = _run_fwd_bwd(MyDDP)
+    ret2 = _run_fwd_bwd(TorchDDP)
+    assert torch.allclose(ret1[0], ret2[0])
+    assert torch.allclose(ret1[1], ret2[1])
 
 @pytest.mark.parametrize('world_size', [2, 4])
 @rerun_if_address_is_in_use()
