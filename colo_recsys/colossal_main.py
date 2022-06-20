@@ -25,9 +25,9 @@ from colossalai.nn.optimizer.colossalai_optimizer import ColossalaiOptimizer
 from colossalai.nn.parallel import ColoDDP
 from colossalai.nn.parallel.layers import init_colo_module
 
-from data.colossal_dataloader import get_dataloader
-from utils import TrainValTestResults, trace_handler, get_mem_info
-from models.colossal_dlrm import DLRM, reshape_spare_features
+from colo_recsys.datasets.colossal_dataloader import get_dataloader
+from colo_recsys.utils.utils import TrainValTestResults, trace_handler, get_mem_info
+from colo_recsys.models.colossal_dlrm import DLRM, reshape_spare_features
 
 
 def parse_args():
@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument('--profile_dir', type=str, default='log/debug')
 
     # ColossalAI config
-    parser.add_argument('--config_path', default='baselines/colossal_config.py', type=str)
+    parser.add_argument('--config_path', default='colo_recsys/colossal_config.py', type=str)
 
     # Dataset
     parser.add_argument("--kaggle", action='store_true')
@@ -150,7 +150,7 @@ def parse_args():
     args = parser.parse_args()
 
     if args.kaggle:
-        from dlrm_main import NUM_EMBEDDINGS_PER_FEATURE
+        from baselines.dlrm_main import NUM_EMBEDDINGS_PER_FEATURE
         global TOTAL_TRAINING_SAMPLES
         TOTAL_TRAINING_SAMPLES = 45840617
         setattr(args, 'num_embeddings_per_feature', NUM_EMBEDDINGS_PER_FEATURE)

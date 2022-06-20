@@ -5,9 +5,9 @@ from contextlib import nullcontext
 import colossalai
 from colossalai.core import global_context as gpc
 
-from modules.colossal_embedding import EmbeddingCollection
-from models.dlrm import DenseArch, OverArch, InteractionArch, choose
-from utils import get_time_elapsed
+from ..modules.colossal_embedding import EmbeddingCollection
+from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
+from ..utils.utils import get_time_elapsed
 
 
 def reshape_spare_features(values):

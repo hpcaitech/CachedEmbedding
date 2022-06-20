@@ -9,7 +9,7 @@ from colossalai.utils import free_port
 from colossalai.core import global_context as gpc
 from colossalai.utils.cuda import get_current_device
 
-from baselines.modules.colossal_embedding import EmbeddingCollection
+from colo_recsys.modules.colossal_embedding import EmbeddingCollection
 
 
 def run_embedding_collection(inputs, num_embeddings_per_feature, use_cpu):

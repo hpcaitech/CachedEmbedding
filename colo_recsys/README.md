@@ -1,0 +1,1 @@
+# Build a scalable embedding supported by [Colossal-AI](https://github.com/hpcaitech/ColossalAI) for training recommendation models
