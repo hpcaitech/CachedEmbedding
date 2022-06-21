@@ -7,10 +7,9 @@ from contextlib import contextmanager
 import torch
 import torch.distributed as dist
 from colossalai.utils import Timer
-from colossalai.logging import get_dist_logger
-from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 
+from recsys import DISTMGR
 
 def get_mem_info(prefix=''):
     return f'{prefix}GPU memory usage: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, ' \
@@ -48,24 +47,20 @@ def get_time_elapsed(logger, repr: str):
     logger.info(f"Time elapsed for {repr}: {elapsed:.4f}s", ranks=[0])
 
 
-# TODO: only consider the DP process group
 def get_world_size():
-    return gpc.data_parallel_size
+    return DISTMGR.get_world_size()
 
 
 def get_rank():
-    if gpc.data_parallel_size == 1:
-        return 0
-    else:
-        return gpc.get_local_rank(ParallelMode.DATA)
+    return DISTMGR.get_rank()
 
 
 def get_group():
-    return gpc.get_group(ParallelMode.DATA)
+    return DISTMGR.get_group(ParallelMode.DATA)
 
 
 def get_cpu_group():
-    return gpc.get_cpu_group(ParallelMode.DATA)
+    return DISTMGR.get_cpu_group(ParallelMode.DATA)
 
 
 @dataclass
@@ -75,18 +70,6 @@ class TrainValTestResults:
     test_accuracy: Optional[float] = None
     test_auroc: Optional[float] = None
     
-
-class MultipleOptimizer(object):
-    def __init__(self, *op):
-        self.optimizers = op
-
-    def zero_grad(self):
-        for op in self.optimizers:
-            op.zero_grad()
-
-    def step(self):
-        for op in self.optimizers:
-            op.step()
 
 class EarlyStopper:
     def __init__(self, patience=7, verbose=False, delta=0, trace_func=print):

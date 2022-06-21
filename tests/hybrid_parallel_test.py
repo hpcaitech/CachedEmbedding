@@ -7,7 +7,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
 
 from recsys import DISTMGR, launch, disable_existing_loggers, ParallelMode
-from recsys.modules.embeddings import ColumnParallelEmbeddingBag
+from zgenrecsys.recsys.modules.embeddings import ColumnParallelEmbeddingBag
 from recsys.modules.functional import split_forward_gather_backward
 
 BATCH_SIZE = 4

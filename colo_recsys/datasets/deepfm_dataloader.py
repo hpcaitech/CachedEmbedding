@@ -2,7 +2,6 @@ import math
 import shutil
 import struct
 from collections import defaultdict
-from functools import lru_cache
 from pathlib import Path
 
 import lmdb
@@ -25,7 +24,7 @@ class MovieLens20MDataset(torch.utils.data.Dataset):
     def __init__(self, dataset_path, sep=',', engine='c', header='infer'):
         data = pd.read_csv(dataset_path, sep=sep, engine=engine, header=header).to_numpy()[:, :3]
         self.items = data[:, :2].astype(np.int) - 1  # -1 because ID begins from 1
-        self.targets = self.__preprocess_target(data[:, 2]).astype(np.float32)
+        self.targets = self._preprocess_target(data[:, 2]).astype(np.float32)
         self.field_dims = np.max(self.items, axis=0) + 1
         self.user_field_idx = np.array((0, ), dtype=np.long)
         self.item_field_idx = np.array((1,), dtype=np.long)
@@ -36,7 +35,7 @@ class MovieLens20MDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         return self.items[index], self.targets[index]
 
-    def __preprocess_target(self, target):
+    def _preprocess_target(self, target):
         target[target <= 3] = 0
         target[target > 3] = 1
         return target
@@ -78,19 +77,19 @@ class AvazuDataset(torch.utils.data.Dataset):
         return self.length
 
     def __build_cache(self, path, cache_path):
-        feat_mapper, defaults = self.__get_feat_mapper(path)
+        feat_mapper, defaults = self._get_feat_mapper(path)
         with lmdb.open(cache_path, map_size=int(1e11)) as env:
             field_dims = np.zeros(self.NUM_FEATS, dtype=np.uint32)
             for i, fm in feat_mapper.items():
                 field_dims[i - 1] = len(fm) + 1
             with env.begin(write=True) as txn:
                 txn.put(b'field_dims', field_dims.tobytes())
-            for buffer in self.__yield_buffer(path, feat_mapper, defaults):
+            for buffer in self._yield_buffer(path, feat_mapper, defaults):
                 with env.begin(write=True) as txn:
                     for key, value in buffer:
                         txn.put(key, value)
 
-    def __get_feat_mapper(self, path):
+    def _get_feat_mapper(self, path):
         feat_cnts = defaultdict(lambda: defaultdict(int))
         with open(path) as f:
             f.readline()
@@ -107,7 +106,7 @@ class AvazuDataset(torch.utils.data.Dataset):
         defaults = {i: len(cnt) for i, cnt in feat_mapper.items()}
         return feat_mapper, defaults
 
-    def __yield_buffer(self, path, feat_mapper, defaults, buffer_size=int(1e5)):
+    def _yield_buffer(self, path, feat_mapper, defaults, buffer_size=int(1e5)):
         item_idx = 0
         buffer = list()
         with open(path) as f:
@@ -152,7 +151,7 @@ class CriteoDataset(torch.utils.data.Dataset):
             shutil.rmtree(cache_path, ignore_errors=True)
             if dataset_path is None:
                 raise ValueError('create cache: failed: dataset_path is None')
-            self.__build_cache(dataset_path, cache_path)
+            self._build_cache(dataset_path, cache_path)
         self.env = lmdb.open(cache_path, create=False, lock=False, readonly=True)
         with self.env.begin(write=False) as txn:
             self.length = txn.stat()['entries'] - 1
@@ -167,20 +166,20 @@ class CriteoDataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.length
 
-    def __build_cache(self, path, cache_path):
-        feat_mapper, defaults = self.__get_feat_mapper(path)
+    def _build_cache(self, path, cache_path):
+        feat_mapper, defaults = self._get_feat_mapper(path)
         with lmdb.open(cache_path, map_size=int(1e11)) as env:
             field_dims = np.zeros(self.NUM_FEATS, dtype=np.uint32)
             for i, fm in feat_mapper.items():
                 field_dims[i - 1] = len(fm) + 1
             with env.begin(write=True) as txn:
                 txn.put(b'field_dims', field_dims.tobytes())
-            for buffer in self.__yield_buffer(path, feat_mapper, defaults):
+            for buffer in self._yield_buffer(path, feat_mapper, defaults):
                 with env.begin(write=True) as txn:
                     for key, value in buffer:
                         txn.put(key, value)
 
-    def __get_feat_mapper(self, path):
+    def _get_feat_mapper(self, path):
         feat_cnts = defaultdict(lambda: defaultdict(int))
         with open(path) as f:
             pbar = tqdm(f, mininterval=1, smoothing=0.1)
@@ -198,7 +197,7 @@ class CriteoDataset(torch.utils.data.Dataset):
         defaults = {i: len(cnt) for i, cnt in feat_mapper.items()}
         return feat_mapper, defaults
 
-    def __yield_buffer(self, path, feat_mapper, defaults, buffer_size=int(1e5)):
+    def _yield_buffer(self, path, feat_mapper, defaults, buffer_size=int(1e5)):
         item_idx = 0
         buffer = list()
         with open(path) as f:
@@ -222,7 +221,6 @@ class CriteoDataset(torch.utils.data.Dataset):
             yield buffer
 
 
-@lru_cache(maxsize=None)
 def convert_numeric_feature(val: str):
     if val == '':
         return 'NULL'

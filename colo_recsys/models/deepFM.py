@@ -4,7 +4,7 @@ import numpy as np
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 import colossalai.nn as col_nn
 
-from modules.embeddings import QREmbedding
+from recsys.modules.embeddings import QREmbedding
 
 class FeatureEmbedding(nn.Module):
     def __init__(self, field_dims, emb_dim, enable_qr):

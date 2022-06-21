@@ -1,1 +1,3 @@
-from deepFM import DeepFactorizationMachine
+from .deepFM import DeepFactorizationMachine
+
+__all__ = ['DeepFactorizationMachine']

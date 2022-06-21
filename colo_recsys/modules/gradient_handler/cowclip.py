@@ -2,14 +2,47 @@ import math
 from typing import List
 
 import torch
+import torch.nn as nn
 from colossalai.registry import GRADIENT_HANDLER
 from colossalai.engine.gradient_handler import BaseGradientHandler
+
+
+class SyncOptimizer(object):
+    def __init__(self, *op):
+        self.optimizers = op
+
+    def zero_grad(self):
+        for op in self.optimizers:
+            op.zero_grad()
+
+    def step(self):
+        for op in self.optimizers:
+            op.step()
 
 
 @GRADIENT_HANDLER.register_module
 class CowclipGradientHandler(BaseGradientHandler):
 
-    def handle_gradient(self, embed_dim: List, clip: int = 1.0, bound: int = 1.0):
+    def handle_gradient(self, 
+                        embed_dim: List, 
+                        clip: int = 1.0,
+                        bound: int = 1.0,
+                        lr: int = 1e-5, 
+                        weight_decay: int = 1e-5):
+
+        trainable_vars = list(self._model.named_parameters())
+
+        embed_index = [
+            i for i, x in enumerate(trainable_vars) if "embedding" in x[0]
+        ]
+        dense_index = [i for i in range(len(trainable_vars)) if i not in embed_index]
+        
+        embed_vars = [trainable_vars[i][1] for i in embed_index]
+        dense_vars = [trainable_vars[i][1] for i in dense_index]
+
+        self._optimizer = SyncOptimizer(torch.optim.Adam(params=embed_vars, lr=lr, weight_decay=weight_decay), 
+                                torch.optim.Adam(params=dense_vars, lr=lr, weight_decay=weight_decay))
+
         gradients = [] 
         trainable_vars = list(self._model.named_parameters())
 
@@ -53,8 +86,13 @@ class CowclipGradientHandler(BaseGradientHandler):
 
         super(self).handle_gradient()
 
+
     @staticmethod
-    def _compute_cow_clip(w, g, ratio=1, ids=None, cnts=None, min_w=0.03, const=False):
+    def _compute_cow_clip(w: nn.Tensor, 
+                          g: nn.Tensor, 
+                          ratio: int = 1, 
+                          min_w: int = 0.03, 
+                          const: bool = False):
 
         if isinstance(g, dict):
             values = torch.tensor(g.values())
