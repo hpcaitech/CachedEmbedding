@@ -8,7 +8,7 @@ from colossalai.testing import rerun_if_address_is_in_use
 
 from recsys import launch, disable_existing_loggers
 from recsys import DISTMGR
-from zgenrecsys.recsys.modules.embeddings import VocabParallelEmbedding, ColumnParallelEmbeddingBag
+from recsys.modules.embeddings import VocabParallelEmbedding, ColumnParallelEmbeddingBag
 
 
 def embedding(use_cpu, padding_idx):
