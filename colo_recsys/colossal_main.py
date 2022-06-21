@@ -344,7 +344,6 @@ def main():
             with get_time_elapsed(logger, f"{i}-th forward pass"):
                 logits = model(dense_features, sparse_features).squeeze()
 
-            logger.info(f"logits shape: {logits.shape}, labels shape: {labels.shape}")
             loss = criterion(logits, labels.float())
             logger.info(f"{i}-th loss: {loss}")
 

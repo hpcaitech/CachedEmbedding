@@ -31,7 +31,7 @@ class EmbeddingCollection(nn.Embedding):
     def forward(self, x):
         embedding = super().forward(x + self.offsets)
         if self.offsets.device.type == 'cpu':
-            embedding = copy_to_gpu(embedding)
+            embedding = embedding.cuda()
         return embedding
 
 
