@@ -61,7 +61,7 @@ class AvazuDataset(torch.utils.data.Dataset):
             shutil.rmtree(cache_path, ignore_errors=True)
             if dataset_path is None:
                 raise ValueError('create cache: failed: dataset_path is None')
-            self.__build_cache(dataset_path, cache_path)
+            self._build_cache(dataset_path, cache_path)
         self.env = lmdb.open(cache_path, create=False, lock=False, readonly=True)
         with self.env.begin(write=False) as txn:
             self.length = txn.stat()['entries'] - 1
@@ -76,7 +76,7 @@ class AvazuDataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.length
 
-    def __build_cache(self, path, cache_path):
+    def _build_cache(self, path, cache_path):
         feat_mapper, defaults = self._get_feat_mapper(path)
         with lmdb.open(cache_path, map_size=int(1e11)) as env:
             field_dims = np.zeros(self.NUM_FEATS, dtype=np.uint32)

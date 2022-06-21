@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 from torch.profiler import record_function
 
-from utils.common import compute_throughput
+from recsys.utils.misc import compute_throughput
 
 def _to_device(batch, device: torch.device, non_blocking: bool):
     return batch.to(device=device, non_blocking=non_blocking)
