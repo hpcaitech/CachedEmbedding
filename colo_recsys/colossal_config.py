@@ -1,3 +1,5 @@
+from torch.optim import SGD
+
 from colossalai.amp import AMP_TYPE
 
 # fp16 = dict(
@@ -6,4 +8,5 @@ from colossalai.amp import AMP_TYPE
 
 parallel = dict(tensor=dict(mode="1d", size=2))
 
-inspect_time = False
+optimizer = dict(type=SGD,)
+inspect_time = True
