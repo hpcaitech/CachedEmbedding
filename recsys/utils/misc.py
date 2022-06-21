@@ -2,11 +2,18 @@ import torch
 import psutil
 from contextlib import contextmanager
 import time
+from time import perf_counter
 
 
 def get_mem_info(prefix=''):
     return f'{prefix}GPU memory usage: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, ' \
            f'CPU memory usage: {psutil.Process().memory_info().rss / 1024**3:.2f} GB'
+
+
+@contextmanager
+def compute_throughput(batch_size) -> float:
+    start = perf_counter()
+    yield lambda : batch_size / ((perf_counter() - start)*1000)
 
 
 @contextmanager

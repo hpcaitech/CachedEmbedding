@@ -5,9 +5,9 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.parameter import Parameter
 
-from .. import DISTMGR
-from .. import ParallelMode, DISTLogger as logger
-from .functional import (reduce_forward, tensor_gather_forward_split_backward, gather_forward_split_backward,
+from ... import DISTMGR
+from ... import ParallelMode, DISTLogger as logger
+from ..functional import (reduce_forward, tensor_gather_forward_split_backward, gather_forward_split_backward,
                          split_forward_gather_backward, dual_all_to_all)
 
 from typing import Optional
