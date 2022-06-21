@@ -26,7 +26,7 @@ from colossalai.nn.parallel import ColoDDP
 from colossalai.nn.parallel.layers import init_colo_module
 
 from colo_recsys.datasets.colossal_dataloader import get_dataloader
-from colo_recsys.utils.utils import TrainValTestResults, trace_handler, get_mem_info
+from colo_recsys.utils import TrainValTestResults, trace_handler, get_mem_info
 from colo_recsys.models.colossal_dlrm import HybridParallelDLRM, reshape_spare_features
 
 

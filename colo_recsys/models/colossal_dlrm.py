@@ -10,7 +10,7 @@ from colossalai.tensor import distspec
 
 from ..modules.colossal_embedding import EmbeddingCollection
 from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
-from ..utils.utils import get_time_elapsed
+from ..utils import get_time_elapsed
 
 
 def reshape_spare_features(values):

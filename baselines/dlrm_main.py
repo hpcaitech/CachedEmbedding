@@ -59,7 +59,7 @@ try:
 except ImportError:
     pass
 
-from colo_recsys.utils.utils import TrainValTestResults, get_mem_info, trace_handler
+from colo_recsys.utils import TrainValTestResults, get_mem_info, trace_handler
 
 TRAIN_PIPELINE_STAGES = 3    # Number of stages in TrainPipelineSparseDist.
 NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
