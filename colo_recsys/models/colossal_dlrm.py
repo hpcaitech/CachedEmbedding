@@ -63,11 +63,11 @@ class DLRM(nn.Module):
 
 class FusedSparseModules(nn.Module):
 
-    def __init__(self, num_embeddings_per_feature, embedding_dim):
+    def __init__(self, num_embeddings_per_feature, embedding_dim, parallel_mode=ParallelMode.PARALLEL_1D):
         super(FusedSparseModules, self).__init__()
-        self.sparse_arch = EmbeddingCollection(num_embeddings_per_feature, embedding_dim)
-        self.world_size = gpc.get_world_size(ParallelMode.PARALLEL_1D)
-        self.process_group = gpc.get_group(ParallelMode.PARALLEL_1D)
+        self.sparse_arch = nn.EmbeddingBag(sum(num_embeddings_per_feature), embedding_dim, sparse=True)
+        self.world_size = gpc.get_world_size(parallel_mode)
+        self.process_group = gpc.get_group(parallel_mode)
 
     def forward(self, sparse_features):
         output_parallel = self.sparse_arch(sparse_features)

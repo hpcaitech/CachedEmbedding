@@ -50,10 +50,13 @@ class Net(torch.nn.Module):
 
         x = self.embed(x)
         if self.use_cpu:
+            # print(f"before .cuda: {x.spec.dist_spec}")
             x = x.cuda()
-        print(f"Before: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
+            x.spec.dist_spec.process_group = group
+        #     print(f"after .cuda: {x.spec.dist_spec}")
+        # print(f"Before: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
         x = x.convert_to_dist_spec(distspec.shard(group, [0], [world_size]))
-        print(f"After: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
+        # print(f"After: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
         x = self.proj(x)
         return x
 
