@@ -195,7 +195,7 @@ def _train(
             with record_function("Forward pass"):
                 logits = model(dense, sparse).squeeze()
             loss = criterion(logits, labels.float())
-            logger.info(f"it: {it}, loss: {loss.item()}, device: {loss.device}")
+            # logger.info(f"it: {it}, loss: {loss.item()}, device: {loss.device}")
             if it == len(data_loader) - 3:
                 logger.info(f"{get_mem_info('After forward:  ')}")
 
