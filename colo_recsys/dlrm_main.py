@@ -25,7 +25,7 @@ from colossalai.nn.parallel.layers import init_colo_module
 
 from colo_recsys.datasets.colossal_dataloader import get_dataloader
 from colo_recsys.utils import TrainValTestResults, trace_handler, get_mem_info
-from colo_recsys.models.colossal_dlrm import DLRM, reshape_spare_features
+from colo_recsys.models.colossal_dlrm import HybridParallelDLRM
 
 
 def parse_args():
@@ -165,14 +165,16 @@ def put_data_to_device(batch, use_cpu):
     dense = torch.tensor_split(batch.dense_features.to(device), world_size, 0)[rank]
     labels = torch.tensor_split(batch.labels.to(device), world_size, 0)[rank]
     if use_cpu:
-        sparse_features = reshape_spare_features(batch.sparse_features)
+        sparse_features = batch.sparse_features
     else:
-        sparse_features = reshape_spare_features(batch.sparse_features.to(device))
+        sparse_features = batch.sparse_features.to(device)
     return dense, sparse_features, labels
 
 
 def _train(
-    engine,
+    model,
+    criterion,
+    optimizer,
     data_loader,
     epoch,
     epochs,
@@ -183,7 +185,7 @@ def _train(
     use_cpu=False,
 ):
     logger = colossalai.logging.get_dist_logger()
-    engine.train()
+    model.train()
     data_iter = iter(data_loader)
     samples_per_trainer = len(data_loader) / gpc.get_world_size(ParallelMode.DATA) * epochs
 
@@ -191,18 +193,18 @@ def _train(
         try:
             dense, sparse, labels = put_data_to_device(next(data_iter), use_cpu)
             with record_function("Forward pass"):
-                logits = engine(dense, sparse).squeeze()
-            loss = engine.criterion(logits, labels.float())
-            # logger.info(f"it: {it}, loss: {loss.item()}, device: {loss.device}")
+                logits = model(dense, sparse).squeeze()
+            loss = criterion(logits, labels.float())
+            logger.info(f"it: {it}, loss: {loss.item()}, device: {loss.device}")
             if it == len(data_loader) - 3:
                 logger.info(f"{get_mem_info('After forward:  ')}")
 
-            engine.zero_grad()
+            optimizer.zero_grad()
             with record_function("Backward pass"):
-                engine.backward(loss)
+                model.backward(loss)
 
             with record_function("Optimization"):
-                engine.step()
+                optimizer.step()
 
             if prof:
                 prof.step()
@@ -211,7 +213,6 @@ def _train(
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point):    # progress made through the epoch
                 logger.info(f"Changing learning rate to: {lr_after_change_point}", ranks=[0])
                 change_lr = False
-                optimizer = engine.optimizer
                 lr = lr_after_change_point
                 for g in optimizer.param_groups:
                     g["lr"] = lr
@@ -219,8 +220,8 @@ def _train(
             break
 
 
-def _evaluate(engine, data_loader, stage, use_cpu=False):
-    engine.eval()
+def _evaluate(model, data_loader, stage, use_cpu=False):
+    model.eval()
     # To enable torchmetrics,
     # modify colossalai/utils/model/colo_init_context.py line#72:
     #   change `ColoTensor` to `ColoParameter`
@@ -232,7 +233,7 @@ def _evaluate(engine, data_loader, stage, use_cpu=False):
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
             try:
                 dense, sparse, labels = put_data_to_device(next(data_iter), use_cpu)
-                logits = engine(dense, sparse).squeeze().detach()
+                logits = model(dense, sparse).squeeze().detach()
                 preds = torch.sigmoid(logits)
 
                 labels = labels.detach()
@@ -255,7 +256,9 @@ def _evaluate(engine, data_loader, stage, use_cpu=False):
 
 def train_val_test(
     args,
-    engine,
+    model,
+    criterion,
+    optimizer,
     train_dataloader,
     val_dataloader,
     test_dataloader,
@@ -269,15 +272,15 @@ def train_val_test(
             on_trace_ready=tensorboard_trace_handler(args.profile_dir),
     ) as prof:
         for epoch in range(args.epochs):
-            _train(engine, train_dataloader, epoch, args.epochs, args.change_lr, args.lr_change_point,
-                   args.lr_after_change_point, prof, args.use_cpu)
+            _train(model, criterion, optimizer, train_dataloader, epoch, args.epochs, args.change_lr,
+                   args.lr_change_point, args.lr_after_change_point, prof, args.use_cpu)
 
-            val_accuracy, val_auroc = _evaluate(engine, val_dataloader, "val", args.use_cpu)
+            val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val", args.use_cpu)
 
             train_val_test_results.val_accuracies.append(val_accuracy)
             train_val_test_results.val_aurocs.append(val_auroc)
 
-        test_accuracy, test_auroc = _evaluate(engine, test_dataloader, "test", args.use_cpu)
+        test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test", args.use_cpu)
         train_val_test_results.test_accuracy = test_accuracy
         train_val_test_results.test_auroc = test_auroc
 
@@ -305,32 +308,41 @@ def main():
         ranks=[0])
 
     device = get_current_device()
+    embed_ouptut_device = 'cuda' if args.use_cpu is None else 'cpu'
     with ColoInitContext(device=device):
-        model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
-                     len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
-                     list(map(int, args.over_arch_layer_sizes.split(","))))
+        model = HybridParallelDLRM(args.num_embeddings_per_feature,
+                                   args.embedding_dim,
+                                   len(DEFAULT_CAT_NAMES),
+                                   len(DEFAULT_INT_NAMES),
+                                   list(map(int, args.dense_arch_layer_sizes.split(","))),
+                                   list(map(int, args.over_arch_layer_sizes.split(","))),
+                                   output_device_type=embed_ouptut_device)
     logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
 
-    init_colo_module(model.sparse_arch, ParallelAction(ComputePattern.TP1D, False), recursive=True, mode='col')
+    init_colo_module(model.sparse_modules, ParallelAction(ComputePattern.TP1D, False), recursive=True, mode='col')
     if args.use_cpu:
         model.sparse_modules.to('cpu')
         if gpc.tensor_parallel_size > 1:
             gloo_group_tp = gpc.get_cpu_group(ParallelMode.PARALLEL_1D)
-            model.sparse_modules.weight.spec.dist_spec.process_group = gloo_group_tp
+            model.sparse_modules.embed.weight.spec.dist_spec.process_group = gloo_group_tp
 
-    ignore_param = []
-    for k, v in model.named_parameters():
-        pass
+    ignore_param = [v for k, v in model.named_parameters() if 'embed' in k]
     ColoDDP.set_params_to_ignore(ignore_param)
     group = gpc.get_group(ParallelMode.PARALLEL_1D)
     model = ColoDDP(model, group)
 
     logger.info(f"{get_mem_info('After colossalai init:  ')}", ranks=[0])
     for name, param in model.named_parameters():
-        logger.info(f"{name} : shape {param.shape}, device {param.data.device}", ranks=[0])
-    exit(0)
+        logger.info(f"{name} : shape {param.shape}, spec: {param.spec.dist_spec}", ranks=[0])
+
     optim_cls = gpc.config.optimizer.pop('type')
-    optimizer = optim_cls(model.parameters(), lr=args.learning_rate)
+    optimizer = optim_cls([{
+        "params": model.module.sparse_modules.parameters(),
+        "lr": args.learning_rate
+    }, {
+        "params": model.module.dense_modules.parameters(),
+        "lr": args.learning_rate * gpc.get_world_size(ParallelMode.PARALLEL_1D)
+    }])
     criterion = torch.nn.BCEWithLogitsLoss()
 
     # Sanity Check & Time inspection
@@ -339,27 +351,29 @@ def main():
 
         data_iter = iter(train_dataloader)
 
-        for i in range(3):
+        for i in range(5):
             batch = next(data_iter)
-            optimizer.zero_grad()
             with get_time_elapsed(logger, f"{i}-th data movement"):
                 dense_features, sparse_features, labels = put_data_to_device(batch, args.use_cpu)
+
+            logger.info(f"rank: {gpc.get_local_rank(ParallelMode.PARALLEL_1D)}, {i}-th iter "
+                        f"sparse: {sparse_features.values()[:10].tolist()}")
 
             with get_time_elapsed(logger, f"{i}-th forward pass"):
                 logits = model(dense_features, sparse_features).squeeze()
 
             loss = criterion(logits, labels.float())
             logger.info(f"{i}-th loss: {loss}")
-
+            optimizer.zero_grad()
             with get_time_elapsed(logger, f"{i}-th backward pass"):
-                loss.backward()
+                model.backward(loss)
 
             with get_time_elapsed(logger, f"{i}-th optimization"):
                 optimizer.step()
-
+        gpc.destroy()
         exit(0)
 
-    train_val_test(args, engine, train_dataloader, val_dataloader, test_dataloader)
+    train_val_test(args, model, criterion, optimizer, train_dataloader, val_dataloader, test_dataloader)
 
 
 if __name__ == '__main__':
