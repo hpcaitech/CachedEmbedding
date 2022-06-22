@@ -1,6 +1,6 @@
 import torch
 
-from .. import DISTMGR as dist_manager
+from recsys import DISTMGR as dist_manager
 
 
 def _reduce(x, parallel_mode):

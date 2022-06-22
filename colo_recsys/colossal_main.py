@@ -25,9 +25,9 @@ from colossalai.nn.optimizer.colossalai_optimizer import ColossalaiOptimizer
 from colossalai.nn.parallel import ColoDDP
 from colossalai.nn.parallel.layers import init_colo_module
 
-from data.colossal_dataloader import get_dataloader
-from utils import TrainValTestResults, trace_handler, get_mem_info
-from models.colossal_dlrm import DLRM, reshape_spare_features
+from colo_recsys.datasets.colossal_dataloader import get_dataloader
+from colo_recsys.utils import TrainValTestResults, trace_handler, get_mem_info
+from colo_recsys.models.colossal_dlrm import HybridParallelDLRM, reshape_spare_features
 
 
 def parse_args():
@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument('--profile_dir', type=str, default='log/debug')
 
     # ColossalAI config
-    parser.add_argument('--config_path', default='baselines/colossal_config.py', type=str)
+    parser.add_argument('--config_path', default='colo_recsys/colossal_config.py', type=str)
 
     # Dataset
     parser.add_argument("--kaggle", action='store_true')
@@ -150,7 +150,7 @@ def parse_args():
     args = parser.parse_args()
 
     if args.kaggle:
-        from dlrm_main import NUM_EMBEDDINGS_PER_FEATURE
+        from baselines.dlrm_main import NUM_EMBEDDINGS_PER_FEATURE
         global TOTAL_TRAINING_SAMPLES
         TOTAL_TRAINING_SAMPLES = 45840617
         setattr(args, 'num_embeddings_per_feature', NUM_EMBEDDINGS_PER_FEATURE)
@@ -161,12 +161,16 @@ def parse_args():
 
 def put_data_to_device(batch, use_cpu):
     device = get_current_device()
-    dense_feature, labels = batch.dense_features.to(device), batch.labels.to(device)
+    rank = gpc.get_local_rank(ParallelMode.PARALLEL_1D)
+    world_size = gpc.get_world_size(ParallelMode.PARALLEL_1D)
+
+    dense = torch.tensor_split(batch.dense_features.to(device), world_size, 0)[rank]
+    labels = torch.tensor_split(batch.labels.to(device), world_size, 0)[rank]
     if use_cpu:
         sparse_features = reshape_spare_features(batch.sparse_features)
     else:
         sparse_features = reshape_spare_features(batch.sparse_features.to(device))
-    return dense_feature, sparse_features, labels
+    return dense, sparse_features, labels
 
 
 def _train(
@@ -289,9 +293,9 @@ def main():
     colossalai.launch_from_torch(config=args.config_path, verbose=False)
 
     logger = colossalai.logging.get_dist_logger()
-    logger.info(f"launch rank {gpc.get_global_rank()}, Done, "
-                f"DP size: {gpc.get_world_size(ParallelMode.DATA)}, "
-                f"MP size: {gpc.get_world_size(ParallelMode.MODEL)}")
+    logger.info(f"launch rank {gpc.get_global_rank()}, "
+                f"DP size: {gpc.data_parallel_size}, "
+                f"TP size: {gpc.tensor_parallel_size}")
 
     train_dataloader = get_dataloader(args, 'train')
     val_dataloader = get_dataloader(args, "val")
@@ -304,38 +308,30 @@ def main():
 
     device = get_current_device()
     with ColoInitContext(device=device):
-        model = DLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
-                     len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
-                     list(map(int, args.over_arch_layer_sizes.split(","))))
-        # if not args.use_cpu:
-        #     model.sparse_arch.offsets = model.sparse_arch.offsets.to(device)
+        model = HybridParallelDLRM(args.num_embeddings_per_feature, args.embedding_dim, len(DEFAULT_CAT_NAMES),
+                                   len(DEFAULT_INT_NAMES), list(map(int, args.dense_arch_layer_sizes.split(","))),
+                                   list(map(int, args.over_arch_layer_sizes.split(","))))
     logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
 
-    real_model = model
-    if gpc.data_parallel_size > 1:
-        model = ColoDDP(model)
-        real_model = model.module
-
-    init_colo_module(real_model.sparse_arch, ParallelAction(ComputePattern.TP1D), recursive=True, mode='row')
+    init_colo_module(model.sparse_modules, ParallelAction(ComputePattern.TP1D, False), recursive=True, mode='col')
 
     if args.use_cpu:
-        real_model.sparse_arch.to('cpu')
+        model.sparse_modules.to('cpu')
         if gpc.tensor_parallel_size > 1:
             gloo_group_tp = gpc.get_cpu_group(ParallelMode.PARALLEL_1D)
-            real_model.sparse_arch.weight.spec.dist_spec.process_group = gloo_group_tp
+            model.sparse_modules.weight.spec.dist_spec.process_group = gloo_group_tp
 
     logger.info(f"{get_mem_info('After colossalai init:  ')}", ranks=[0])
-    for name, param in real_model.named_parameters():
+    for name, param in model.named_parameters():
         logger.info(f"{name} : shape {param.shape}, device {param.data.device}", ranks=[0])
 
-    # TODO: check ColoOptimizer
-    optimizer = ColossalaiOptimizer(optim=torch.optim.SGD(model.parameters(), lr=args.learning_rate))
+    optim_cls = gpc.config.optimizer.pop('type')
+    optimizer = optim_cls(model.parameters(), lr=args.learning_rate)
     criterion = torch.nn.BCEWithLogitsLoss()
-    engine = Engine(model, optimizer, criterion)
 
     # Sanity Check & Time inspection
     if gpc.config.inspect_time:
-        from utils import get_time_elapsed
+        from colo_recsys.utils.utils import get_time_elapsed
 
         data_iter = iter(train_dataloader)
 

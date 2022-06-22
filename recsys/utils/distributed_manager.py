@@ -2,7 +2,7 @@ from enum import Enum
 import random
 import numpy as np
 import torch
-from recsys.utils.singleton_meta import SingletonMeta
+from .singleton_meta import SingletonMeta
 
 
 class ParallelMode(Enum):

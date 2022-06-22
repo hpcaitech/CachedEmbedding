@@ -11,11 +11,13 @@ from colossalai.context.parallel_mode import ParallelMode
 
 from recsys import DISTMGR
 
+
 def get_mem_info(prefix=''):
     return f'{prefix}GPU memory usage: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, ' \
            f'CPU memory usage: {psutil.Process().memory_info().rss / 1024**3:.2f} GB'
 
-def count_parameters(model,prefix=''): 
+
+def count_parameters(model, prefix=''):
     cnt = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return f'{prefix}: {cnt}'
 
@@ -35,7 +37,7 @@ def trace_handler(p):
 @contextmanager
 def compute_throughput(batch_size) -> float:
     start = perf_counter()
-    yield lambda : batch_size / ((perf_counter() - start)*1000)
+    yield lambda: batch_size / ((perf_counter() - start) * 1000)
 
 
 @contextmanager
@@ -69,9 +71,10 @@ class TrainValTestResults:
     val_aurocs: List[float] = field(default_factory=list)
     test_accuracy: Optional[float] = None
     test_auroc: Optional[float] = None
-    
+
 
 class EarlyStopper:
+
     def __init__(self, patience=7, verbose=False, delta=0, trace_func=print):
         self.patience = patience
         self.verbose = verbose
