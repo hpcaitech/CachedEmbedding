@@ -101,7 +101,7 @@ class FusedSparseModules(SparseArch):
         output_ = self.embed(x + self.offsets)
         if self.output_device_type == "cuda" and self.offsets.device.type == "cpu":
             output_ = output_.cuda()
-            output_.spec.dist_spec = self.process_group
+            output_.spec.dist_spec.process_group = self.process_group
         output = output_.convert_to_dist_spec(distspec.shard(self.process_group, [0], [self.world_size]))
         return output
 

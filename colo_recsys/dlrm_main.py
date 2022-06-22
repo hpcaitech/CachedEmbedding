@@ -308,7 +308,7 @@ def main():
         ranks=[0])
 
     device = get_current_device()
-    embed_ouptut_device = 'cuda' if args.use_cpu is None else 'cpu'
+    embed_ouptut_device = 'cuda' if args.use_cpu else None
     with ColoInitContext(device=device):
         model = HybridParallelDLRM(args.num_embeddings_per_feature,
                                    args.embedding_dim,
