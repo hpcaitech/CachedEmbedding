@@ -50,10 +50,13 @@ class Net(torch.nn.Module):
 
         x = self.embed(x)
         if self.use_cpu:
+            # print(f"before .cuda: {x.spec.dist_spec}")
             x = x.cuda()
-        print(f"Before: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
+            x.spec.dist_spec.process_group = group
+        #     print(f"after .cuda: {x.spec.dist_spec}")
+        # print(f"Before: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
         x = x.convert_to_dist_spec(distspec.shard(group, [0], [world_size]))
-        print(f"After: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
+        # print(f"After: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
         x = self.proj(x)
         return x
 
@@ -105,7 +108,16 @@ def run_hybrid_device(use_cpu):
     group = gpc.get_group(ParallelMode.PARALLEL_1D)
     model = ColoDDP(model, group)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+    if rank == 0:
+        for name, param in model.named_parameters():
+            print(f"Name: {name}, shape: {param.shape}, spec: {param.spec.dist_spec}")
+    optimizer = torch.optim.SGD([{
+        "params": model.module.embed.parameters(),
+        "lr": 1e-3
+    }, {
+        "params": model.module.proj.parameters(),
+        "lr": 1e-3 * world_size
+    }])
     print(f'Rank: {rank}, new embedding size: {model.module.embed.weight.size()} | '
           f'new device: {model.module.embed.weight.device}')
     assert model.module.embed.weight.size(1) == org_size // gpc.get_world_size(ParallelMode.PARALLEL_1D)
@@ -152,6 +164,8 @@ def run_hybrid_device(use_cpu):
     if rank == 0:
         embed_weight = torch.cat(embed_weight_list, dim=1).cuda()
         assert torch.allclose(embed_weight, ref_model.embed.weight.detach())
+        assert torch.allclose(model.module.proj.weight.detach(), ref_model.proj.weight.detach())
+        assert torch.allclose(model.module.proj.bias.detach(), ref_model.proj.bias.detach())
 
 
 def run_dist(rank, world_size, port, use_cpu):
