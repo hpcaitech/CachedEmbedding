@@ -19,7 +19,7 @@ from colossalai.context.parallel_mode import ParallelMode
 from colossalai.core import global_context as gpc
 from colossalai.utils.model.colo_init_context import ColoInitContext
 from colossalai.utils.cuda import get_current_device
-from colossalai.tensor import ParallelAction, ComputePattern
+from colossalai.tensor import ParallelAction, ComputePattern, distspec, DistSpecManager, TensorSpec
 from colossalai.nn.parallel import ColoDDP
 from colossalai.nn.parallel.layers import init_colo_module
 
@@ -307,6 +307,8 @@ def main():
         f"test batches: {len(test_dataloader)}",
         ranks=[0])
 
+    world_size = gpc.get_world_size(ParallelMode.PARALLEL_1D)
+    group = gpc.get_group(ParallelMode.PARALLEL_1D)
     device = get_current_device()
     embed_ouptut_device = 'cuda' if args.use_cpu else None
     with ColoInitContext(device=device):
@@ -319,7 +321,10 @@ def main():
                                    output_device_type=embed_ouptut_device)
     logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
 
-    init_colo_module(model.sparse_modules, ParallelAction(ComputePattern.TP1D, False), recursive=True, mode='col')
+    # init_colo_module(model.sparse_modules, ParallelAction(ComputePattern.TP1D, False), recursive=True, mode='col')
+    spec = TensorSpec(distspec.shard(group, [-1], [world_size]), ParallelAction(ComputePattern.TP1D, gather_out=False))
+    with DistSpecManager.no_grad():
+        model.sparse_modules.embed.weight.set_spec(spec)
     if args.use_cpu:
         model.sparse_modules.to('cpu')
         if gpc.tensor_parallel_size > 1:
@@ -328,7 +333,6 @@ def main():
 
     ignore_param = [v for k, v in model.named_parameters() if 'embed' in k]
     ColoDDP.set_params_to_ignore(ignore_param)
-    group = gpc.get_group(ParallelMode.PARALLEL_1D)
     model = ColoDDP(model, group)
 
     logger.info(f"{get_mem_info('After colossalai init:  ')}", ranks=[0])

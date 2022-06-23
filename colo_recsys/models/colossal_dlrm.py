@@ -82,7 +82,7 @@ class DLRM(nn.Module):
         return logits
 
 
-class FusedSparseModules(SparseArch):
+class FusedEmbeddingCollection(SparseArch):
 
     def __init__(self,
                  num_embeddings_per_feature,
@@ -90,7 +90,7 @@ class FusedSparseModules(SparseArch):
                  parallel_mode=ParallelMode.PARALLEL_1D,
                  *args,
                  **kwargs):
-        super(FusedSparseModules, self).__init__(num_embeddings_per_feature, embedding_dim, *args, **kwargs)
+        super(FusedEmbeddingCollection, self).__init__(num_embeddings_per_feature, embedding_dim, *args, **kwargs)
 
         self.parallel_mode = parallel_mode
         self.world_size = gpc.get_world_size(parallel_mode)
@@ -104,6 +104,56 @@ class FusedSparseModules(SparseArch):
             output_.spec.dist_spec.process_group = self.process_group
         output = output_.convert_to_dist_spec(distspec.shard(self.process_group, [0], [self.world_size]))
         return output
+
+
+class FusedSparseModules(nn.Module):
+
+    def __init__(
+        self,
+        num_embeddings_per_feature,
+        embedding_dim,
+        reduction_mode='sum',
+        parallel_mode=ParallelMode.PARALLEL_1D,
+        sparse=True,
+        output_device_type=None,
+    ):
+        super(FusedSparseModules, self).__init__()
+        self.embed = nn.EmbeddingBag(sum(num_embeddings_per_feature),
+                                     embedding_dim,
+                                     sparse=sparse,
+                                     mode=reduction_mode,
+                                     include_last_offset=True)
+
+        offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
+        self.register_buffer('offsets', torch.from_numpy(offsets).requires_grad_(False), False)
+
+        self.output_device = output_device_type
+        self.group = gpc.get_group(parallel_mode)
+        self.world_size = gpc.get_world_size(parallel_mode)
+
+    def forward(self, sparse_features):
+        keys = sparse_features.keys()
+        assert len(keys) == len(self.offsets), f"keys len: {len(keys)}, offsets len: {len(self.offsets)}"
+
+        sparse_dict = sparse_features.to_dict()
+        flattened_sparse_features = torch.cat(
+            [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
+        batch_offsets = sparse_features.offsets()
+
+        batch_size = len(sparse_features.lengths()) // len(keys)
+        flattened_sparse_features = self.embed(flattened_sparse_features, batch_offsets)
+
+        if self.output_device == 'cuda' and self.offsets.device.type == 'cpu':
+            flattened_sparse_features = flattened_sparse_features.cuda()
+            flattened_sparse_features.spec.dist_spec.process_group = self.group
+        # [batch size * feature size, hidden size / world size]
+        # it must convert to [batch size, feature size, hidden size / world size] before all to all
+        flattened_sparse_features = flattened_sparse_features.view(batch_size, len(keys), -1)
+        # print(f"before shape: {flattened_sparse_features.shape}, spec: {flattened_sparse_features.spec.dist_spec}")
+        flattened_sparse_features = flattened_sparse_features.convert_to_dist_spec(
+            distspec.shard(self.group, [0], [self.world_size]))
+        # print(f"after shape: {flattened_sparse_features.shape}, spec: {flattened_sparse_features.spec.dist_spec}")
+        return flattened_sparse_features
 
 
 class FusedDenseModules(nn.Module):
