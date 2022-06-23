@@ -261,7 +261,7 @@ class FusedHybridParallelEmbeddingBag(ColumnParallelEmbeddingBag):
 
         self.fused_op = fused_op
 
-    def forward(self, input_, offsets=None, per_sample_weights=None):
+    def forward(self, input_, offsets=None, per_sample_weights=None, send_shape=None, scatter_dim=0, gather_dim=-1):
         output_parallel = F.embedding_bag(input_, self.weight, offsets, self.max_norm, self.norm_type,
                                           self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
                                           self.include_last_offset, self.padding_idx)
@@ -269,11 +269,17 @@ class FusedHybridParallelEmbeddingBag(ColumnParallelEmbeddingBag):
         if self.output_device_type == 'cuda' and output_parallel.device.type == 'cpu':
             output_parallel = output_parallel.cuda()
 
+        if send_shape is not None:
+            output_parallel = output_parallel.view(*send_shape)
+
         if self.fused_op == 'all_to_all':
             # TODO: check situations when the scatter dim is indivisible by world size
-            outputs = dual_all_to_all(output_parallel, self.parallel_mode, scatter_dim=0, gather_dim=1)
+            outputs = dual_all_to_all(output_parallel,
+                                      self.parallel_mode,
+                                      scatter_dim=scatter_dim,
+                                      gather_dim=gather_dim)
         else:
-            outputs = self.comm_func(output_parallel, self.parallel_mode, dim=1)
-            outputs = split_forward_gather_backward(outputs, self.parallel_mode, dim=0)
+            outputs = self.comm_func(output_parallel, self.parallel_mode, dim=gather_dim)
+            outputs = split_forward_gather_backward(outputs, self.parallel_mode, dim=scatter_dim)
 
         return outputs

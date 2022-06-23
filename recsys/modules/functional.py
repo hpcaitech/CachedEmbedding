@@ -131,7 +131,7 @@ class _SplitForwardGatherBackward(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad):
-        return _gather(grad, ctx.parallel_mode, ctx.dim), None, None
+        return _gather(grad.contiguous(), ctx.parallel_mode, ctx.dim), None, None
 
 
 def split_forward_gather_backward(x, parallel_mode, dim):
