@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
-import colossalai.nn as col_nn
 
 from recsys.modules.embeddings import QREmbedding
 

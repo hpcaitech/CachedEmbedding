@@ -6,13 +6,16 @@ import numpy as np
 
 
 class LambdaLayer(nn.Module):
+    
     def __init__(self, lambd: Callable):
         super(LambdaLayer, self).__init__()
         self.lambd = lambd
     def forward(self, x):
         return self.lambd(x)
 
+
 class MixDimensionEmbeddingBag(nn.Module):
+
     def __init__(self, 
                  blocks_vocab: List[torch.Tensor], 
                  field_dims: List[int], 

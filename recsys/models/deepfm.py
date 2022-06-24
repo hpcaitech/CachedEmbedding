@@ -5,7 +5,9 @@ from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
 from modules.embeddings import QREmbedding
 
+
 class FeatureEmbedding(nn.Module):
+    
     def __init__(self, field_dims, emb_dim, enable_qr):
         super().__init__()
         if enable_qr:
@@ -23,7 +25,9 @@ class FeatureEmbedding(nn.Module):
     def weight(self):
         return self.embedding.weight
 
+
 class FeatureLinear(nn.Module):
+
     def __init__(self, field_dims, enable_qr, output_dim=1):
         super().__init__()
         # May change to use embeddingbag(mode='sum')
@@ -44,7 +48,9 @@ class FeatureLinear(nn.Module):
     def weight(self):
         return self.fc.weight
 
+
 class FactorizationMachine(nn.Module):
+
     def __init__(self, reduce_sum=True):
         super().__init__()
         self.reduce_sum = reduce_sum
@@ -56,7 +62,9 @@ class FactorizationMachine(nn.Module):
 
         return 0.5 * ix
 
+
 class MultiLayerPerceptron(nn.Module):
+
     def __init__(self, emb_dims, dropout, output_layer=True):
         super().__init__()
         layers = []
@@ -80,7 +88,9 @@ class MultiLayerPerceptron(nn.Module):
     def weight(self):
         return [layer.weight for layer in self.mlp]
         
+        
 class DeepFactorizationMachine(nn.Module):
+    
     def __init__(self, field_dims, embed_dim, mlp_dims, dropout, enable_qr):
         super().__init__()
         self.enable_qr = enable_qr
@@ -103,4 +113,3 @@ class DeepFactorizationMachine(nn.Module):
         else:
             x = self.linear(x).squeeze(1) + torch.sum(self.fm(embed_x),dim=1) + torch.sum(self.mlp(embed_x).squeeze(-1),dim=1)
         return torch.sigmoid(x)
-
