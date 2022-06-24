@@ -1,7 +1,7 @@
 from colossalai.utils import free_port, get_current_device
 from colossalai.utils.model.colo_init_context import ColoInitContext
 from colossalai.testing import rerun_if_address_is_in_use
-from colossalai.tensor import TensorSpec, ComputePattern, ParallelAction
+from colossalai.tensor import TensorSpec, ComputePattern, ComputeSpec
 
 from functools import partial
 from colossalai.core import global_context as gpc
@@ -52,7 +52,7 @@ class Net(torch.nn.Module):
         if self.use_cpu:
             # print(f"before .cuda: {x.spec.dist_spec}")
             x = x.cuda()
-            x.spec.dist_spec.process_group = group
+            x.tensor_spec.dist_spec.process_group = group
         #     print(f"after .cuda: {x.spec.dist_spec}")
         # print(f"Before: {x.shape}, {x.device}, dist spec: {x.spec.dist_spec}")
         x = x.convert_to_dist_spec(distspec.shard(group, [0], [world_size]))
@@ -90,7 +90,8 @@ def run_hybrid_device(use_cpu):
 
     org_size = model.embed.weight.size(1)
     print(f'Rank: {rank}, embedding size: {model.embed.weight.size()} | device: {model.embed.weight.device}')
-    parallel_action = ParallelAction(ComputePattern.TP1D, False)
+    parallel_action = ComputeSpec(ComputePattern.TP1D)
+    parallel_action.output_replicate = False
     init_colo_module(model.embed, parallel_action, recursive=True, mode='col')
 
     # use cpu gloo to handle embedding
@@ -98,7 +99,7 @@ def run_hybrid_device(use_cpu):
         model.embed.to('cpu')
         if gpc.tensor_parallel_size > 1:
             gloo_group_tp = gpc.get_cpu_group(ParallelMode.PARALLEL_1D)
-            model.embed.weight.spec.dist_spec.process_group = gloo_group_tp
+            model.embed.weight.tensor_spec.dist_spec.process_group = gloo_group_tp
 
     ignore_params = []
     for k, v in model.named_parameters():
@@ -110,7 +111,7 @@ def run_hybrid_device(use_cpu):
 
     if rank == 0:
         for name, param in model.named_parameters():
-            print(f"Name: {name}, shape: {param.shape}, spec: {param.spec.dist_spec}")
+            print(f"Name: {name}, shape: {param.shape}, spec: {param.tensor_spec.dist_spec}")
     optimizer = torch.optim.SGD([{
         "params": model.module.embed.parameters(),
         "lr": 1e-3

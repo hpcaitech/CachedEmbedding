@@ -101,8 +101,10 @@ class FusedEmbeddingCollection(SparseArch):
         output_ = self.embed(x + self.offsets)
         if self.output_device_type == "cuda" and self.offsets.device.type == "cpu":
             output_ = output_.cuda()
-            output_.spec.dist_spec.process_group = self.process_group
+            output_.tensor_spec.dist_spec.process_group = self.process_group
+        # print(f"Before all to all, shape: {output_.shape}, spec: {output_.tensor_spec.dist_spec}")
         output = output_.convert_to_dist_spec(distspec.shard(self.process_group, [0], [self.world_size]))
+        # print(f"after all to all, shape: {output.shape}, spec: {output.tensor_spec.dist_spec}")
         return output
 
 
@@ -188,11 +190,11 @@ class HybridParallelDLRM(nn.Module):
                  output_device_type=None):
         super(HybridParallelDLRM, self).__init__()
 
-        self.sparse_modules = FusedSparseModules(num_embeddings_per_feature,
-                                                 embedding_dim,
-                                                 parallel_mode=parallel_mode,
-                                                 sparse=sparse,
-                                                 output_device_type=output_device_type)
+        self.sparse_modules = FusedEmbeddingCollection(num_embeddings_per_feature,
+                                                       embedding_dim,
+                                                       parallel_mode=parallel_mode,
+                                                       sparse=sparse,
+                                                       output_device_type=output_device_type)
         self.dense_modules = FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                dense_arch_layer_sizes, over_arch_layer_sizes)
 

@@ -19,7 +19,7 @@ from colossalai.context.parallel_mode import ParallelMode
 from colossalai.core import global_context as gpc
 from colossalai.utils.model.colo_init_context import ColoInitContext
 from colossalai.utils.cuda import get_current_device
-from colossalai.tensor import ParallelAction, ComputePattern, distspec, DistSpecManager, TensorSpec
+from colossalai.tensor import ComputeSpec, ComputePattern, distspec, DistSpecManager, TensorSpec
 from colossalai.nn.parallel import ColoDDP
 from colossalai.nn.parallel.layers import init_colo_module
 
@@ -320,16 +320,17 @@ def main():
                                    list(map(int, args.over_arch_layer_sizes.split(","))),
                                    output_device_type=embed_ouptut_device)
     logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
-
-    # init_colo_module(model.sparse_modules, ParallelAction(ComputePattern.TP1D, False), recursive=True, mode='col')
-    spec = TensorSpec(distspec.shard(group, [-1], [world_size]), ParallelAction(ComputePattern.TP1D, gather_out=False))
+    compute_spec = ComputeSpec(ComputePattern.TP1D)
+    compute_spec.output_replicate = False
+    # init_colo_module(model.sparse_modules, compute_spec, recursive=True, mode='col')
+    spec = TensorSpec(distspec.shard(group, [-1], [world_size]), compute_spec)
     with DistSpecManager.no_grad():
-        model.sparse_modules.embed.weight.set_spec(spec)
+        model.sparse_modules.embed.weight.set_tensor_spec(spec)
     if args.use_cpu:
         model.sparse_modules.to('cpu')
         if gpc.tensor_parallel_size > 1:
             gloo_group_tp = gpc.get_cpu_group(ParallelMode.PARALLEL_1D)
-            model.sparse_modules.embed.weight.spec.dist_spec.process_group = gloo_group_tp
+            model.sparse_modules.embed.weight.tensor_spec.dist_spec.process_group = gloo_group_tp
 
     ignore_param = [v for k, v in model.named_parameters() if 'embed' in k]
     ColoDDP.set_params_to_ignore(ignore_param)
@@ -337,7 +338,7 @@ def main():
 
     logger.info(f"{get_mem_info('After colossalai init:  ')}", ranks=[0])
     for name, param in model.named_parameters():
-        logger.info(f"{name} : shape {param.shape}, spec: {param.spec.dist_spec}", ranks=[0])
+        logger.info(f"{name} : shape {param.shape}, spec: {param.tensor_spec.dist_spec}", ranks=[0])
 
     optim_cls = gpc.config.optimizer.pop('type')
     optimizer = optim_cls([{
