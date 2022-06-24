@@ -13,6 +13,7 @@ class LambdaLayer(nn.Module):
     def forward(self, x):
         return self.lambd(x)
 
+
 class MixDimensionEmbeddingBag(nn.Module):
 
     def __init__(self, 

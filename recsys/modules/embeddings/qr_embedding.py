@@ -12,7 +12,7 @@ class QREmbedding(nn.Module):
         self.q_embeddings = nn.Embedding(num_buckets, embedding_dim,)
         self.r_embeddings = nn.Embedding(num_buckets, embedding_dim,)
         self.verbose = verbose
-        # self._init_weights()
+        self._init_weights()
 
     def forward(self, x, offsets=None):
         if offsets is not None:

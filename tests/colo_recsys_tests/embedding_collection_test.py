@@ -65,4 +65,4 @@ def test_embedding(world_size, use_cpu):
 
 
 if __name__ == '__main__':
-    test_embedding(4)
+    test_embedding(4, False)

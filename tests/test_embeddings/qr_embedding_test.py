@@ -5,10 +5,9 @@ import torch
 import torch.multiprocessing as mp
 
 from colossalai.testing import rerun_if_address_is_in_use
-from colossalai.utils import free_port
+from colossalai.utils import free_port, get_current_device
 from recsys import DISTMGR, launch
 from recsys import disable_existing_loggers
-from recsys.utils import get_current_device
 from recsys.modules.embeddings import ParallelQREmbedding, ColumnParallelEmbeddingBag
 
 from common import EMBEDDING_DIM, FIELD_DIMS, BATCH_SIZE, check_equal
