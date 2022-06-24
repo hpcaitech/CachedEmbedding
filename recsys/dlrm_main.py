@@ -278,6 +278,7 @@ def main():
     dist_manager.new_process_group(1, ParallelMode.DATA)
 
     dist_logger.info(f"launch rank: {dist_manager.get_rank()}, {dist_manager.get_distributed_info()}")
+    dist_logger.info(f"config: {args}", ranks=[0])
 
     train_dataloader = criteo.get_dataloader(args, 'train', ParallelMode.DATA)
     val_dataloader = criteo.get_dataloader(args, "val", ParallelMode.DATA)
