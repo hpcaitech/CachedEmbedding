@@ -8,6 +8,11 @@ from .base_dataiter import BaseStreamDataIter
 
 
 class CudaStreamDataIter(BaseStreamDataIter):
+    """
+    A data iterator that supports batch prefetching with the help of cuda stream. 
+    Be aware that it now only supports batch loading on GPU.
+    Also, it can only support dataset in the format of (input, target/label) 
+    """
     
     def __init__(self, loader: DataLoader):
         super().__init__(loader)
