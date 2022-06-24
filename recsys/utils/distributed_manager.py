@@ -94,6 +94,16 @@ class DistributedManager(metaclass=SingletonMeta):
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
+    
+    def destroy(self):
+        """Destroys the current distributed parallel environment.
+        """
+        for mode, group in self._groups.items():
+            if mode is not ParallelMode.DEFAULT:
+                torch.distributed.destroy_process_group(group)
+        # destroy global process group
+        torch.distributed.destroy_process_group()
+        self._groups.clear()
 
 
 DISTMGR = DistributedManager()

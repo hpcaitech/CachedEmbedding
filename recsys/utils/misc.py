@@ -25,11 +25,6 @@ def get_time_elapsed(logger, repr: str):
     logger.info(f"Time elapsed for {repr}: {elapsed:.4f}s", ranks=[0])
 
 
-def synchronize():
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-
-
 class Timer:
     """A timer object which helps to log the execution times, and provides different tools to assess the times.
     """
