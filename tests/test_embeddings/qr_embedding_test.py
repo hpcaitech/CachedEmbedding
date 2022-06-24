@@ -81,7 +81,10 @@ def check_qr_embedding():
 def check_layer(rank, world_size, port):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
+    
     check_qr_embedding()
+    
+    DISTMGR.destroy()
     torch.cuda.empty_cache()
 
 
