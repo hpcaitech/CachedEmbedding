@@ -1,5 +1,6 @@
 # This script is mainly inspired by torch.nn.Embedding & https://github.com/NVIDIA/Megatron-LM
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from torch import Tensor
@@ -283,3 +284,37 @@ class FusedHybridParallelEmbeddingBag(ColumnParallelEmbeddingBag):
             outputs = split_forward_gather_backward(outputs, self.parallel_mode, dim=scatter_dim)
 
         return outputs
+
+
+class ParallelQREmbedding(nn.Module):
+    def __init__(self,
+                 embedding_dim: int,
+                 num_buckets: int,
+                 ):
+        super().__init__()
+        self.num_buckets = num_buckets
+        self.q_embeddings = ColumnParallelEmbeddingBag(num_buckets, embedding_dim,)
+        self.r_embeddings = ColumnParallelEmbeddingBag(num_buckets, embedding_dim,)
+
+    def forward(self, x, offsets=None):
+        if offsets is not None:
+            x = x + x.new_tensor(offsets).unsqueeze(0)
+
+        # Get the quotient index.
+        quotient_index = torch.div(x, self.num_buckets, rounding_mode='floor')
+        
+        # Get the reminder index.
+        remainder_index = torch.remainder(x, self.num_buckets)
+        
+        # Lookup the quotient_embedding using the quotient_index.
+        quotient_embedding = self.q_embeddings(quotient_index)
+        
+        # Lookup the remainder_embedding using the remainder_index.
+        remainder_embedding = self.r_embeddings(remainder_index)
+        
+        # Use multiplication as a combiner operation
+        return torch.sum(quotient_embedding * remainder_embedding, dim=1)
+
+    @property
+    def weight(self):
+        return self.q_embeddings.weight + self.r_embeddings.weight

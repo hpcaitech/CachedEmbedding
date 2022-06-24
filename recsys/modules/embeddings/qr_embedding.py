@@ -16,7 +16,7 @@ class QREmbedding(nn.Module):
 
     def forward(self, x, offsets=None):
         if offsets is not None:
-            x = x + x.new_tensor(self.offsets).unsqueeze(0)
+            x = x + x.new_tensor(offsets).unsqueeze(0)
 
         # Get the quotient index.
         if self.verbose:
