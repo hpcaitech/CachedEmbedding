@@ -88,7 +88,7 @@ def check_layer(rank, world_size, port):
     torch.cuda.empty_cache()
 
 
-@pytest.mark.parameterize('world_size', [1, 4])
+@pytest.mark.parametrize('world_size', [1, 4])
 @rerun_if_address_is_in_use()
 def test_layer(world_size):
     run_func = partial(check_layer, world_size=world_size, port=free_port())
