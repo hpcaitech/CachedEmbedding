@@ -14,7 +14,7 @@ from torchvision import transforms, datasets
 import colossalai
 from colossalai.context import ParallelMode, Config
 from colossalai.core import global_context as gpc
-from colossalai.utils import get_dataloader, free_port
+from colossalai.utils import free_port
 from colossalai.testing import rerun_if_address_is_in_use
 from torchvision import transforms
 

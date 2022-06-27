@@ -19,37 +19,30 @@ class CudaStreamDataIter(BaseStreamDataIter):
 
     def _preload(self):
         try:
-            self.next_input, self.next_target = next(self.iter)
+            self.batch_data = next(self.iter)
        
         except StopIteration:
-            self.next_input = None
-            self.next_target = None
+            self.batch_data = None
             self._reset()
             return
 
         with torch.cuda.stream(self.stream):
-            self.next_input = self.next_input.cuda(non_blocking=True)
-            self.next_target = self.next_target.cuda(non_blocking=True)
+            self.batch_data = self.to_cuda(self.batch_data)
 
     def _reset(self):
         self.iter = iter(self.loader)
         self.stream = torch.cuda.Stream()
-
         self._preload()
 
     def __next__(self):
         torch.cuda.current_stream().wait_stream(self.stream)
-        input = self.next_input
-        target = self.next_target
+        batch_data = self.batch_data
         
-        if input is not None:
-            input.record_stream(torch.cuda.current_stream())
-        
-        if target is not None:
-            target.record_stream(torch.cuda.current_stream())
+        if batch_data is not None:
+            batch_data.record_stream(torch.cuda.current_stream())
         
         self._preload()
-        return input, target
+        return batch_data
 
     def __iter__(self):
         return self
