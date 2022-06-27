@@ -39,7 +39,7 @@ class CudaStreamDataIter(BaseStreamDataIter):
         batch_data = self.batch_data
         
         if batch_data is not None:
-            batch_data.record_stream(torch.cuda.current_stream())
+            self.record_stream(batch_data, torch.cuda.current_stream())
         
         self._preload()
         return batch_data
