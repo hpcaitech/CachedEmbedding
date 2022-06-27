@@ -101,6 +101,7 @@ def parse_args():
     parser.add_argument(
         "--seed",
         type=int,
+        default=1024,
         help="Random seed for reproducibility.",
     )
     parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
@@ -195,7 +196,7 @@ def _train(
             with record_function("Forward pass"):
                 logits = model(dense, sparse).squeeze()
             loss = criterion(logits, labels.float())
-            # logger.info(f"it: {it}, loss: {loss.item()}, device: {loss.device}")
+            logger.info(f"it: {it}, loss: {loss.item()}")
             if it == len(data_loader) - 3:
                 logger.info(f"{get_mem_info('After forward:  ')}")
 
@@ -291,7 +292,7 @@ def main():
     args = parse_args()
 
     colossalai.logging.disable_existing_loggers()
-    colossalai.launch_from_torch(config=args.config_path, verbose=False)
+    colossalai.launch_from_torch(config=args.config_path, verbose=False, seed=args.seed)
 
     logger = colossalai.logging.get_dist_logger()
     logger.info(f"[DEBUG] launch rank {gpc.get_global_rank()}, "
@@ -356,19 +357,19 @@ def main():
 
         data_iter = iter(train_dataloader)
 
-        for i in range(5):
+        for i in range(10):
             batch = next(data_iter)
             with get_time_elapsed(logger, f"{i}-th data movement"):
                 dense_features, sparse_features, labels = put_data_to_device(batch, args.use_cpu)
 
-            logger.info(f"rank: {gpc.get_local_rank(ParallelMode.PARALLEL_1D)}, {i}-th iter "
-                        f"sparse: {sparse_features.values()[:10].tolist()}")
+            # logger.info(f"rank: {gpc.get_local_rank(ParallelMode.PARALLEL_1D)}, {i}-th iter "
+            #             f"sparse: {sparse_features.values()[:10].tolist()}")
 
             with get_time_elapsed(logger, f"{i}-th forward pass"):
                 logits = model(dense_features, sparse_features).squeeze()
 
             loss = criterion(logits, labels.float())
-            logger.info(f"{i}-th loss: {loss}")
+            logger.info(f"{i}-th loss: {loss}", ranks=[0])
             optimizer.zero_grad()
             with get_time_elapsed(logger, f"{i}-th backward pass"):
                 model.backward(loss)

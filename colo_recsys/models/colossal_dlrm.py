@@ -134,6 +134,7 @@ class FusedSparseModules(nn.Module):
         self.world_size = gpc.get_world_size(parallel_mode)
 
     def forward(self, sparse_features):
+        # format input
         keys = sparse_features.keys()
         assert len(keys) == len(self.offsets), f"keys len: {len(keys)}, offsets len: {len(self.offsets)}"
 
@@ -142,19 +143,26 @@ class FusedSparseModules(nn.Module):
             [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
         batch_offsets = sparse_features.offsets()
 
+        # embedding_bag lookup
         batch_size = len(sparse_features.lengths()) // len(keys)
         flattened_sparse_features = self.embed(flattened_sparse_features, batch_offsets)
 
         if self.output_device == 'cuda' and self.offsets.device.type == 'cpu':
             flattened_sparse_features = flattened_sparse_features.cuda()
             flattened_sparse_features.spec.dist_spec.process_group = self.group
+
+        # comm setup for view & all to all
+        shard_spec = flattened_sparse_features.tensor_spec.dist_spec
         # [batch size * feature size, hidden size / world size]
         # it must convert to [batch size, feature size, hidden size / world size] before all to all
-        flattened_sparse_features = flattened_sparse_features.view(batch_size, len(keys), -1)
-        # print(f"before shape: {flattened_sparse_features.shape}, spec: {flattened_sparse_features.spec.dist_spec}")
+        flattened_sparse_features = flattened_sparse_features.view_base(batch_size, len(keys), -1)
+        flattened_sparse_features.tensor_spec.dist_spec = shard_spec
+
         flattened_sparse_features = flattened_sparse_features.convert_to_dist_spec(
             distspec.shard(self.group, [0], [self.world_size]))
-        # print(f"after shape: {flattened_sparse_features.shape}, spec: {flattened_sparse_features.spec.dist_spec}")
+
+        # print(f"after all to all: {flattened_sparse_features.shape}, "
+        #       f"spec: {flattened_sparse_features.tensor_spec.dist_spec}")
         return flattened_sparse_features
 
 
@@ -190,11 +198,16 @@ class HybridParallelDLRM(nn.Module):
                  output_device_type=None):
         super(HybridParallelDLRM, self).__init__()
 
-        self.sparse_modules = FusedEmbeddingCollection(num_embeddings_per_feature,
-                                                       embedding_dim,
-                                                       parallel_mode=parallel_mode,
-                                                       sparse=sparse,
-                                                       output_device_type=output_device_type)
+        # self.sparse_modules = FusedEmbeddingCollection(num_embeddings_per_feature,
+        #                                                embedding_dim,
+        #                                                parallel_mode=parallel_mode,
+        #                                                sparse=sparse,
+        #                                                output_device_type=output_device_type)
+        self.sparse_modules = FusedSparseModules(num_embeddings_per_feature,
+                                                 embedding_dim,
+                                                 parallel_mode=parallel_mode,
+                                                 sparse=sparse,
+                                                 output_device_type=output_device_type)
         self.dense_modules = FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                dense_arch_layer_sizes, over_arch_layer_sizes)
 
