@@ -19,7 +19,7 @@ from colossalai.context.parallel_mode import ParallelMode
 from colossalai.core import global_context as gpc
 from colossalai.utils.model.colo_init_context import ColoInitContext
 from colossalai.utils.cuda import get_current_device
-from colossalai.tensor import ParallelAction, ComputePattern, distspec, DistSpecManager, TensorSpec
+from colossalai.tensor import ComputeSpec, ComputePattern, distspec, DistSpecManager, TensorSpec
 from colossalai.nn.parallel import ColoDDP
 from colossalai.nn.parallel.layers import init_colo_module
 
@@ -101,6 +101,7 @@ def parse_args():
     parser.add_argument(
         "--seed",
         type=int,
+        default=1024,
         help="Random seed for reproducibility.",
     )
     parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
@@ -195,7 +196,7 @@ def _train(
             with record_function("Forward pass"):
                 logits = model(dense, sparse).squeeze()
             loss = criterion(logits, labels.float())
-            # logger.info(f"it: {it}, loss: {loss.item()}, device: {loss.device}")
+            # logger.info(f"it: {it}, loss: {loss.item()}")
             if it == len(data_loader) - 3:
                 logger.info(f"{get_mem_info('After forward:  ')}")
 
@@ -233,10 +234,9 @@ def _evaluate(model, data_loader, stage, use_cpu=False):
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
             try:
                 dense, sparse, labels = put_data_to_device(next(data_iter), use_cpu)
-                logits = model(dense, sparse).squeeze().detach()
+                logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
 
-                labels = labels.detach()
                 auroc(preds, labels)
                 accuracy(preds, labels)
                 # pred_buffer.extend(preds.tolist())
@@ -291,7 +291,7 @@ def main():
     args = parse_args()
 
     colossalai.logging.disable_existing_loggers()
-    colossalai.launch_from_torch(config=args.config_path, verbose=False)
+    colossalai.launch_from_torch(config=args.config_path, verbose=False, seed=args.seed)
 
     logger = colossalai.logging.get_dist_logger()
     logger.info(f"[DEBUG] launch rank {gpc.get_global_rank()}, "
@@ -320,16 +320,17 @@ def main():
                                    list(map(int, args.over_arch_layer_sizes.split(","))),
                                    output_device_type=embed_ouptut_device)
     logger.info(f"{get_mem_info('After model Init:  ')}", ranks=[0])
-
-    # init_colo_module(model.sparse_modules, ParallelAction(ComputePattern.TP1D, False), recursive=True, mode='col')
-    spec = TensorSpec(distspec.shard(group, [-1], [world_size]), ParallelAction(ComputePattern.TP1D, gather_out=False))
+    compute_spec = ComputeSpec(ComputePattern.TP1D)
+    compute_spec.output_replicate = False
+    # init_colo_module(model.sparse_modules, compute_spec, recursive=True, mode='col')
+    spec = TensorSpec(distspec.shard(group, [-1], [world_size]), compute_spec)
     with DistSpecManager.no_grad():
-        model.sparse_modules.embed.weight.set_spec(spec)
+        model.sparse_modules.embed.weight.set_tensor_spec(spec)
     if args.use_cpu:
         model.sparse_modules.to('cpu')
         if gpc.tensor_parallel_size > 1:
             gloo_group_tp = gpc.get_cpu_group(ParallelMode.PARALLEL_1D)
-            model.sparse_modules.embed.weight.spec.dist_spec.process_group = gloo_group_tp
+            model.sparse_modules.embed.weight.tensor_spec.dist_spec.process_group = gloo_group_tp
 
     ignore_param = [v for k, v in model.named_parameters() if 'embed' in k]
     ColoDDP.set_params_to_ignore(ignore_param)
@@ -337,7 +338,7 @@ def main():
 
     logger.info(f"{get_mem_info('After colossalai init:  ')}", ranks=[0])
     for name, param in model.named_parameters():
-        logger.info(f"{name} : shape {param.shape}, spec: {param.spec.dist_spec}", ranks=[0])
+        logger.info(f"{name} : shape {param.shape}, spec: {param.tensor_spec.dist_spec}", ranks=[0])
 
     optim_cls = gpc.config.optimizer.pop('type')
     optimizer = optim_cls([{
@@ -354,20 +355,23 @@ def main():
         from colo_recsys.utils import get_time_elapsed
 
         data_iter = iter(train_dataloader)
-
-        for i in range(5):
+        auroc = metrics.AUROC(compute_on_step=False).to(get_current_device())
+        for i in range(10):
             batch = next(data_iter)
             with get_time_elapsed(logger, f"{i}-th data movement"):
                 dense_features, sparse_features, labels = put_data_to_device(batch, args.use_cpu)
 
-            logger.info(f"rank: {gpc.get_local_rank(ParallelMode.PARALLEL_1D)}, {i}-th iter "
-                        f"sparse: {sparse_features.values()[:10].tolist()}")
+            # logger.info(f"rank: {gpc.get_local_rank(ParallelMode.PARALLEL_1D)}, {i}-th iter "
+            #             f"sparse: {sparse_features.values()[:10].tolist()}")
 
             with get_time_elapsed(logger, f"{i}-th forward pass"):
                 logits = model(dense_features, sparse_features).squeeze()
 
+            score = auroc(logits.detach().clone(), labels)
+            logger.info(f"{i}-th auroc score: {score.item()}")
+
             loss = criterion(logits, labels.float())
-            logger.info(f"{i}-th loss: {loss}")
+            logger.info(f"{i}-th loss: {loss}", ranks=[0])
             optimizer.zero_grad()
             with get_time_elapsed(logger, f"{i}-th backward pass"):
                 model.backward(loss)
