@@ -11,7 +11,7 @@ from colossalai.utils.model.colo_init_context import ColoInitContext
 from colossalai.context.parallel_mode import ParallelMode
 from colossalai.core import global_context as gpc
 from colossalai.nn.parallel.layers import init_colo_module
-from colossalai.tensor import ParallelAction, ComputePattern, distspec, DistSpecManager, TensorSpec
+from colossalai.tensor import ComputeSpec, ComputePattern, distspec, DistSpecManager, TensorSpec
 
 
 def run_embedding_bag(use_cpu):
@@ -28,10 +28,11 @@ def run_embedding_bag(use_cpu):
                                                       freeze=False,
                                                       sparse=True,
                                                       include_last_offset=True)
-
-    spec = TensorSpec(distspec.shard(group, [-1], [world_size]), ParallelAction(ComputePattern.TP1D, gather_out=False))
+    compute_spec = ComputeSpec(ComputePattern.TP1D)
+    compute_spec.output_replicate = False
+    spec = TensorSpec(distspec.shard(group, [-1], [world_size]), compute_spec)
     with DistSpecManager.no_grad():
-        model.weight.set_spec(spec)
+        model.weight.set_tensor_spec(spec)
 
     # check init weight
     ref_weight = torch.tensor_split(ref_model.weight.detach(), world_size, 1)[rank]
@@ -42,7 +43,7 @@ def run_embedding_bag(use_cpu):
         model_device = torch.device('cpu')
         model.to(model_device)
         gloo_group = gpc.get_cpu_group(ParallelMode.PARALLEL_1D)
-        model.weight.spec.dist_spec.process_group = gloo_group
+        model.weight.tensor_spec.dist_spec.process_group = gloo_group
 
     inputs = torch.randint(low=0, high=num_embed, size=(10,), device=model_device)
     offsets = torch.tensor([0, 4, 4, 8, 10], dtype=torch.long, device=model_device)
@@ -53,27 +54,43 @@ def run_embedding_bag(use_cpu):
     # check results before communication
     if use_cpu:
         model_res = model_res.cuda()
-        model_res.spec.dist_spec.process_group = group
+        model_res.tensor_spec.dist_spec.process_group = group
 
     ref_res_before_comm = torch.tensor_split(ref_res.detach(), world_size, dim=1)[rank]
     assert torch.allclose(model_res.detach(), ref_res_before_comm)
+    shard_spec = model_res.tensor_spec.dist_spec
 
-    print(f"rank: {rank}, model res: {model_res.shape} spec: {model_res.spec}")
-    model_res = model_res.view(4, 1, -1)
-    # check results after communication
-    model_res = model_res.convert_to_dist_spec(distspec.shard(group, [0], [world_size])).squeeze(1)
-    print(f"rank: {rank}, after convert model res: {model_res.shape}, spec: {model_res.spec}")
-    ref_res_after_comm = torch.tensor_split(ref_res.detach(), world_size, dim=0)[rank]
-    assert torch.allclose(model_res.detach(), ref_res_after_comm)
+    if rank == 0:
+        # (4, 2)
+        print(f"rank: {rank}, model res after model fwd: {model_res.shape} spec: {model_res.tensor_spec.dist_spec}")
+
+    model_res = model_res.view_base(4, 1, 2)
+    if rank == 0:
+        # (4, 1, 2)
+        print(f"rank: {rank}, after view model res: {model_res.shape}, spec: {model_res.tensor_spec.dist_spec}")
+    model_res.tensor_spec.dist_spec = shard_spec
+    if rank == 0:
+        # (4, 1, 2)
+        print(f"rank: {rank}, after reset spec model res: {model_res.shape}, spec: {model_res.tensor_spec.dist_spec}")
+
+    # reset shard spec
+    model_res.tensor_spec.dist_spec.dims = [-1]
+    model_res = model_res.to_replicate()
+    if rank == 0:
+        print(f"rank: {rank}, after to_replicate res: {model_res.shape}, spec: {model_res.tensor_spec.dist_spec}")
+        print(f"rank: {rank}, ref_res {ref_res.shape}")
+    assert torch.allclose(model_res.view(4, embed_dim), ref_res), f"{model_res} vs {ref_res}"
 
     full_grad = torch.rand_like(ref_res)
     ref_res.backward(full_grad)
-    grad_in_rank = torch.tensor_split(full_grad.detach(), world_size, 0)[rank]
-    model_res.backward(grad_in_rank)
+    # grad_in_rank = torch.tensor_split(full_grad.detach(), world_size, 0)[rank]
+    model_res.backward(full_grad.unsqueeze(1))
 
     # check grad
     ref_model_grad = torch.tensor_split(ref_model.weight.grad.detach().to_dense(), world_size, 1)[rank]
-    assert torch.allclose(model.weight.grad.detach().to_dense().cuda(), ref_model_grad)
+    a = model.weight.grad.detach().to_dense().cuda()
+    b = ref_model_grad
+    assert torch.allclose(a, b), f"{a} vs {b}"
 
 
 def run_dist(rank, world_size, port, use_cpu):
@@ -106,4 +123,4 @@ def test_embedding_bag(world_size, use_cpu):
 
 
 if __name__ == "__main__":
-    test_embedding_bag(4, True)
+    test_embedding_bag(4, False)

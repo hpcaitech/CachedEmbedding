@@ -96,6 +96,7 @@ def parse_args():
     parser.add_argument(
         "--seed",
         type=int,
+        default=1024,
         help="Random seed for reproducibility.",
     )
     parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
@@ -187,6 +188,7 @@ def _train(model,
                 logits = model(dense, sparse).squeeze()
 
             loss = criterion(logits, labels.float())
+            # dist_logger.info(f"loss: {loss.item()}")
             if it == len(data_loader) - 3:
                 dist_logger.info(f"{get_mem_info('In the last 3-th forward pass:  ')}")
 
@@ -273,7 +275,7 @@ def main():
     args = parse_args()
     disable_existing_loggers()
 
-    launch_from_torch(backend='nccl')
+    launch_from_torch(backend='nccl', seed=args.seed)
     # TODO: remove this group when using hybrid parallelism
     dist_manager.new_process_group(1, ParallelMode.DATA)
 
