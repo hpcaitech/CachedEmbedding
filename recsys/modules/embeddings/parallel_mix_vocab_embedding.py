@@ -47,37 +47,6 @@ class LoadBalanceManager(object):
         group = self.groups[rank]
         assert min(group) >= 0 and max(group) < _input.size(1)
         return _input[:, group]
-    
-
-def balance_hash(field_dims: List[int], num_groups=4, base_emb_dim=128) \
-                                            -> Tuple[List[int], Callable]:
-    assert len(field_dims) >= num_groups, \
-            f"number of input fields {len(field_dims)} must be larger than the world size {num_groups}"
-    dim_indices = np.array(range(len(field_dims)))
-    np.random.shuffle(dim_indices)
-    chunk_size = len(field_dims) // num_groups
-    groups = []
-
-    for i in range(num_groups):
-        if i == num_groups-1:
-            groups.append(dim_indices[i*chunk_size:])
-            break
-        groups.append(dim_indices[i*chunk_size:(i+1)*chunk_size])
-
-    emb_dims = []
-    total_sum = sum(field_dims)
-    for group in groups:
-        div = total_sum / sum([field_dims[x] for x in group])
-        # scale base embedding dim by total_sum/sum
-        emb_dim = int(base_emb_dim / 2**(int(math.log2(div))))
-        emb_dims.append(emb_dim)
-
-    def mapping_rule(groups: List[List[int]], _input: torch.Tensor, rank: int) -> torch.Tensor:
-        group = groups[rank]
-        assert min(group) >= 0 and max(group) < _input.size(1)
-        return _input[:, group]
-
-    return groups, emb_dims, mapping_rule
 
 
 class LambdaLayer(nn.Module):
