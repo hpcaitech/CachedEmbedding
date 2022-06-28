@@ -287,6 +287,7 @@ class FusedHybridParallelEmbeddingBag(ColumnParallelEmbeddingBag):
 
 
 class ParallelQREmbedding(nn.Module):
+
     def __init__(self,
                  embedding_dim: int,
                  num_buckets: int,
