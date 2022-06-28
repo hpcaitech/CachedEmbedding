@@ -166,9 +166,9 @@ class ColumnParallelEmbeddingBag(torch.nn.Module):
                 torch.empty(self.num_embeddings, self.embedding_dim_per_partition, device=device, dtype=dtype))
 
             # TODO: check RNG states
-            init_method(self.weight)
-            if self.padding_idx is not None:
-                with torch.no_grad():
+            with torch.no_grad():
+                init_method(self.weight)
+                if self.padding_idx is not None:
                     self.weight[self.padding_idx].fill_(0)
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim]
@@ -295,8 +295,14 @@ class ParallelQREmbedding(nn.Module):
     ):                 
         super().__init__()
         self.num_buckets = num_buckets
-        self.q_embeddings = ColumnParallelEmbeddingBag(num_buckets, embedding_dim,)
-        self.r_embeddings = ColumnParallelEmbeddingBag(num_buckets, embedding_dim,)
+        self.q_embeddings = ColumnParallelEmbeddingBag(
+            num_buckets,
+            embedding_dim,
+        )
+        self.r_embeddings = ColumnParallelEmbeddingBag(
+            num_buckets,
+            embedding_dim,
+        )
 
     def forward(self, x, offsets=None):
         if offsets is not None:
@@ -304,16 +310,16 @@ class ParallelQREmbedding(nn.Module):
 
         # Get the quotient index.
         quotient_index = torch.div(x, self.num_buckets, rounding_mode='floor')
-        
+
         # Get the reminder index.
         remainder_index = torch.remainder(x, self.num_buckets)
-        
+
         # Lookup the quotient_embedding using the quotient_index.
         quotient_embedding = self.q_embeddings(quotient_index)
-        
+
         # Lookup the remainder_embedding using the remainder_index.
         remainder_embedding = self.r_embeddings(remainder_index)
-        
+
         # Use multiplication as a combiner operation
         return torch.sum(quotient_embedding * remainder_embedding, dim=1)
 
