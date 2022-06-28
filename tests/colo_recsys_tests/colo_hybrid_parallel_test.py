@@ -1,7 +1,7 @@
 from colossalai.utils import free_port, get_current_device
 from colossalai.utils.model.colo_init_context import ColoInitContext
 from colossalai.testing import rerun_if_address_is_in_use
-from colossalai.tensor import TensorSpec, ComputePattern, ComputeSpec
+from colossalai.tensor import TensorSpec, ComputePattern, ComputeSpec, DistSpecManager, distspec
 
 from functools import partial
 from colossalai.core import global_context as gpc
@@ -9,11 +9,11 @@ from colossalai.context import ParallelMode
 
 from colossalai.nn.parallel.layers import init_colo_module
 from colossalai.nn.parallel import ColoDDP
-from colossalai.tensor import distspec
 
 import colossalai
 import torch
 import torch.multiprocessing as mp
+import numpy as np
 import pytest
 
 NUM_EMBEDDINGS = 16
@@ -69,6 +69,153 @@ class RefNet(Net):
     def forward(self, x):
         x = self.embed(x)
         return self.proj(x)
+
+
+class EBNet(torch.nn.Module):
+
+    def __init__(self, num_embed, embed_dim, output_dim, use_cpu):
+        super(EBNet, self).__init__()
+        self.embed = torch.nn.EmbeddingBag(num_embed, embed_dim, sparse=True, include_last_offset=True)
+        self.linear = torch.nn.Linear(embed_dim, output_dim)
+        self.use_cpu = use_cpu
+
+    def forward(self, inputs, offsets, send_shape=None):
+        embeddings = self.embed(inputs, offsets)
+        if send_shape is not None:
+            embeddings = embeddings.view(*send_shape)
+        return self.linear(embeddings)
+
+
+class ParallelEBNet(EBNet):
+
+    def __init__(self, parallel_mode, *args, **kwargs):
+        super(ParallelEBNet, self).__init__(*args, **kwargs)
+        self.parallel_mode = parallel_mode
+        self.group = gpc.get_group(parallel_mode)
+        self.world_size = gpc.get_world_size(parallel_mode)
+
+    def forward(self, inputs, offsets, send_shape=None):
+        embeddings = self.embed(inputs, offsets)
+
+        if self.use_cpu:
+            embeddings = embeddings.cuda()
+            embeddings.tensor_spec.dist_spec.process_group = self.group
+
+        if send_shape is not None:
+            spec = embeddings.tensor_spec.dist_spec
+            embeddings = embeddings.view_base(*send_shape)
+            embeddings.tensor_spec.dist_spec = spec
+
+        embeddings = embeddings.convert_to_dist_spec(distspec.shard(self.group, [0], [self.world_size]))
+        return self.linear(embeddings)
+
+
+def run_hybrid_device_embedding_bag(use_cpu):
+    rank = gpc.get_global_rank()
+    world_size = gpc.get_world_size(ParallelMode.PARALLEL_1D)
+    group = gpc.get_group(ParallelMode.PARALLEL_1D)
+    device = get_current_device()
+
+    batch_size, feature_size = world_size * 2, 3
+
+    with ColoInitContext(device=device):
+        model = ParallelEBNet(ParallelMode.PARALLEL_1D, NUM_EMBEDDINGS, EMBED_DIM, OUTPUT_DIM, use_cpu)
+
+    if rank == 0:
+        ref_model = EBNet(NUM_EMBEDDINGS, EMBED_DIM, OUTPUT_DIM, use_cpu).cuda()
+        with torch.no_grad():
+            ref_model.embed.weight.copy_(model.embed.weight)
+            ref_model.linear.weight.copy_(model.linear.weight)
+            ref_model.linear.bias.copy_(model.linear.bias)
+
+    origin_size = model.embed.weight.shape[1]
+
+    compute_spec = ComputeSpec(ComputePattern.TP1D)
+    compute_spec.output_replicate = False
+    spec = TensorSpec(distspec.shard(group, [-1], [world_size]), compute_spec)
+    with DistSpecManager.no_grad():
+        model.embed.weight.set_tensor_spec(spec)
+
+    if use_cpu:
+        model.embed.to('cpu')
+        if gpc.tensor_parallel_size > 1:
+            gloo_group_tp = gpc.get_cpu_group(ParallelMode.PARALLEL_1D)
+            model.embed.weight.tensor_spec.dist_spec.process_group = gloo_group_tp
+
+    ignore_params = []
+    for k, v in model.named_parameters():
+        if 'embed' in k:
+            ignore_params.append(v)
+    ColoDDP.set_params_to_ignore(ignore_params)
+    model = ColoDDP(model, group)
+
+    # Init check
+    assert model.module.embed.weight.shape[1] == origin_size // world_size
+    embed_weight_list = gather_tensor(model.module.embed.weight.detach())
+    if rank == 0:
+        embed_weight = torch.cat(embed_weight_list, dim=1).cuda()
+        assert torch.allclose(embed_weight, ref_model.embed.weight.detach())
+
+    optimizer = torch.optim.SGD([{
+        "params": model.module.embed.parameters(),
+        "lr": 1e-3
+    }, {
+        "params": model.module.linear.parameters(),
+        "lr": 1e-3 * world_size
+    }])
+    if rank == 0:
+        ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
+
+    for i in range(3):
+        torch.manual_seed(1234 + i * 3)
+        # Synth data
+        indices_in_batch = batch_size * feature_size
+        data = torch.randint(low=0, high=NUM_EMBEDDINGS, size=(indices_in_batch,))
+        offsets = torch.from_numpy(
+            np.array([
+                0, *np.sort(np.random.randint(low=0, high=indices_in_batch, size=(indices_in_batch - 1,))),
+                indices_in_batch
+            ]))
+
+        if not use_cpu:
+            data = data.cuda()
+            offsets = offsets.cuda()
+
+        outputs = model(data, offsets, send_shape=(batch_size, feature_size, -1))
+        assert list(outputs.shape) == [batch_size // world_size, feature_size, OUTPUT_DIM]
+
+        loss = outputs.sum()
+        model.backward(loss)
+
+        outputs_list = gather_tensor(outputs.detach())
+        embed_grad_list = gather_tensor(model.module.embed.weight.grad.detach().to_dense())
+        if rank == 0:
+            ref_out = ref_model(data.cuda(), offsets.cuda(), send_shape=(batch_size, feature_size, -1))
+            global_output = torch.cat(outputs_list, dim=0).cuda()
+            assert torch.allclose(global_output, ref_out.detach())
+
+            ref_loss = ref_out.sum()
+            ref_loss.backward()
+
+            embed_grad = torch.cat(embed_grad_list, dim=1).cuda()
+            assert torch.allclose(ref_model.embed.weight.grad.detach().to_dense(), embed_grad)
+            assert torch.allclose(model.module.linear.weight.grad.detach() * world_size,
+                                  ref_model.linear.weight.grad.detach())
+            assert torch.allclose(model.module.linear.bias.grad.detach() * world_size,
+                                  ref_model.linear.bias.grad.detach())
+
+            ref_optimizer.step()
+            ref_optimizer.zero_grad()
+
+        optimizer.step()
+        optimizer.zero_grad()
+
+        embed_weight_list = gather_tensor(model.module.embed.weight.detach())
+        if rank == 0:
+            embed_weight = torch.cat(embed_weight_list, dim=1).cuda()
+            assert torch.allclose(embed_weight, ref_model.embed.weight.detach())
+            assert torch.allclose(model.module.linear.weight.detach(), ref_model.linear.weight.detach())
+            assert torch.allclose(model.module.linear.bias.detach(), ref_model.linear.bias.detach())
 
 
 def run_hybrid_device(use_cpu):
@@ -179,7 +326,8 @@ def run_dist(rank, world_size, port, use_cpu):
                       port=port,
                       backend='nccl',
                       verbose=False)
-    run_hybrid_device(use_cpu)
+    # run_hybrid_device(use_cpu)
+    run_hybrid_device_embedding_bag(use_cpu)
 
 
 @pytest.mark.parametrize('world_size', [1, 4])
@@ -192,4 +340,4 @@ def test_hybrid_device(world_size, use_cpu):
 
 
 if __name__ == '__main__':
-    test_hybrid_device(4, True)
+    test_hybrid_device(4, False)

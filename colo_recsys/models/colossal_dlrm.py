@@ -120,12 +120,15 @@ class FusedSparseModules(nn.Module):
         output_device_type=None,
     ):
         super(FusedSparseModules, self).__init__()
-        self.embed = nn.EmbeddingBag(sum(num_embeddings_per_feature),
+        tot_embed = sum(num_embeddings_per_feature)
+        self.embed = nn.EmbeddingBag(tot_embed,
                                      embedding_dim,
                                      sparse=sparse,
                                      mode=reduction_mode,
                                      include_last_offset=True)
-
+        bound = np.sqrt(1 / tot_embed)
+        with torch.no_grad():
+            torch.nn.init.uniform_(self.embed.weight, a=-bound, b=bound)
         offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
         self.register_buffer('offsets', torch.from_numpy(offsets).requires_grad_(False), False)
 
@@ -147,15 +150,15 @@ class FusedSparseModules(nn.Module):
         batch_size = len(sparse_features.lengths()) // len(keys)
         flattened_sparse_features = self.embed(flattened_sparse_features, batch_offsets)
 
+        # comm setup for view & all to all
         if self.output_device == 'cuda' and self.offsets.device.type == 'cpu':
             flattened_sparse_features = flattened_sparse_features.cuda()
-            flattened_sparse_features.spec.dist_spec.process_group = self.group
+            flattened_sparse_features.tensor_spec.dist_spec.process_group = self.group
 
-        # comm setup for view & all to all
         shard_spec = flattened_sparse_features.tensor_spec.dist_spec
         # [batch size * feature size, hidden size / world size]
         # it must convert to [batch size, feature size, hidden size / world size] before all to all
-        flattened_sparse_features = flattened_sparse_features.view_base(batch_size, len(keys), -1)
+        flattened_sparse_features = flattened_sparse_features.view_local(batch_size, len(keys), -1)
         flattened_sparse_features.tensor_spec.dist_spec = shard_spec
 
         flattened_sparse_features = flattened_sparse_features.convert_to_dist_spec(

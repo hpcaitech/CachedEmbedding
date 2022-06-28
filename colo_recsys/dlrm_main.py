@@ -196,7 +196,7 @@ def _train(
             with record_function("Forward pass"):
                 logits = model(dense, sparse).squeeze()
             loss = criterion(logits, labels.float())
-            logger.info(f"it: {it}, loss: {loss.item()}")
+            # logger.info(f"it: {it}, loss: {loss.item()}")
             if it == len(data_loader) - 3:
                 logger.info(f"{get_mem_info('After forward:  ')}")
 
@@ -234,10 +234,9 @@ def _evaluate(model, data_loader, stage, use_cpu=False):
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set:"):
             try:
                 dense, sparse, labels = put_data_to_device(next(data_iter), use_cpu)
-                logits = model(dense, sparse).squeeze().detach()
+                logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
 
-                labels = labels.detach()
                 auroc(preds, labels)
                 accuracy(preds, labels)
                 # pred_buffer.extend(preds.tolist())
@@ -356,7 +355,7 @@ def main():
         from colo_recsys.utils import get_time_elapsed
 
         data_iter = iter(train_dataloader)
-
+        auroc = metrics.AUROC(compute_on_step=False).to(get_current_device())
         for i in range(10):
             batch = next(data_iter)
             with get_time_elapsed(logger, f"{i}-th data movement"):
@@ -367,6 +366,9 @@ def main():
 
             with get_time_elapsed(logger, f"{i}-th forward pass"):
                 logits = model(dense_features, sparse_features).squeeze()
+
+            score = auroc(logits.detach().clone(), labels)
+            logger.info(f"{i}-th auroc score: {score.item()}")
 
             loss = criterion(logits, labels.float())
             logger.info(f"{i}-th loss: {loss}", ranks=[0])
