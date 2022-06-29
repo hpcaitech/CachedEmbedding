@@ -36,7 +36,7 @@ from torchrec.distributed.planner import EmbeddingShardingPlanner, Topology
 from torchrec.distributed.types import ShardingEnv, ShardingType
 from torchrec.distributed.planner.types import ParameterConstraints
 
-from torch.profiler import profile, record_function, ProfilerActivity, schedule
+from torch.profiler import profile, record_function, ProfilerActivity, schedule, tensorboard_trace_handler
 
 # OSS import
 try:
@@ -59,7 +59,7 @@ try:
 except ImportError:
     pass
 
-from colo_recsys.utils import TrainValTestResults, get_mem_info, trace_handler
+from colo_recsys.utils import TrainValTestResults, get_mem_info, count_parameters
 
 TRAIN_PIPELINE_STAGES = 3    # Number of stages in TrainPipelineSparseDist.
 NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
@@ -69,6 +69,8 @@ NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="torchrec dlrm example trainer")
     parser.add_argument("--kaggle", action='store_true')
+    parser.add_argument("--profile_dir", default="torchrec_tensorboard_log/debug", type=str)
+    parser.add_argument("--memory_fraction", default=None, type=float)
     parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
     parser.add_argument("--batch_size", type=int, default=32, help="batch size to use for training")
     parser.add_argument(
@@ -216,12 +218,13 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _evaluate(limit_batches: Optional[int],
-              train_pipeline: TrainPipelineSparseDist,
-              iterator: Iterator[Batch],
-              next_iterator: Iterator[Batch],
-              stage: str,
-              prof=None) -> Tuple[float, float]:
+def _evaluate(
+    limit_batches: Optional[int],
+    train_pipeline: TrainPipelineSparseDist,
+    iterator: Iterator[Batch],
+    next_iterator: Iterator[Batch],
+    stage: str,
+) -> Tuple[float, float]:
     """
     Evaluates model. Computes and prints metrics including AUROC and Accuracy. Helper
     function for train_val_test.
@@ -260,14 +263,15 @@ def _evaluate(limit_batches: Optional[int],
     accuracy = metrics.Accuracy(compute_on_step=False).to(device)
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
-    for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
-        try:
-            _loss, logits, labels = train_pipeline.progress(combined_iterator)
-            preds = torch.sigmoid(logits)
-            auroc(preds, labels)
-            accuracy(preds, labels)
-        except StopIteration:
-            break
+    with torch.no_grad():
+        for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
+            try:
+                _loss, logits, labels = train_pipeline.progress(combined_iterator)
+                preds = torch.sigmoid(logits)
+                auroc(preds, labels)
+                accuracy(preds, labels)
+            except StopIteration:
+                break
     auroc_result = auroc.compute().item()
     accuracy_result = accuracy.compute().item()
     if dist.get_rank() == 0:
@@ -276,20 +280,21 @@ def _evaluate(limit_batches: Optional[int],
     return auroc_result, accuracy_result
 
 
-def _train(train_pipeline: TrainPipelineSparseDist,
-           iterator: Iterator[Batch],
-           next_iterator: Iterator[Batch],
-           within_epoch_val_dataloader: DataLoader,
-           epoch: int,
-           epochs: int,
-           change_lr: bool,
-           lr_change_point: float,
-           lr_after_change_point: float,
-           validation_freq_within_epoch: Optional[int],
-           limit_train_batches: Optional[int],
-           limit_val_batches: Optional[int],
-           prof=None,
-           num_batches=0) -> None:
+def _train(
+    train_pipeline: TrainPipelineSparseDist,
+    iterator: Iterator[Batch],
+    next_iterator: Iterator[Batch],
+    within_epoch_val_dataloader: DataLoader,
+    epoch: int,
+    epochs: int,
+    change_lr: bool,
+    lr_change_point: float,
+    lr_after_change_point: float,
+    validation_freq_within_epoch: Optional[int],
+    limit_train_batches: Optional[int],
+    limit_val_batches: Optional[int],
+    prof=None,
+) -> None:
     """
     Trains model for 1 epoch. Helper function for train_val_test.
 
@@ -348,9 +353,9 @@ def _train(train_pipeline: TrainPipelineSparseDist,
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
             train_pipeline.progress(combined_iterator)
-            if it == (num_batches - 3):
-                print(f"{get_mem_info('Training:  ')}")
+
             prof.step()
+
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point):    # progress made through the epoch
                 print(f"Changing learning rate to: {lr_after_change_point}")
@@ -358,6 +363,7 @@ def _train(train_pipeline: TrainPipelineSparseDist,
                 lr = lr_after_change_point
                 for g in optimizer.param_groups:
                     g["lr"] = lr
+                change_lr = False
 
             if validation_freq_within_epoch and it % validation_freq_within_epoch == 0:
                 _evaluate(
@@ -369,6 +375,7 @@ def _train(train_pipeline: TrainPipelineSparseDist,
                 )
                 train_pipeline._model.train()
         except StopIteration:
+            print(f"{get_mem_info('Training:  ')}")
             break
 
 
@@ -403,14 +410,15 @@ def train_val_test(
     test_iterator = iter(test_dataloader)
     with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            schedule=schedule(wait=0, warmup=len(train_dataloader) - 3, active=2, repeat=1),
-            on_trace_ready=trace_handler,
+            schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
+            profile_memory=True,
+            on_trace_ready=tensorboard_trace_handler(args.profile_dir),
     ) as prof:
         for epoch in range(args.epochs):
             val_iterator = iter(val_dataloader)
             _train(train_pipeline, train_iterator, val_iterator, val_dataloader, epoch, args.epochs, args.change_lr,
                    args.lr_change_point, args.lr_after_change_point, args.validation_freq_within_epoch,
-                   args.limit_train_batches, args.limit_val_batches, prof, len(train_dataloader))
+                   args.limit_train_batches, args.limit_val_batches, prof)
             train_iterator = iter(train_dataloader)
             val_next_iterator = (test_iterator if epoch == args.epochs - 1 else train_iterator)
 
@@ -424,7 +432,6 @@ def train_val_test(
 
             train_val_test_results.val_accuracies.append(val_accuracy)
             train_val_test_results.val_aurocs.append(val_auroc)
-            # prof.step()
 
         test_accuracy, test_auroc = _evaluate(
             args.limit_test_batches,
@@ -458,7 +465,7 @@ def main(argv: List[str]) -> None:
     args = parse_args(argv)
     if args.kaggle:
         global TOTAL_TRAINING_SAMPLES
-        TOTAL_TRAINING_SAMPLES = 45840617
+        TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 for criteo kaggle
         setattr(args, 'num_embeddings_per_feature', NUM_EMBEDDINGS_PER_FEATURE)
 
     rank = int(os.environ["LOCAL_RANK"])
@@ -473,6 +480,8 @@ def main(argv: List[str]) -> None:
     if not torch.distributed.is_initialized():
         dist.init_process_group(backend=backend)
 
+    if args.memory_fraction is not None:
+        torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     if args.num_embeddings_per_feature is not None:
         args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
         args.num_embeddings = None
@@ -484,8 +493,8 @@ def main(argv: List[str]) -> None:
 
     if dist.get_rank() == 0:
         print(args)
-        print(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
-              f"test batches: {len(test_dataloader)}")
+        # print(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
+        #       f"test batches: {len(test_dataloader)}")
     # Sets default limits for random dataloader iterations when left unspecified.
     if args.in_memory_binary_criteo_path is None:
         for stage in STAGES:
@@ -522,35 +531,39 @@ def main(argv: List[str]) -> None:
     ]
 
     print(f"{get_mem_info('After model init:  ')}")
+    if dist.get_rank() == 0:
+        print(count_parameters(train_model, "DLRM"))
 
     # Torchrec Planner
-    env = ShardingEnv.from_process_group(dist.GroupMember.WORLD)
-    topology = Topology(
-        world_size=env.world_size,
-        compute_device="cuda",
-        hbm_cap=70 * 1024**3,    # GPU mem
-        ddr_cap=300 * 1024 * 3,    # CPU mem
-        intra_host_bw=1000 * 1024**3 / 1000,    # Device to Device bandwidth
-    # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
-        batch_size=args.batch_size)
-    constraints = {
-        f"t_{feature_name}":
-        ParameterConstraints(sharding_types=[ShardingType.TABLE_WISE.value
-                                            ]    # if num_embeddings < 1e5 else ShardingType.ROW_WISE.value],
-                            )
-        for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, DEFAULT_CAT_NAMES)
-    }
-    planner = EmbeddingShardingPlanner(
-        topology=topology,
-        constraints=constraints,
+    # env = ShardingEnv.from_process_group(dist.GroupMember.WORLD)
+    # topology = Topology(
+    #     world_size=env.world_size,
+    #     compute_device="cuda",
+    #     hbm_cap=70 * 1024**3,    # GPU mem
+    #     ddr_cap=300 * 1024 * 3,    # CPU mem
+    #     intra_host_bw=1000 * 1024**3 / 1000,    # Device to Device bandwidth
+    # # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
+    #     batch_size=args.batch_size)
+    # constraints = {
+    #     f"t_{feature_name}":
+    #     ParameterConstraints(sharding_types=[ShardingType.TABLE_WISE.value
+    #                                         ]    # if num_embeddings < 1e5 else ShardingType.ROW_WISE.value],
+    #                         )
+    #     for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, DEFAULT_CAT_NAMES)
+    # }
+    # planner = EmbeddingShardingPlanner(
+    #     topology=topology,
+    #     constraints=constraints,
+    # )
+    # plan = planner.collective_plan(train_model, sharders, env.process_group)
+    model = DistributedModelParallel(
+        module=train_model,
+        device=device,
+        sharders=cast(List[ModuleSharder[nn.Module]], sharders),
     )
-    plan = planner.collective_plan(train_model, sharders, env.process_group)
-    model = DistributedModelParallel(module=train_model,
-                                     device=device,
-                                     sharders=cast(List[ModuleSharder[nn.Module]], sharders),
-                                     plan=plan)
-    print(f"{get_mem_info('After model parallel:  ')}")
+    # plan=plan)
 
+    print(f"{get_mem_info('After model parallel:  ')}")
     if dist.get_rank() == 0:
         print(f"Plan: {model.plan}")
 
