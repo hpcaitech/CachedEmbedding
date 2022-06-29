@@ -7,6 +7,7 @@ from torchrec.datasets.criteo import (
     DAYS,
     InMemoryBinaryCriteoIterDataPipe,
 )
+from torchrec.datasets.random import RandomRecDataset
 from torch.utils.data import DataLoader
 
 from .. import ParallelMode, DISTMGR
@@ -15,7 +16,7 @@ STAGES = ["train", "val", "test"]
 
 KAGGLE_NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
                                            '27,14992,5461306,10,5652,2173,4,7046547,18,15,286181,105,142572'
-KAGGLE_TOTAL_TRAINING_SAMPLES = 45840617
+KAGGLE_TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 days for criteo kaggle, 45840617 samples in total
 
 
 def get_dataloader(args, stage, parallel_mode: ParallelMode = ParallelMode.DEFAULT):
@@ -24,6 +25,23 @@ def get_dataloader(args, stage, parallel_mode: ParallelMode = ParallelMode.DEFAU
         raise ValueError(f"Supplied stage was {stage}. Must be one of {STAGES}.")
 
     args.pin_memory = (args.backend == "nccl") if not hasattr(args, "pin_memory") else args.pin_memory
+
+    if args.in_memory_binary_criteo_path is None:
+        return DataLoader(
+            RandomRecDataset(
+                keys=DEFAULT_CAT_NAMES,
+                batch_size=args.batch_size,
+                hash_size=args.num_embeddings,
+                hash_sizes=args.num_embeddings_per_feature if hasattr(args, "num_embeddings_per_feature") else None,
+                manual_seed=args.seed if hasattr(args, "seed") else None,
+                ids_per_feature=1,
+                num_dense=len(DEFAULT_INT_NAMES),
+                num_batches=getattr(args, f"limit_{stage}_batches")),
+            batch_size=None,
+            batch_sampler=None,
+            pin_memory=args.pin_memory,
+            num_workers=0,
+        )
 
     files = os.listdir(args.in_memory_binary_criteo_path)
 

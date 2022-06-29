@@ -69,7 +69,7 @@ NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="torchrec dlrm example trainer")
     parser.add_argument("--kaggle", action='store_true')
-    parser.add_argument("--profile_dir", default="torchrec_tensorboard_log/debug", type=str)
+    parser.add_argument("--profile_dir", default="tensorboard_log/torchrec", type=str)
     parser.add_argument("--memory_fraction", default=None, type=float)
     parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
     parser.add_argument("--batch_size", type=int, default=32, help="batch size to use for training")

@@ -214,6 +214,20 @@ class HybridParallelDLRM(nn.Module):
                                  broadcast_buffers=False,
                                  static_graph=True)
 
+        # precompute for parallelized embedding
+        param_amount = sum(num_embeddings_per_feature) * embedding_dim
+        param_storage = self.sparse_modules.embed.weight.element_size() * param_amount
+        param_amount += sum(p.numel() for p in self.dense_modules.parameters())
+        param_storage += sum(p.numel() * p.element_size() for p in self.dense_modules.parameters())
+
+        buffer_amount = sum(b.numel() for b in self.sparse_modules.buffers()) + \
+                        sum(b.numel() for b in self.dense_modules.buffers())
+        buffer_storage = sum(b.numel() * b.element_size() for b in self.sparse_modules.buffers()) + \
+                         sum(b.numel() * b.element_size() for b in self.dense_modules.buffers())
+        stat_str = f"Number of model parameters: {param_amount:,}, storage overhead: {param_storage/1024**3:.2f} GB. " \
+                   f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
+        self.stat_str = stat_str
+
     def forward(self, dense_features, sparse_features, inspect_time=False):
         """
         dense_features:     B // world size, dense feature dim
@@ -234,3 +248,6 @@ class HybridParallelDLRM(nn.Module):
                 logits = self.dense_modules(dense_features, embedded_sparse)
 
         return logits
+
+    def model_stats(self, prefix=""):
+        return f"{prefix}: {self.stat_str}"
