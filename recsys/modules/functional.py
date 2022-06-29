@@ -1,15 +1,26 @@
 import torch
 
-from recsys import DISTMGR as dist_manager
+from recsys import DISTLogger, DISTMGR as dist_manager
+
+try:
+    from torch.distributed import ReduceOp
+except ImportError:
+    class ReduceOp:
+        SUM = None
+        MAX = None
+    DISTLogger.warning("Unsupported `ReduceOp` for distributed computing", ranks=[0])
+
+_reduce_ops = dict(sum=ReduceOp.SUM, max=ReduceOp.MAX, mean=ReduceOp.SUM)
 
 
-def _reduce(x, parallel_mode):
+def _reduce(x, parallel_mode, reduce_op: str):
     if dist_manager.get_world_size(parallel_mode) == 1:
         return x
 
     process_group = dist_manager.get_cpu_group(parallel_mode) \
         if x.device.type == 'cpu' else dist_manager.get_group(parallel_mode)
-    torch.distributed.all_reduce(x, group=process_group)
+
+    torch.distributed.all_reduce(x, op=_reduce_ops[reduce_op], group=process_group)
     return x
 
 
@@ -75,16 +86,16 @@ def _all_to_all(x, parallel_mode, scatter_dim, gather_dim):
 class _ReduceForward(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, x, parallel_mode):
-        return _reduce(x, parallel_mode)
+    def forward(ctx, x, parallel_mode, reduce_op):
+        return _reduce(x, parallel_mode, reduce_op)
 
     @staticmethod
     def backward(ctx, grad):
         return grad, None
 
 
-def reduce_forward(x, parallel_mode):
-    return _ReduceForward.apply(x, parallel_mode)
+def reduce_forward(x, parallel_mode, reduce_op='sum'):
+    return _ReduceForward.apply(x, parallel_mode, reduce_op)
 
 
 class _TensorGatherForwardSplitBackward(torch.autograd.Function):
