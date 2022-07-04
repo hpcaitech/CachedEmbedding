@@ -31,12 +31,15 @@ def check_block_embeddingbag():
     embed = nn.EmbeddingBag(
                 sum(example_fields), 
                 example_block_dim,
-                mode=REDUCE_OPS)
+                mode=REDUCE_OPS,
+                norm_type=2.,
+                scale_grad_by_freq=False)
     embed = embed.to(dtype)
 
     linear = nn.Linear(
                 example_block_dim, 
-                EMBEDDING_DIM)
+                EMBEDDING_DIM,
+                bias=False)
     linear = linear.to(dtype)
 
     # block embedding bag
