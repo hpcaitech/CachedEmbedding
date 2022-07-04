@@ -31,9 +31,7 @@ def check_block_embeddingbag():
     embed = nn.EmbeddingBag(
                 sum(example_fields), 
                 example_block_dim,
-                mode=REDUCE_OPS,
-                norm_type=2.,
-                scale_grad_by_freq=False)
+                mode=REDUCE_OPS)
     embed = embed.to(dtype)
 
     linear = nn.Linear(
@@ -60,10 +58,6 @@ def check_block_embeddingbag():
 
     A_master = A_master.clone()
     blk_embed_output = blk_embed(A_master)
-    
-    print(torch_output.shape,blk_embed_output.shape)
-    print('torch',torch_output)
-    print('blk',blk_embed_output)
 
     check_equal(torch_output.detach(), blk_embed_output.detach())
     _print_rank_0('embed forward: pass')
@@ -126,7 +120,7 @@ def check_mv_embeddingbag():
     
     if REDUCE_OPS == 'mean':
         with torch.no_grad():
-            A_output_gather /= world_size
+            A_output_gather = A_output_gather / world_size
 
     A = A_master.clone()
     test_out = test_embed(A)
