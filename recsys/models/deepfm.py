@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
-from modules.embeddings import QREmbedding
+from recsys.modules.embeddings import ParallelQREmbedding
 
 
 class FeatureEmbedding(nn.Module):
@@ -11,7 +11,7 @@ class FeatureEmbedding(nn.Module):
     def __init__(self, field_dims, emb_dim, enable_qr):
         super().__init__()
         if enable_qr:
-            self.embedding = QREmbedding(emb_dim, sum(field_dims) // 50, verbose=False)
+            self.embedding = ParallelQREmbedding(emb_dim, sum(field_dims) // 50, verbose=False)
         else:
             self.embedding = nn.Embedding(sum(field_dims), emb_dim)
         self.offsets = np.array((0,*np.cumsum(field_dims)[:-1]),dtype=np.long)
@@ -33,7 +33,7 @@ class FeatureLinear(nn.Module):
         # May change to use embeddingbag(mode='sum')
         # self.fc = nn.EmbeddingBag(sum(field_dims), output_dim, mode='sum')
         if enable_qr:
-            self.fc = QREmbedding(output_dim, sum(field_dims) // 50, verbose=False)
+            self.fc = ParallelQREmbedding(output_dim, sum(field_dims) // 50, verbose=False)
         else:
             self.fc = nn.Embedding(sum(field_dims), output_dim)
         self.offsets = np.array((0,*np.cumsum(field_dims[:-1])),dtype=np.long)

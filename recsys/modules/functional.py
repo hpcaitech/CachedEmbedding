@@ -91,7 +91,7 @@ class _ReduceForward(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad):
-        return grad, None
+        return grad, None, None
 
 
 def reduce_forward(x, parallel_mode, reduce_op='sum'):

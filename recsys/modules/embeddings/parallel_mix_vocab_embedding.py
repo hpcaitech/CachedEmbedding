@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import Tensor
 import numpy as np
 
-from recsys import DISTMGR, ParallelMode
+from recsys import DISTMGR, ParallelMode, DISTLogger 
 from ..functional import reduce_forward
 
 
@@ -122,7 +122,6 @@ class BlockEmbeddingBag(nn.Module):
             if linear_w is None:
                 self.linear_weight = nn.Parameter(
                     torch.empty(base_embedding_dim, block_embedding_dim, device=device, dtype=dtype))
-
                 init_method(self.linear_weight)
             else:
                 assert list(linear_w.shape) == [base_embedding_dim, block_embedding_dim], \
@@ -173,18 +172,17 @@ class BlockEmbeddingBag(nn.Module):
                            init_method=init_method)
         return embeddingbag
 
+    def get_base_embedding_dim(self) -> int:
+        assert hasattr(self, 'base_embedding_dim')
+        return self.base_embedding_dim
+
     def get_weights(self) -> List[Optional[Tensor]]:
         assert isinstance(self.embed_weight, Tensor)
         if self.linear_weight is None:
-            return [self.embed_weight.data, None]
+            return [self.embed_weight.clone().detach(), None]
         else:
             assert isinstance(self.linear_weight, Tensor)
-            return [self.embed_weight.data, self.linear_weight.data]
-
-    # @property
-    # def base_embedding_dim(self) -> int:
-    #     assert hasattr(self, 'base_embedding_dim')
-    #     return self.base_embedding_dim
+            return [self.embed_weight.clone().detach(), self.linear_weight.clone().detach()]
 
 
 class ParallelMixVocabEmbeddingBag(nn.Module):
@@ -197,7 +195,6 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                 blk_embed: Optional[BlockEmbeddingBag] = None,
                 lbmgr: Optional[LoadBalanceManager] = None,
                 freeze: bool = False,
-                comm_func = None,
                 *args,
                 **kwargs):
         super().__init__()
@@ -220,14 +217,11 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
 
         self.group = self.lbmgr.get_group(self.rank)
         self.block_dim = self.lbmgr.get_block_dim(self.rank)
-
-        if comm_func is not None:
-            self.comm_func = comm_func
-        else:
-            self.comm_func = reduce_forward
+        self.comm_func = reduce_forward
 
         if blk_embed is not None:
             weights = blk_embed.get_weights()
+            base_embedding_dim = blk_embed.get_base_embedding_dim()
             assert weights[0].size() == (sum([self.field_dims[i] for i in self.group]), self.block_dim), \
                 'passed embedding layer dimensions are wrong: {x1} vs {x2} \
                     '.format(x1=weights[0].size(), x2=(sum([self.field_dims[i] for i in self.group]), self.block_dim))
@@ -235,10 +229,13 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                 assert weights[1].size() == (self.embedding_dim, self.block_dim), \
                     'passed linear layer dimensions are wrong: {x1} vs {x2} \
                     '.format(x1=weights[1].size(), x2=(self.embedding_dim, self.block_dim))
-            assert blk_embed.base_embedding_dim == self.embedding_dim
+            if base_embedding_dim != self.embedding_dim:
+                DISTLogger.warning('Base embedding dimension provided by blk_embed is different from \
+                    default or manually passed. Will overwrite by blk_embed.base_embedding_dim')
+                self.embedding_dim = base_embedding_dim
             self.embed = BlockEmbeddingBag.from_pretrained(
                                                 weights=weights,
-                                                base_embedding_dim=blk_embed.base_embedding_dim,
+                                                base_embedding_dim=base_embedding_dim,
                                                 freeze=freeze)
         else:
             self.embed = BlockEmbeddingBag(
@@ -253,9 +250,11 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         x_parallel = self.lbmgr.shard_tensor(x, self.rank)
         output_parallel = self.embed(x_parallel, offsets)
         output_gather = self.comm_func(output_parallel, self.parallel_mode, reduce_op=self.mode)
+        output_gather = output_gather.to(get_current_device())
 
         if self.mode == 'mean':
-            output_gather /= self.num_groups
+            with torch.no_grad():
+                output_gather /= self.num_groups
 
         assert output_gather.shape == (x.size(0), self.embedding_dim)
         return output_gather
@@ -265,7 +264,6 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                         blk_embed: BlockEmbeddingBag,
                         lbmgr: LoadBalanceManager,
                         mode: str = 'sum',
-                        comm_func = reduce_forward,
                         freeze: bool = False,
                         field_dims: Optional[List[int]] = None,
                         embedding_dim: Optional[int] = 128,
@@ -284,7 +282,6 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                     blk_embed=blk_embed,
                     lbmgr=lbmgr,
                     freeze=freeze,
-                    comm_func=comm_func,
                     *args,
                     **kwargs)
 

@@ -20,15 +20,68 @@ def _print_rank_0(msg):
     if i == 0:
         print(msg)
 
-def check_block_embedding():
-    # embed = nn.EmbeddingBag(sum([FIELD_DIMS[i] for i in group]), block_dim)
-    # embed = embed.to(dtype).to(device)
+def check_block_embeddingbag():
+    dtype = torch.float32
+    
+    example_field_idx = [0,2]
+    example_fields = [FIELD_DIMS[i] for i in example_field_idx]
+    example_block_dim = EMBEDDING_DIM // 2
 
-    # linear = nn.Linear(block_dim, EMBEDDING_DIM)
-    # linear = linear.to(dtype).to(device)
-    pass
+    # torch modules
+    embed = nn.EmbeddingBag(
+                sum(example_fields), 
+                example_block_dim,
+                mode=REDUCE_OPS)
+    embed = embed.to(dtype)
 
-def check_mv_embedding():
+    linear = nn.Linear(
+                example_block_dim, 
+                EMBEDDING_DIM)
+    linear = linear.to(dtype)
+
+    # block embedding bag
+    blk_embed = BlockEmbeddingBag.from_pretrained(
+                    weights=[embed.weight.clone().detach(),linear.weight.clone().detach()],
+                    base_embedding_dim=EMBEDDING_DIM,
+                    freeze=False,
+                    mode=REDUCE_OPS)
+    blk_embed = blk_embed.to(dtype)
+
+    # initiate input tensor
+    A_shape = (BATCH_SIZE, len(example_fields))
+    A_master = torch.randint(min(example_fields), A_shape)
+    
+    # forward pass
+    A = A_master.clone()
+    torch_output = linear(embed(A))
+
+    A_master = A_master.clone()
+    blk_embed_output = blk_embed(A_master)
+    
+    print(torch_output.shape,blk_embed_output.shape)
+    print('torch',torch_output)
+    print('blk',blk_embed_output)
+
+    check_equal(torch_output.detach(), blk_embed_output.detach())
+    _print_rank_0('embed forward: pass')
+
+    # backward pass
+    grad_shape = torch_output.shape
+    grad_master = torch.randn(grad_shape, dtype=dtype)
+
+    grad = grad_master.clone()
+    torch_output.backward(grad)
+
+    grad_master = grad_master.clone()
+    blk_embed_output.backward(grad_master)
+    
+    blk_embed_ws = blk_embed.get_weights(detach=True)
+
+    check_equal(blk_embed_ws[0], embed.weight)
+    check_equal(blk_embed_ws[1], linear.weight)
+    _print_rank_0('embed backward: pass')
+
+def check_mv_embeddingbag():
     device = get_current_device()
     dtype = torch.float32
     world_size = DISTMGR.get_world_size()
@@ -51,7 +104,6 @@ def check_mv_embedding():
     test_embed = ParallelMixVocabEmbeddingBag.from_pretrained(
                     blk_embed=blk_embed, 
                     lbmgr=lbmgr,
-                    comm_func=comm_func,
                     mode=REDUCE_OPS)
 
     test_embed = test_embed.to(dtype).to(device)
@@ -66,52 +118,55 @@ def check_mv_embedding():
     
     A_output_gather = comm_func(
                     A_output_parallel, 
-                    ParallelMode.DEFAULT, 
+                    ParallelMode.DEFAULT,
                     reduce_op=REDUCE_OPS)
     
-    A_output_gather_clone = A_output_gather.clone()
-
-    A_output_gather_clone /= world_size
+    if REDUCE_OPS == 'mean':
+        with torch.no_grad():
+            A_output_gather /= world_size
 
     A = A_master.clone()
-    out = test_embed(A)
+    test_out = test_embed(A)
 
-    check_equal(out.detach(), A_output_gather_clone.detach())
+    check_equal(test_out.detach(), A_output_gather.detach())
     _print_rank_0('embed forward: pass')
 
     grad_shape = A_output_gather.shape
     grad_master = torch.randn(grad_shape, dtype=dtype, device=device)
     torch.distributed.broadcast(grad_master, src=0)
-    grad = grad_master.clone()
-    out.backward(grad)
-    grad_master = grad_master.clone()
-    A_output_gather.backward(grad_master)
 
-    blk_weights = blk_embed.get_weights()
-    test_weights = test_embed.get_weights()
+    grad = grad_master.clone()
+    A_output_gather.backward(grad)
+
+    grad_master = grad_master.clone()
+    test_out.backward(grad_master)
+
+    blk_weights = blk_embed.get_weights(detach=False)
+    test_weights = test_embed.get_weights(detach=False)
     
-    for i in range(len(blk_weights)):
-        check_equal(blk_weights[i].grad.detach(), test_weights[i].grad.detach())
+    for (w1,w2) in zip(blk_weights, test_weights):
+        if w1 is None or w2 is None:
+            assert w1 is None and w2 is None
+        else:
+            check_equal(w1, w2)
     
     _print_rank_0('embed backward: pass')
-
 
 def check_layer(rank, world_size, port):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
-    check_mv_embedding()
+    check_block_embeddingbag()
+    check_mv_embeddingbag()
     
     DISTMGR.destroy()
     torch.cuda.empty_cache()
-
 
 @pytest.mark.parametrize('world_size', [1,4])
 @rerun_if_address_is_in_use()
 def test_layer(world_size):
     run_func = partial(check_layer, world_size=world_size, port=free_port())
     mp.spawn(run_func, nprocs=world_size)
-
 
 if __name__ == '__main__':
     test_layer(4)
