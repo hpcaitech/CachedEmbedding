@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import Tensor
 import numpy as np
 
-from recsys import DISTMGR, ParallelMode, DISTLogger 
+from recsys import DISTMGR, ParallelMode, DISTLogger
 from ..functional import reduce_forward
 
 
@@ -82,7 +82,7 @@ class BlockEmbeddingBag(nn.Module):
                  freeze_w: Optional[bool] = False,
                  device = None,
                  dtype = None,
-                 init_method = torch.nn.init.xavier_normal_):
+                 init_method = nn.init.xavier_normal_):
         super().__init__()
         self.num_embeddings = num_embeddings
         self.block_embedding_dim = block_embedding_dim
@@ -108,10 +108,10 @@ class BlockEmbeddingBag(nn.Module):
         if embed_w is None:
             self.embed_weight = nn.Parameter(
                 torch.empty(num_embeddings, block_embedding_dim, device=device, dtype=dtype))
-            init_method(self.embed_weight)
             if padding_idx is not None:
                 with torch.no_grad():
                     self.embed_weight[padding_idx].fill_(0)
+            init_method(self.embed_weight)
         else:
             assert list(embed_w.shape) == [num_embeddings, block_embedding_dim]
             self.embed_weight = nn.Parameter(embed_w, requires_grad=(not freeze_w))
@@ -151,7 +151,7 @@ class BlockEmbeddingBag(nn.Module):
                         sparse: bool = False,
                         include_last_offset: bool = False,
                         padding_idx: Optional[int] = None,
-                        init_method = torch.nn.init.xavier_normal_) -> 'BlockEmbeddingBag':
+                        init_method = nn.init.xavier_normal_) -> 'BlockEmbeddingBag':
         assert len(weights) == 2 and weights[0].dim() == 2, \
             'Both embedding and linear weights are expected \n \
             Embedding parameters are expected to be 2-dimensional'
@@ -176,13 +176,21 @@ class BlockEmbeddingBag(nn.Module):
         assert hasattr(self, 'base_embedding_dim')
         return self.base_embedding_dim
 
-    def get_weights(self) -> List[Optional[Tensor]]:
+    def get_weights(self, detach: bool = False) -> List[Optional[Tensor]]:
         assert isinstance(self.embed_weight, Tensor)
+        self.embed_weight.retain_grad()
         if self.linear_weight is None:
-            return [self.embed_weight.clone().detach(), None]
+            if detach:
+                return [self.embed_weight.clone().detach(), None]
+            else:
+                return [self.embed_weight.clone(), None]
         else:
             assert isinstance(self.linear_weight, Tensor)
-            return [self.embed_weight.clone().detach(), self.linear_weight.clone().detach()]
+            self.linear_weight.retain_grad()
+            if detach:
+                return [self.embed_weight.clone().detach(), self.linear_weight.clone().detach()]
+            else:
+                return [self.embed_weight.clone(), self.linear_weight.clone()]
 
 
 class ParallelMixVocabEmbeddingBag(nn.Module):
@@ -220,7 +228,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         self.comm_func = reduce_forward
 
         if blk_embed is not None:
-            weights = blk_embed.get_weights()
+            weights = blk_embed.get_weights(detach=False)
             base_embedding_dim = blk_embed.get_base_embedding_dim()
             assert weights[0].size() == (sum([self.field_dims[i] for i in self.group]), self.block_dim), \
                 'passed embedding layer dimensions are wrong: {x1} vs {x2} \
@@ -249,12 +257,11 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
     def forward(self, x, offsets=None):
         x_parallel = self.lbmgr.shard_tensor(x, self.rank)
         output_parallel = self.embed(x_parallel, offsets)
-        output_gather = self.comm_func(output_parallel, self.parallel_mode, reduce_op=self.mode)
-        output_gather = output_gather.to(get_current_device())
+        output_gather = self.comm_func(output_parallel, self.parallel_mode)#, reduce_op=self.mode)
 
         if self.mode == 'mean':
             with torch.no_grad():
-                output_gather /= self.num_groups
+                output_gather = output_gather / self.num_groups
 
         assert output_gather.shape == (x.size(0), self.embedding_dim)
         return output_gather
@@ -287,6 +294,6 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
 
         return embeddingbag
     
-    def get_weights(self) -> List[Tensor]:
+    def get_weights(self, detach: bool = True) -> List[Tensor]:
         assert hasattr(self, 'embed') and isinstance(self.embed, BlockEmbeddingBag)
-        return self.embed.get_weights()
+        return self.embed.get_weights(detach)
