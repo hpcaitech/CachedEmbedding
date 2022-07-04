@@ -42,7 +42,7 @@ from torch.profiler import profile, record_function, ProfilerActivity, schedule,
 try:
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/data:dlrm_dataloader
-    from data.dlrm_dataloader import get_dataloader, STAGES
+    from data.dlrm_dataloader import get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE
 
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
@@ -53,8 +53,7 @@ except ImportError:
 # internal import
 try:
     from .data.dlrm_dataloader import (    # noqa F811
-        get_dataloader, STAGES,
-    )
+        get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
     from .modules.dlrm_train import DLRMTrain    # noqa F811
 except ImportError:
     pass
@@ -62,8 +61,6 @@ except ImportError:
 from colo_recsys.utils import TrainValTestResults, get_mem_info, count_parameters
 
 TRAIN_PIPELINE_STAGES = 3    # Number of stages in TrainPipelineSparseDist.
-NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
-                             '27,14992,5461306,10,5652,2173,4,7046547,18,15,286181,105,142572'  # For criteo kaggle
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -466,7 +463,7 @@ def main(argv: List[str]) -> None:
     if args.kaggle:
         global TOTAL_TRAINING_SAMPLES
         TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 for criteo kaggle
-        setattr(args, 'num_embeddings_per_feature', NUM_EMBEDDINGS_PER_FEATURE)
+        setattr(args, 'num_embeddings_per_feature', KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
 
     rank = int(os.environ["LOCAL_RANK"])
     if torch.cuda.is_available():

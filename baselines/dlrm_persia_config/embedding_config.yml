@@ -1,0 +1,55 @@
+feature_index_prefix_bit: 12
+slots_config:
+  cat_0:
+    dim: 128
+  cat_1:
+    dim: 128
+  cat_2:
+    dim: 128
+  cat_3:
+    dim: 128
+  cat_4:
+    dim: 128
+  cat_5:
+    dim: 128
+  cat_6:
+    dim: 128
+  cat_7:
+    dim: 128
+  cat_8:
+    dim: 128
+  cat_9:
+    dim: 128
+  cat_10:
+    dim: 128
+  cat_11:
+    dim: 128
+  cat_12:
+    dim: 128
+  cat_13:
+    dim: 128
+  cat_14:
+    dim: 128
+  cat_15:
+    dim: 128
+  cat_16:
+    dim: 128
+  cat_17:
+    dim: 128
+  cat_18:
+    dim: 128
+  cat_19:
+    dim: 128
+  cat_20:
+    dim: 128
+  cat_21:
+    dim: 128
+  cat_22:
+    dim: 128
+  cat_23:
+    dim: 128
+  cat_24:
+    dim: 128
+  cat_25:
+    dim: 128
+feature_groups: {}
