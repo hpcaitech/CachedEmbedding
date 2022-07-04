@@ -87,8 +87,8 @@ def check_mv_embeddingbag():
 
     rank = DISTMGR.get_rank()
     
-    group = lbmgr.groups[rank]
-    block_dim = lbmgr.emb_dims[rank]
+    group = lbmgr.get_group(rank)
+    block_dim = lbmgr.get_block_dim(rank)
     comm_func = reduce_forward # need all_reduce
 
     blk_embed = BlockEmbeddingBag(
@@ -138,8 +138,8 @@ def check_mv_embeddingbag():
     grad_master = grad_master.clone()
     test_out.backward(grad_master)
 
-    blk_weights = blk_embed.get_weights(detach=False)
-    test_weights = test_embed.get_weights(detach=False)
+    blk_weights = blk_embed.get_weights(detach=True)
+    test_weights = test_embed.get_weights(detach=True)
     
     for (w1,w2) in zip(blk_weights, test_weights):
         if w1 is None or w2 is None:
