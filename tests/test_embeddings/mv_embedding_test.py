@@ -72,10 +72,10 @@ def check_block_embeddingbag():
     grad_master = grad_master.clone()
     blk_embed_output.backward(grad_master)
     
-    blk_embed_ws = blk_embed.get_weights(detach=True)
-
-    check_equal(blk_embed_ws[0], embed.weight)
-    check_equal(blk_embed_ws[1], linear.weight)
+    blk_embed_ws = blk_embed.get_weights(detach=False)
+    
+    check_equal(blk_embed_ws[0].grad, embed.weight.grad)        
+    check_equal(blk_embed_ws[1].grad, linear.weight.grad)
     _print_rank_0('embed backward: pass')
 
 def check_mv_embeddingbag():
@@ -138,15 +138,15 @@ def check_mv_embeddingbag():
     grad_master = grad_master.clone()
     test_out.backward(grad_master)
 
-    blk_weights = blk_embed.get_weights(detach=True)
-    test_weights = test_embed.get_weights(detach=True)
+    blk_weights = blk_embed.get_weights(detach=False)
+    test_weights = test_embed.get_weights(detach=False)
     
     for (w1,w2) in zip(blk_weights, test_weights):
         if w1 is None or w2 is None:
             assert w1 is None and w2 is None
         else:
-            check_equal(w1, w2)
-    
+            check_equal(w1.grad, w2.grad)
+ 
     _print_rank_0('embed backward: pass')
 
 def check_layer(rank, world_size, port):

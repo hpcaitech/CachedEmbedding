@@ -3,7 +3,8 @@ import torch.nn as nn
 import numpy as np
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
-from recsys.modules.embeddings import ParallelQREmbedding
+from recsys.modules.embeddings import ParallelQREmbedding, ParallelMixVocabEmbeddingBag
+from recsys import DISTMGR
 
 
 class FeatureEmbedding(nn.Module):
@@ -13,7 +14,7 @@ class FeatureEmbedding(nn.Module):
         if enable_qr:
             self.embedding = ParallelQREmbedding(emb_dim, sum(field_dims) // 50, verbose=False)
         else:
-            self.embedding = nn.Embedding(sum(field_dims), emb_dim)
+            self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim)
         self.offsets = np.array((0,*np.cumsum(field_dims)[:-1]),dtype=np.long)
 
     def forward(self,x):
@@ -35,7 +36,7 @@ class FeatureLinear(nn.Module):
         if enable_qr:
             self.fc = ParallelQREmbedding(output_dim, sum(field_dims) // 50, verbose=False)
         else:
-            self.fc = nn.Embedding(sum(field_dims), output_dim)
+            self.fc = ParallelMixVocabEmbeddingBag(field_dims, output_dim)
         self.offsets = np.array((0,*np.cumsum(field_dims[:-1])),dtype=np.long)
         self.bias = nn.Parameter(torch.zeros((output_dim,)))
         

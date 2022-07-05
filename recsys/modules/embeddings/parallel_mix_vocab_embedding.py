@@ -178,19 +178,13 @@ class BlockEmbeddingBag(nn.Module):
 
     def get_weights(self, detach: bool = False) -> List[Optional[Tensor]]:
         assert isinstance(self.embed_weight, Tensor)
-        self.embed_weight.retain_grad()
         if self.linear_weight is None:
-            if detach:
-                return [self.embed_weight.clone().detach(), None]
-            else:
-                return [self.embed_weight.clone(), None]
+            return [self.embed_weight.detach() if detach 
+                    else self.embed_weight, None]
         else:
             assert isinstance(self.linear_weight, Tensor)
-            self.linear_weight.retain_grad()
-            if detach:
-                return [self.embed_weight.clone().detach(), self.linear_weight.clone().detach()]
-            else:
-                return [self.embed_weight.clone(), self.linear_weight.clone()]
+            return [self.embed_weight.detach() if detach 
+                    else self.embed_weight, self.linear_weight]
 
 
 class ParallelMixVocabEmbeddingBag(nn.Module):
@@ -228,7 +222,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         self.comm_func = reduce_forward
 
         if blk_embed is not None:
-            weights = blk_embed.get_weights(detach=False)
+            weights = blk_embed.get_weights(detach=True)
             base_embedding_dim = blk_embed.get_base_embedding_dim()
             assert weights[0].size() == (sum([self.field_dims[i] for i in self.group]), self.block_dim), \
                 'passed embedding layer dimensions are wrong: {x1} vs {x2} \
@@ -294,6 +288,6 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
 
         return embeddingbag
     
-    def get_weights(self, detach: bool = True) -> List[Tensor]:
+    def get_weights(self, detach: bool = False) -> List[Tensor]:
         assert hasattr(self, 'embed') and isinstance(self.embed, BlockEmbeddingBag)
         return self.embed.get_weights(detach)
