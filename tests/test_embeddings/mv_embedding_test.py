@@ -119,8 +119,7 @@ def check_mv_embeddingbag():
                     reduce_op=REDUCE_OPS)
     
     if REDUCE_OPS == 'mean':
-        with torch.no_grad():
-            A_output_gather = A_output_gather / world_size
+        A_output_gather = A_output_gather / world_size
 
     A = A_master.clone()
     test_out = test_embed(A)
@@ -131,7 +130,7 @@ def check_mv_embeddingbag():
     grad_shape = A_output_gather.shape
     grad_master = torch.randn(grad_shape, dtype=dtype, device=device)
     torch.distributed.broadcast(grad_master, src=0)
-
+    
     grad = grad_master.clone()
     A_output_gather.backward(grad)
 
@@ -153,7 +152,7 @@ def check_layer(rank, world_size, port):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
-    check_block_embeddingbag()
+    # check_block_embeddingbag()
     check_mv_embeddingbag()
     
     DISTMGR.destroy()

@@ -254,8 +254,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         output_gather = self.comm_func(output_parallel, self.parallel_mode)#, reduce_op=self.mode)
 
         if self.mode == 'mean':
-            with torch.no_grad():
-                output_gather = output_gather / self.num_groups
+            output_gather = output_gather / self.num_groups
 
         assert output_gather.shape == (x.size(0), self.embedding_dim)
         return output_gather
