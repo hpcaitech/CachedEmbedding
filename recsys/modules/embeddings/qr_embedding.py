@@ -2,15 +2,15 @@ import torch
 import torch.nn as nn
 
 
-class QREmbedding(nn.Module):
+class QREmbeddingBag(nn.Module):
     def __init__(self,
                  embedding_dim: int,
                  num_buckets: int,
                  verbose: bool = False):
         super().__init__()
         self.num_buckets = num_buckets
-        self.q_embeddings = nn.Embedding(num_buckets, embedding_dim,)
-        self.r_embeddings = nn.Embedding(num_buckets, embedding_dim,)
+        self.q_embeddings = nn.EmbeddingBag(num_buckets, embedding_dim,)
+        self.r_embeddings = nn.EmbeddingBag(num_buckets, embedding_dim,)
         self.verbose = verbose
         self._init_weights()
 
@@ -22,7 +22,7 @@ class QREmbedding(nn.Module):
         if self.verbose:
             print('## input x:',x)
         
-        quotient_index = torch.floor_divide(x, self.num_buckets)
+        quotient_index = torch.div(x, self.num_buckets, rounding_mode='floor')
         
         # Get the reminder index.
         remainder_index = torch.remainder(x, self.num_buckets)
