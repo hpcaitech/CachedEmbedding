@@ -292,7 +292,7 @@ class ParallelQREmbedding(nn.Module):
         self,
         embedding_dim: int,
         num_buckets: int,
-    ):
+    ):                 
         super().__init__()
         self.num_buckets = num_buckets
         self.q_embeddings = ColumnParallelEmbeddingBag(

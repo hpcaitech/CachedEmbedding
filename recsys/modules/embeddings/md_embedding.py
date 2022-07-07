@@ -19,8 +19,8 @@ class MixDimensionEmbeddingBag(nn.Module):
     def __init__(self, 
                  blocks_vocab: List[torch.Tensor], 
                  field_dims: List[int], 
-                 blocks_embedding_dims: List[int], 
-                 base_embedding_dim: int):
+                 blocks_embedding_dims: List[int] = [64,32,16], 
+                 base_embedding_dim: int = 128):
 
         super().__init__()
         self.num_blocks = len(blocks_vocab)

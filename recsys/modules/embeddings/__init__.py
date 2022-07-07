@@ -7,6 +7,7 @@ from .parallel_embeddings import (
     FusedHybridParallelEmbeddingBag,
     ParallelQREmbedding
 )
+from .parallel_mix_vocab_embedding import LoadBalanceManager, ParallelMixVocabEmbeddingBag, BlockEmbeddingBag
 
 __all__ = [
     'MixDimensionEmbeddingBag',
@@ -16,4 +17,7 @@ __all__ = [
     'ColumnParallelEmbeddingBag',
     'FusedHybridParallelEmbeddingBag',
     'ParallelQREmbedding',
+    'LoadBalanceManager',
+    'ParallelMixVocabEmbeddingBag',
+    'BlockEmbeddingBag',
 ]
