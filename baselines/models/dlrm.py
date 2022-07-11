@@ -68,10 +68,10 @@ class SparseArch(nn.Module):
     def __init__(self, embedding_bag_collection: EmbeddingBagCollection) -> None:
         super().__init__()
         self.embedding_bag_collection: EmbeddingBagCollection = embedding_bag_collection
-        assert (self.embedding_bag_collection.embedding_bag_configs), "Embedding bag collection cannot be empty!"
-        self.D: int = self.embedding_bag_collection.embedding_bag_configs[0].embedding_dim
+        assert (self.embedding_bag_collection.embedding_bag_configs()), "Embedding bag collection cannot be empty!"
+        self.D: int = self.embedding_bag_collection.embedding_bag_configs()[0].embedding_dim
         self._sparse_feature_names: List[str] = [
-            name for conf in embedding_bag_collection.embedding_bag_configs for name in conf.feature_names
+            name for conf in embedding_bag_collection.embedding_bag_configs() for name in conf.feature_names
         ]
 
         self.F: int = len(self._sparse_feature_names)
@@ -330,13 +330,13 @@ class DLRM(nn.Module):
         dense_device: Optional[torch.device] = None,
     ) -> None:
         super().__init__()
-        assert (len(embedding_bag_collection.embedding_bag_configs) > 0), "At least one embedding bag is required"
-        for i in range(1, len(embedding_bag_collection.embedding_bag_configs)):
-            conf_prev = embedding_bag_collection.embedding_bag_configs[i - 1]
-            conf = embedding_bag_collection.embedding_bag_configs[i]
+        assert (len(embedding_bag_collection.embedding_bag_configs()) > 0), "At least one embedding bag is required"
+        for i in range(1, len(embedding_bag_collection.embedding_bag_configs())):
+            conf_prev = embedding_bag_collection.embedding_bag_configs()[i - 1]
+            conf = embedding_bag_collection.embedding_bag_configs()[i]
             assert (
                 conf_prev.embedding_dim == conf.embedding_dim), "All EmbeddingBagConfigs must have the same dimension"
-        embedding_dim: int = embedding_bag_collection.embedding_bag_configs[0].embedding_dim
+        embedding_dim: int = embedding_bag_collection.embedding_bag_configs()[0].embedding_dim
         if dense_arch_layer_sizes[-1] != embedding_dim:
             raise ValueError(f"embedding_bag_collection dimension ({embedding_dim}) and final dense "
                              "arch layer size ({dense_arch_layer_sizes[-1]}) must match.")
@@ -373,6 +373,38 @@ class DLRM(nn.Module):
         """
         embedded_dense = self.dense_arch(dense_features)
         embedded_sparse = self.sparse_arch(sparse_features)
+        concatenated_dense = self.inter_arch(dense_features=embedded_dense, sparse_features=embedded_sparse)
+        logits = self.over_arch(concatenated_dense)
+        return logits
+
+
+# ============== Customize for Persia ===================
+class Dense(nn.Module):
+
+    def __init__(self, embedding_dim, num_sparse_features, dense_in_features, dense_arch_layer_sizes,
+                 over_arch_layer_sizes):
+        super(Dense, self).__init__()
+
+        self.dense_arch = DenseArch(
+            in_features=dense_in_features,
+            layer_sizes=dense_arch_layer_sizes,
+        )
+        self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features)
+
+        over_in_features: int = (embedding_dim + choose(num_sparse_features, 2) + num_sparse_features)
+        self.over_arch = OverArch(
+            in_features=over_in_features,
+            layer_sizes=over_arch_layer_sizes,
+        )
+
+    def forward(self, dense_features: List[torch.Tensor], embedded_sparse: List[torch.Tensor]):
+        """
+        fixed input signature in Persia
+        """
+        # batch size, feature size, embedding dim
+        embedded_sparse = torch.stack(embedded_sparse, dim=1)
+        # batch size
+        embedded_dense = self.dense_arch(dense_features[0])
         concatenated_dense = self.inter_arch(dense_features=embedded_dense, sparse_features=embedded_sparse)
         logits = self.over_arch(concatenated_dense)
         return logits

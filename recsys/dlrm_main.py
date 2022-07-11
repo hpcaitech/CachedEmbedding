@@ -19,7 +19,7 @@ def parse_args():
     # debug
     parser.add_argument('--profile_dir',
                         type=str,
-                        default='tensorboard_log/debug',
+                        default='tensorboard_log/recsys',
                         help='Specify the directory where profiler files are saved for tensorboard visualization')
     parser.add_argument('--inspect_time',
                         action='store_true',
@@ -30,6 +30,28 @@ def parse_args():
                         default='all_to_all',
                         help='Specify the fused collective functions between Embedding and Dense, '
                         'permitted option: all_to_all | gather_scatter')
+
+    # stress test
+    parser.add_argument("--memory_fraction", type=float, default=None)
+    parser.add_argument("--num_embeddings", type=int, default=10000)
+    parser.add_argument(
+        "--limit_train_batches",
+        type=int,
+        default=None,
+        help="number of train batches",
+    )
+    parser.add_argument(
+        "--limit_val_batches",
+        type=int,
+        default=None,
+        help="number of validation batches",
+    )
+    parser.add_argument(
+        "--limit_test_batches",
+        type=int,
+        default=None,
+        help="number of test batches",
+    )
 
     # Dataset
     parser.add_argument("--kaggle", action='store_true')
@@ -145,7 +167,13 @@ def parse_args():
 
     if args.kaggle:
         setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
-    args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
+    if args.num_embeddings_per_feature is not None:
+        args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
+    if args.in_memory_binary_criteo_path is None:
+        for stage in criteo.STAGES:
+            attr = f"limit_{stage}_batches"
+            if getattr(args, attr) is None:
+                setattr(args, attr, 10)
 
     return args
 
@@ -177,7 +205,7 @@ def _train(model,
            prof=None):
     model.train()
     data_iter = iter(data_loader)
-    samples_per_trainer = len(data_loader) / dist_manager.get_world_size() * epochs
+    samples_per_trainer = criteo.KAGGLE_TOTAL_TRAINING_SAMPLES / dist_manager.get_world_size() * epochs
     rank = dist_manager.get_rank()
     world_size = dist_manager.get_world_size()
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
@@ -189,8 +217,6 @@ def _train(model,
 
             loss = criterion(logits, labels.float())
             # dist_logger.info(f"loss: {loss.item()}")
-            if it == len(data_loader) - 3:
-                dist_logger.info(f"{get_mem_info('In the last 3-th forward pass:  ')}")
 
             optimizer.zero_grad()
             with record_function("(zhg)backward pass"):
@@ -209,6 +235,7 @@ def _train(model,
                 for g in optimizer.param_groups:
                     g["lr"] = lr
         except StopIteration:
+            dist_logger.info(f"{get_mem_info('Training:  ')}")
             break
 
 
@@ -276,6 +303,8 @@ def main():
     disable_existing_loggers()
 
     launch_from_torch(backend='nccl', seed=args.seed)
+    if args.memory_fraction is not None:
+        torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     # TODO: remove this group when using hybrid parallelism
     dist_manager.new_process_group(1, ParallelMode.DATA)
 
@@ -285,15 +314,17 @@ def main():
     train_dataloader = criteo.get_dataloader(args, 'train', ParallelMode.DATA)
     val_dataloader = criteo.get_dataloader(args, "val", ParallelMode.DATA)
     test_dataloader = criteo.get_dataloader(args, "test", ParallelMode.DATA)
-    dist_logger.info(
-        f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
-        f"test batches: {len(test_dataloader)}",
-        ranks=[0])
+    if args.in_memory_binary_criteo_path is not None:
+        dist_logger.info(
+            f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
+            f"test batches: {len(test_dataloader)}",
+            ranks=[0])
 
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device
     model = HybridParallelDLRM(
-        args.num_embeddings_per_feature,
+        [args.num_embeddings] *
+        len(criteo.DEFAULT_CAT_NAMES) if args.in_memory_binary_criteo_path is None else args.num_embeddings_per_feature,
         args.embedding_dim,
         len(criteo.DEFAULT_CAT_NAMES),
         len(criteo.DEFAULT_INT_NAMES),
@@ -304,6 +335,7 @@ def main():
         sparse=args.use_sparse_embed_grad,
         fused_op=args.fused_op,
     )
+    dist_logger.info(f"{model.model_stats('DLRM')}", ranks=[0])
     dist_logger.info(f"{get_mem_info('After model init:  ')}", ranks=[0])
     for name, param in model.named_parameters():
         dist_logger.info(f"{name} : shape {param.shape}, device {param.data.device}", ranks=[0])

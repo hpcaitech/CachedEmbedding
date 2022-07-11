@@ -18,8 +18,15 @@ def get_mem_info(prefix=''):
 
 
 def count_parameters(model, prefix=''):
-    cnt = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    return f'{prefix}: {cnt}'
+    trainable_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    param_amount = sum(p.numel() for p in model.parameters())
+    buffer_amount = sum(b.numel() for b in model.buffers())
+    param_storage = sum([p.numel() * p.element_size() for p in model.parameters()])
+    buffer_storage = sum([b.numel() * b.element_size() for b in model.buffers()])
+    stats_str = f'{prefix}: {trainable_param:,}.' + '\n'
+    stats_str += f"Number of model parameters: {param_amount:,}, storage overhead: {param_storage/1024**3:.2f} GB. "
+    stats_str += f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
+    return stats_str
 
 
 def trace_handler(p):
