@@ -1,5 +1,5 @@
 from .md_embedding import MixDimensionEmbeddingBag
-from .qr_embedding import QREmbedding
+from .qr_embedding import QREmbeddingBag
 from .pep_embedding import PEPEmbeddingBag
 from .parallel_embeddings import (
     VocabParallelEmbedding,
@@ -11,7 +11,7 @@ from .parallel_mix_vocab_embedding import LoadBalanceManager, ParallelMixVocabEm
 
 __all__ = [
     'MixDimensionEmbeddingBag',
-    'QREmbedding',
+    'QREmbeddingBag',
     'PEPEmbeddingBag',
     'VocabParallelEmbedding',
     'ColumnParallelEmbeddingBag',

@@ -128,7 +128,7 @@ class BlockEmbeddingBag(nn.Module):
                     "Pretrained weights have dimension {x1}, which is different from linear layer dimensions {x2} \
                         ".format(x1=list(linear_w.shape), x2=[block_embedding_dim, base_embedding_dim])
                 self.linear_weight = nn.Parameter(linear_w, requires_grad=(not freeze_w))
-           
+
     def forward(self, input_, offsets=None, per_sample_weights=None):
         output_parallel = F.embedding_bag(input_, self.embed_weight, offsets, self.max_norm, self.norm_type,
                                           self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,

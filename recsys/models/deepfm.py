@@ -18,9 +18,9 @@ class FeatureEmbedding(nn.Module):
         self.offsets = np.array((0,*np.cumsum(field_dims)[:-1]),dtype=np.long)
 
     def forward(self,x):
-        with record_function('Embedding lookup'):
-            x = x + x.new_tensor(self.offsets).unsqueeze(0)
-            return self.embedding(x)
+        # with record_function('Embedding lookup'):
+        #     x = x + x.new_tensor(self.offsets).unsqueeze(0)
+        return self.embedding(x, self.offsets)
 
     @property
     def weight(self):
@@ -41,9 +41,9 @@ class FeatureLinear(nn.Module):
         self.bias = nn.Parameter(torch.zeros((output_dim,)))
         
     def forward(self,x):
-        with record_function('Linear layer lookup'):
-            x = x + x.new_tensor(self.offsets).unsqueeze(0)
-            return torch.sum(self.fc(x), dim=1) + self.bias
+        # with record_function('Linear layer lookup'):
+        #     x = x + x.new_tensor(self.offsets).unsqueeze(0)
+        return self.fc(x, self.offsets) + self.bias
 
     @property
     def weight(self):
