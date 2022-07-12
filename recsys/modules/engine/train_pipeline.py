@@ -1,9 +1,8 @@
 from typing import Optional
 
 import torch
+import torch.nn as nn
 from torch.profiler import record_function
-
-from recsys.utils.misc import compute_throughput
 
 def _to_device(batch, device: torch.device, non_blocking: bool):
     return batch.to(device=device, non_blocking=non_blocking)
@@ -25,10 +24,14 @@ class TrainPipelineBase:
 
     def __init__(
         self,
-        engine: torch.nn.Module,
-        device: torch.device,
+        model: nn.Module,
+        criterion,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        device: Optional[torch.device] = None,
     ) -> None:
-        self._model = engine
+        self._model = model
+        self._criterion = criterion
+        self._optimizer = optimizer
         self._device = device
         self._memcpy_stream: Optional[torch.cuda.streams.Stream] = (
             torch.cuda.Stream() if device.type == "cuda" else None
@@ -36,8 +39,6 @@ class TrainPipelineBase:
         self._cur_batch = None
         self._label = None
         self._connected = False
-        self.ave_forward_throughput = []
-        self.ave_backward_throughput = []
 
     def _connect(self, dataloader_iter) -> None:
         cur_batch, label = next(dataloader_iter)
@@ -71,24 +72,14 @@ class TrainPipelineBase:
             _wait_for_batch(label, self._memcpy_stream)
 
         with record_function("## forward ##"):
-            with compute_throughput(len(cur_batch)) as ctp:
-                output = self._model(cur_batch)
+            output = self._model(cur_batch)
 
-        fwd_throughput = ctp()
-        # print('forward_throughput is {:.4f}'.format(fwd_throughput))
-        self.ave_forward_throughput.append(fwd_throughput)
-            
         with record_function("## criterion ##"):
-            losses = self._model.criterion(output, label.float())
+            losses = self._criterion(output, label.float())
 
         if self._model.training:
             with record_function("## backward ##"):
-                with compute_throughput(len(cur_batch)) as ctp: 
-                    self._model.backward(losses)
-        
-        bwd_throughput = ctp()
-        # print('backward_throughput is {:.4f}'.format(bwd_throughput))
-        self.ave_backward_throughput.append(bwd_throughput) 
+                losses.backward()
 
         # Copy the next batch to GPU
         self._cur_batch = cur_batch = next_batch
@@ -104,6 +95,6 @@ class TrainPipelineBase:
         # Update
         if self._model.training:
             with record_function("## optimizer ##"):
-                self._model.step()
+                self._optimizer.step()
 
         return losses, output, label
