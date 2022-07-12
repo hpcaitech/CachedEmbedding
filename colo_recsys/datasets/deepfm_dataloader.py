@@ -3,6 +3,7 @@ import shutil
 import struct
 from collections import defaultdict
 from pathlib import Path
+from typing import Tuple
 
 import lmdb
 import torch
@@ -11,122 +12,139 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-class MovieLens20MDataset(torch.utils.data.Dataset):
-    """
-    MovieLens 1B Dataset
-    Data preparation
-        treat samples with a rating less than 3 as negative samples
-    :param dataset_path: MovieLens dataset path
-    Reference:
-        https://grouplens.org/datasets/movielens
-    """
 
-    def __init__(self, dataset_path, sep=',', engine='c', header='infer'):
-        data = pd.read_csv(dataset_path, sep=sep, engine=engine, header=header).to_numpy()[:, :3]
-        self.items = data[:, :2].astype(np.int) - 1  # -1 because ID begins from 1
-        self.targets = self._preprocess_target(data[:, 2]).astype(np.float32)
-        self.field_dims = np.max(self.items, axis=0) + 1
-        self.user_field_idx = np.array((0, ), dtype=np.long)
-        self.item_field_idx = np.array((1,), dtype=np.long)
+class _RandomRecBatch:
+    generator: Optional[torch.Generator]
 
-    def __len__(self):
-        return self.targets.shape[0]
+    def __init__(
+        self,
+        keys: List[str],
+        batch_size: int,
+        hash_sizes: List[int],
+        ids_per_features: List[int],
+        manual_seed: Optional[int] = None,
+        num_generated_batches: int = 10,
+        num_batches: Optional[int] = None,
+    ) -> None:
 
-    def __getitem__(self, index):
-        return self.items[index], self.targets[index]
+        self.keys = keys
+        self.keys_length: int = len(keys)
+        self.batch_size = batch_size
+        self.hash_sizes = hash_sizes
+        self.ids_per_features = ids_per_features
+        self.num_batches = num_batches
+        self.num_generated_batches = num_generated_batches
 
-    def _preprocess_target(self, target):
-        target[target <= 3] = 0
-        target[target > 3] = 1
-        return target
+        if manual_seed is not None:
+            self.generator = torch.Generator()
+            # pyre-ignore[16]
+            self.generator.manual_seed(manual_seed)
+        else:
+            self.generator = None
+
+        self._generated_batches: List[Batch] = [
+            self._generate_batch()
+        ] * num_generated_batches
+        self.batch_index = 0
+
+    def __iter__(self) -> "_RandomRecBatch":
+        self.batch_index = 0
+        return self
+
+    def __next__(self) -> Tuple:
+        if self.batch_index == self.num_batches:
+            raise StopIteration
+        if self.num_generated_batches >= 0:
+            batch = self._generated_batches[
+                self.batch_index % len(self._generated_batches)
+            ]
+        else:
+            batch = self._generate_batch()
+        self.batch_index += 1
+        return batch
+
+    def _generate_batch(self) -> Tuple:
+
+        values = []
+        lengths = []
+        for key_idx, _ in enumerate(self.keys):
+            hash_size = self.hash_sizes[key_idx]
+            num_ids_in_batch = self.ids_per_features[key_idx]
+
+            values.append(
+                # pyre-ignore
+                torch.randint(
+                    high=hash_size,
+                    size=(num_ids_in_batch * self.batch_size,),
+                    generator=self.generator,
+                )
+            )
+            lengths.extend([num_ids_in_batch] * self.batch_size)
+
+        sparse_features = dict(values=values, lengths=lengths)
+
+        labels = torch.randint(
+            low=0,
+            high=2,
+            size=(self.batch_size,),
+            generator=self.generator,
+        )
+
+        batch = (
+            sparse_features,
+            labels,
+        )
+        return batch
 
 
-class AvazuDataset(torch.utils.data.Dataset):
-    """
-    Avazu Click-Through Rate Prediction Dataset
-    Dataset preparation
-        Remove the infrequent features (appearing in less than threshold instances) and treat them as a single feature
-    :param dataset_path: avazu train path
-    :param cache_path: lmdb cache path
-    :param rebuild_cache: If True, lmdb cache is refreshed
-    :param min_threshold: infrequent feature threshold
-    Reference
-        https://www.kaggle.com/c/avazu-ctr-prediction
-    """
+class RandomCriteoDataset(torch.utils.data.Dataset):
+    
+    def __init__(
+        self,
+        keys: List[str],
+        batch_size: int,
+        hash_size: Optional[int] = 100,
+        hash_sizes: Optional[List[int]] = None,
+        ids_per_feature: Optional[int] = 2,
+        ids_per_features: Optional[List[int]] = None,
+        manual_seed: Optional[int] = None,
+        num_batches: Optional[int] = None,
+        num_generated_batches: int = 10,
+    ) -> None:
+        super().__init__()
 
-    def __init__(self, dataset_path=None, cache_path='.avazu', rebuild_cache=False, min_threshold=4):
-        self.NUM_FEATS = 22
-        self.min_threshold = min_threshold
-        if rebuild_cache or not Path(cache_path).exists():
-            shutil.rmtree(cache_path, ignore_errors=True)
-            if dataset_path is None:
-                raise ValueError('create cache: failed: dataset_path is None')
-            self._build_cache(dataset_path, cache_path)
-        self.env = lmdb.open(cache_path, create=False, lock=False, readonly=True)
-        with self.env.begin(write=False) as txn:
-            self.length = txn.stat()['entries'] - 1
-            self.field_dims = np.frombuffer(txn.get(b'field_dims'), dtype=np.uint32)
+        if hash_sizes is None:
+            hash_size = hash_size or 100
+            hash_sizes = [hash_size] * len(keys)
 
-    def __getitem__(self, index):
-        with self.env.begin(write=False) as txn:
-            np_array = np.frombuffer(
-                txn.get(struct.pack('>I', index)), dtype=np.uint32).astype(dtype=np.long)
-        return np_array[1:], np_array[0]
+        assert hash_sizes is not None
+        assert len(hash_sizes) == len(
+            keys
+        ), "length of hash_sizes must be equal to the number of keys"
 
-    def __len__(self):
-        return self.length
+        if ids_per_features is None:
+            ids_per_feature = ids_per_feature or 2
+            ids_per_features = [ids_per_feature] * len(keys)
 
-    def _build_cache(self, path, cache_path):
-        feat_mapper, defaults = self._get_feat_mapper(path)
-        with lmdb.open(cache_path, map_size=int(1e11)) as env:
-            field_dims = np.zeros(self.NUM_FEATS, dtype=np.uint32)
-            for i, fm in feat_mapper.items():
-                field_dims[i - 1] = len(fm) + 1
-            with env.begin(write=True) as txn:
-                txn.put(b'field_dims', field_dims.tobytes())
-            for buffer in self._yield_buffer(path, feat_mapper, defaults):
-                with env.begin(write=True) as txn:
-                    for key, value in buffer:
-                        txn.put(key, value)
+        assert ids_per_features is not None
+        assert len(ids_per_features) == len(
+            keys
+        ), "length of ids_per_features must be equal to the number of keys"
 
-    def _get_feat_mapper(self, path):
-        feat_cnts = defaultdict(lambda: defaultdict(int))
-        with open(path) as f:
-            f.readline()
-            pbar = tqdm(f, mininterval=1, smoothing=0.1)
-            pbar.set_description('Create avazu dataset cache: counting features')
-            for line in pbar:
-                values = line.rstrip('\n').split(',')
-                if len(values) != self.NUM_FEATS + 2:
-                    continue
-                for i in range(1, self.NUM_FEATS + 1):
-                    feat_cnts[i][values[i + 1]] += 1
-        feat_mapper = {i: {feat for feat, c in cnt.items() if c >= self.min_threshold} for i, cnt in feat_cnts.items()}
-        feat_mapper = {i: {feat: idx for idx, feat in enumerate(cnt)} for i, cnt in feat_mapper.items()}
-        defaults = {i: len(cnt) for i, cnt in feat_mapper.items()}
-        return feat_mapper, defaults
+        self.batch_generator = _RandomRecBatch(
+            keys=keys,
+            batch_size=batch_size,
+            hash_sizes=hash_sizes,
+            ids_per_features=ids_per_features,
+            num_dense=num_dense,
+            manual_seed=manual_seed,
+            num_batches=num_batches,
+            num_generated_batches=num_generated_batches,
+        )
 
-    def _yield_buffer(self, path, feat_mapper, defaults, buffer_size=int(1e5)):
-        item_idx = 0
-        buffer = list()
-        with open(path) as f:
-            f.readline()
-            pbar = tqdm(f, mininterval=1, smoothing=0.1)
-            pbar.set_description('Create avazu dataset cache: setup lmdb')
-            for line in pbar:
-                values = line.rstrip('\n').split(',')
-                if len(values) != self.NUM_FEATS + 2:
-                    continue
-                np_array = np.zeros(self.NUM_FEATS + 1, dtype=np.uint32)
-                np_array[0] = int(values[1])
-                for i in range(1, self.NUM_FEATS + 1):
-                    np_array[i] = feat_mapper[i].get(values[i+1], defaults[i])
-                buffer.append((struct.pack('>I', item_idx), np_array.tobytes()))
-                item_idx += 1
-                if item_idx % buffer_size == 0:
-                    yield buffer
-                    buffer.clear()
-            yield buffer
+    def __iter__(self) -> Iterator[Tuple]:
+        return iter(self.batch_generator)
+
 
 class CriteoDataset(torch.utils.data.Dataset):
     """
@@ -147,21 +165,29 @@ class CriteoDataset(torch.utils.data.Dataset):
         self.NUM_FEATS = 39
         self.NUM_INT_FEATS = 13
         self.min_threshold = min_threshold
-        if rebuild_cache or not Path(cache_path).exists():
-            shutil.rmtree(cache_path, ignore_errors=True)
-            if dataset_path is None:
-                raise ValueError('create cache: failed: dataset_path is None')
-            self._build_cache(dataset_path, cache_path)
-        self.env = lmdb.open(cache_path, create=False, lock=False, readonly=True)
-        with self.env.begin(write=False) as txn:
-            self.length = txn.stat()['entries'] - 1
-            self.field_dims = np.frombuffer(txn.get(b'field_dims'), dtype=np.uint32)
+        if not Path(cache_path).exists() and not rebuild_cache:
+            print('Random dataset generated')
+            self.env = None
+            self.dataset = iter(RandomCriteoDataset(
+                    keys=[f"feat{i}" for i in range(self.NUM_FEATS)],
+                    batch_size=16,
+                    hash_size=100_000,
+                    ids_per_feature=1000,))
+            self.length = 100_000
+        else:
+            self.env = lmdb.open(cache_path, create=False, lock=False, readonly=True)
+            with self.env.begin(write=False) as txn:
+                self.length = txn.stat()['entries'] - 1
+                self.field_dims = np.frombuffer(txn.get(b'field_dims'), dtype=np.uint32)
 
     def __getitem__(self, index):
-        with self.env.begin(write=False) as txn:
-            np_array = np.frombuffer(
-                txn.get(struct.pack('>I', index)), dtype=np.uint32).astype(dtype=np.long)
-        return np_array[1:], np_array[0]
+        if self.env is not None:
+            with self.env.begin(write=False) as txn:
+                np_array = np.frombuffer(
+                    txn.get(struct.pack('>I', index)), dtype=np.uint32).astype(dtype=np.long)
+            return np_array[1:], np_array[0]
+        else:
+            return next(self.dataset)
 
     def __len__(self):
         return self.length

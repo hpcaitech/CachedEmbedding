@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.multiprocessing as mp
 from torch.profiler import profile, ProfilerActivity, tensorboard_trace_handler
+import numpy as np
 
 from colossalai.testing import rerun_if_address_is_in_use
 from colossalai.utils import free_port, get_current_device
@@ -90,6 +91,8 @@ def check_mv_embeddingbag():
 
     group = lbmgr.get_group(rank)
     block_dim = lbmgr.get_block_dim(rank)
+    offsets = torch.tensor((0,*np.cumsum(np.array( \
+            FIELD_DIMS, dtype=np.long)[group])[:-1]), device=device)
     comm_func = reduce_forward # need all_reduce
 
     blk_embed = BlockEmbeddingBag(
@@ -112,6 +115,7 @@ def check_mv_embeddingbag():
     torch.distributed.broadcast(A_master, src=0)
 
     A_parallel = lbmgr.shard_tensor(A_master, rank)
+    A_parallel = A_parallel + offsets
     A_output_parallel = blk_embed(A_parallel)
 
     A_output_gather = comm_func(

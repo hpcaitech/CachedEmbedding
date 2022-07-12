@@ -186,6 +186,7 @@ if __name__ == '__main__':
     
     launch_from_torch(backend='nccl', seed=args.seed)
     dist_manager.new_process_group(2, ParallelMode.DATA)
+    dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
     print(dist_manager.get_distributed_info())
 
     if args.use_wandb:
