@@ -80,74 +80,74 @@ def check_block_embeddingbag():
     _print_rank_0('embed backward: pass')
 
 def check_mv_embeddingbag():
-        device = get_current_device()
-        dtype = torch.float32
-        world_size = DISTMGR.get_world_size()
+    device = get_current_device()
+    dtype = torch.float32
+    world_size = DISTMGR.get_world_size()
 
-        lbmgr = LoadBalanceManager(FIELD_DIMS, world_size, EMBEDDING_DIM)
+    lbmgr = LoadBalanceManager(FIELD_DIMS, world_size, EMBEDDING_DIM)
 
-        rank = DISTMGR.get_rank()
+    rank = DISTMGR.get_rank()
 
-        group = lbmgr.get_group(rank)
-        block_dim = lbmgr.get_block_dim(rank)
-        comm_func = reduce_forward # need all_reduce
+    group = lbmgr.get_group(rank)
+    block_dim = lbmgr.get_block_dim(rank)
+    comm_func = reduce_forward # need all_reduce
 
-        blk_embed = BlockEmbeddingBag(
-                        sum([FIELD_DIMS[i] for i in group]),
-                        block_dim,
-                        EMBEDDING_DIM)
+    blk_embed = BlockEmbeddingBag(
+                    sum([FIELD_DIMS[i] for i in group]),
+                    block_dim,
+                    EMBEDDING_DIM)
 
-        blk_embed = blk_embed.to(dtype).to(device)
+    blk_embed = blk_embed.to(dtype).to(device)
 
-        test_embed = ParallelMixVocabEmbeddingBag.from_pretrained(
-                        blk_embed=blk_embed, 
-                        lbmgr=lbmgr,
-                        mode=REDUCE_OPS)
+    test_embed = ParallelMixVocabEmbeddingBag.from_pretrained(
+                    blk_embed=blk_embed, 
+                    lbmgr=lbmgr,
+                    mode=REDUCE_OPS)
 
-        test_embed = test_embed.to(dtype).to(device)
+    test_embed = test_embed.to(dtype).to(device)
 
-        A_shape = (BATCH_SIZE, len(FIELD_DIMS))
-        A_master = torch.randint(min(FIELD_DIMS), A_shape, device=device)
+    A_shape = (BATCH_SIZE, len(FIELD_DIMS))
+    A_master = torch.randint(min(FIELD_DIMS), A_shape, device=device)
 
-        torch.distributed.broadcast(A_master, src=0)
+    torch.distributed.broadcast(A_master, src=0)
 
-        A_parallel = lbmgr.shard_tensor(A_master, rank)
-        A_output_parallel = blk_embed(A_parallel)
+    A_parallel = lbmgr.shard_tensor(A_master, rank)
+    A_output_parallel = blk_embed(A_parallel)
 
-        A_output_gather = comm_func(
-                        A_output_parallel, 
-                        ParallelMode.DEFAULT,
-                        reduce_op=REDUCE_OPS)
+    A_output_gather = comm_func(
+                    A_output_parallel, 
+                    ParallelMode.DEFAULT,
+                    reduce_op=REDUCE_OPS)
 
-        if REDUCE_OPS == 'mean':
-            A_output_gather = A_output_gather / world_size
+    if REDUCE_OPS == 'mean':
+        A_output_gather = A_output_gather / world_size
 
-        A = A_master.clone()
-        test_out = test_embed(A)
+    A = A_master.clone()
+    test_out = test_embed(A)
 
-        check_equal(test_out.detach(), A_output_gather.detach())
-        _print_rank_0('embed forward: pass')
+    check_equal(test_out.detach(), A_output_gather.detach())
+    _print_rank_0('embed forward: pass')
 
-        grad_shape = A_output_gather.shape
-        grad_master = torch.randn(grad_shape, dtype=dtype, device=device)
-        torch.distributed.broadcast(grad_master, src=0)
+    grad_shape = A_output_gather.shape
+    grad_master = torch.randn(grad_shape, dtype=dtype, device=device)
+    torch.distributed.broadcast(grad_master, src=0)
 
-        grad = grad_master.clone()
-        A_output_gather.backward(grad)
+    grad = grad_master.clone()
+    A_output_gather.backward(grad)
 
-        grad_master = grad_master.clone()
-        test_out.backward(grad_master)
+    grad_master = grad_master.clone()
+    test_out.backward(grad_master)
 
-        blk_weights = blk_embed.get_weights(detach=False)
-        test_weights = test_embed.get_weights(detach=False)
+    blk_weights = blk_embed.get_weights(detach=False)
+    test_weights = test_embed.get_weights(detach=False)
 
-        for (w1,w2) in zip(blk_weights, test_weights):
-            if w1 is None or w2 is None:
-                assert w1 is None and w2 is None
-            else:
-                check_equal(w1.grad, w2.grad)
+    for (w1,w2) in zip(blk_weights, test_weights):
+        if w1 is None or w2 is None:
+            assert w1 is None and w2 is None
+        else:
+            check_equal(w1.grad, w2.grad)
 
-        _print_rank_0('embed backward: pass')
+    _print_rank_0('embed backward: pass')
 
 def check_layer(rank, world_size, port):
     disable_existing_loggers()

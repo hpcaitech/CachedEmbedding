@@ -16,13 +16,13 @@ from recsys.modules.dataloader import get_dataloader
 from colo_recsys.datasets import CriteoDataset
 from recsys.models import DeepFactorizationMachine
 from colo_recsys.utils.common import (
-    # CAT_FEATURE_COUNT, DEFAULT_CAT_NAMES, 
     count_parameters,
     EarlyStopper,
 )
 from recsys.modules.engine import TrainPipelineBase
 
 args = None
+
 
 def parse_dfm_args():
     parser = get_default_parser()
@@ -59,7 +59,7 @@ def parse_dfm_args():
     parser.add_argument('--enable_qr', action='store_true')
     
     # Visual
-    parser.add_argument('--tboard_name', type=str, default='mvembed-2tp2dp')
+    parser.add_argument('--tboard_name', type=str, default='mvembed-4tp2dp')
     
     args = parser.parse_args()
 
@@ -68,15 +68,13 @@ def parse_dfm_args():
 def train(model, criterion, optimizer, data_loader, device, prof, epoch, log_interval=100):
     model.train()
     total_loss = 0
-
-    pipe = TrainPipelineBase(model, criterion, optimizer, device)
+    pipe = TrainPipelineBase(model, criterion, optimizer, device=device)
     iterator = iter(data_loader)
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
             losses, _, _ = pipe.progress(iterator)
-            # print(losses)
             prof.step()
         
             total_loss += losses
@@ -103,11 +101,14 @@ def test(model, criterion, data_loader, device, epoch=0):
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
             with torch.no_grad():
+                # try:
                 _, output, label = pipe.progress(iterator)
+                #     auroc(output, label)
+                #     accuracy(output, label)
+                # except:
+                #     break
                 targets.extend(label.tolist())
                 predicts.extend(output.tolist())
-            # auroc(output, label)
-            # accuracy(output, label)
 
         except StopIteration:
             break
@@ -118,11 +119,11 @@ def test(model, criterion, data_loader, device, epoch=0):
     return roc_auc_score(targets, predicts)
 
 def main(args):
-    device = torch.device('cuda', torch.cuda.current_device())
+    curr_device = torch.device('cuda', torch.cuda.current_device())
     if args.dataset == 'criteo':
         dataset = CriteoDataset(args.dataset_path, args.cache_path)
     else:
-        print('dataset not supported')
+        dist_logger.warning('dataset not supported',ranks=[0])
         dataset = CriteoDataset(args.dataset_path, args.cache_path)
     
     train_length = int(len(dataset) * 0.8)
@@ -136,7 +137,7 @@ def main(args):
     test_data_loader = get_dataloader(test_dataset, shuffle=True, batch_size=args.batch_size, pin_memory=True, num_workers=16)
 
     model = DeepFactorizationMachine(dataset.field_dims, \
-                    args.embed_dim, eval(args.mlp_dims), args.dropout, args.enable_qr).to(device)
+                    args.embed_dim, eval(args.mlp_dims), args.dropout, args.enable_qr).to(curr_device)
 
     dist_logger.info(count_parameters(model,'Number of parameters'), ranks=[0])
 
@@ -156,8 +157,8 @@ def main(args):
         early_stopper = EarlyStopper(verbose=True)
         
         for epoch_i in range(args.epoch):
-            train_loss = train(model, criterion, optimizer, train_data_loader, device, prof, epoch_i)
-            auc = test(model, criterion, valid_data_loader, device, epoch_i)
+            train_loss = train(model, criterion, optimizer, train_data_loader, curr_device, prof, epoch_i)
+            auc = test(model, criterion, valid_data_loader, curr_device, epoch_i)
 
             dist_logger.info(
             f"Epoch {epoch_i} - train loss: {train_loss:.5}, auc: {auc:.5}",ranks=[0])
@@ -168,14 +169,14 @@ def main(args):
             early_stopper(auc)
 
             if early_stopper.early_stop:
-                print("Early stopping")
+                dist_logger.info("Early stopping", ranks=[0])
                 break
 
         t3 = time.time()
-        print('overall training time:',t3-t0,'s')
+        dist_logger.info(f'overall training time:{t3-t0}s',ranks=[0])
 
-        auc = test(model, criterion, test_data_loader, device)
-        print(f'test auc: {auc:.5}\n')
+        auc = test(model, criterion, test_data_loader, curr_device)
+        dist_logger.info(f'test auc: {auc:.5}\n',ranks=[0])
 
 
 if __name__ == '__main__':
@@ -184,8 +185,7 @@ if __name__ == '__main__':
     disable_existing_loggers()
     
     launch_from_torch(backend='nccl', seed=args.seed)
-    dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
-    
+    dist_manager.new_process_group(2, ParallelMode.DATA)
     print(dist_manager.get_distributed_info())
 
     if args.use_wandb:

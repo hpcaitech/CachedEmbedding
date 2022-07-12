@@ -3,8 +3,8 @@ import torch.nn as nn
 import numpy as np
 from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
+from recsys import ParallelMode
 from recsys.modules.embeddings import ParallelQREmbedding, ParallelMixVocabEmbeddingBag
-from recsys import DISTMGR
 
 
 class FeatureEmbedding(nn.Module):
@@ -14,40 +14,25 @@ class FeatureEmbedding(nn.Module):
         if enable_qr:
             self.embedding = ParallelQREmbedding(emb_dim, sum(field_dims) // 50, verbose=False)
         else:
-            self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim)
-        self.offsets = np.array((0,*np.cumsum(field_dims)[:-1]),dtype=np.long)
+            self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='mean')
 
     def forward(self,x):
-        # with record_function('Embedding lookup'):
-        #     x = x + x.new_tensor(self.offsets).unsqueeze(0)
-        return self.embedding(x, self.offsets)
-
-    @property
-    def weight(self):
-        return self.embedding.weight
-
+        return self.embedding(x)
+    
 
 class FeatureLinear(nn.Module):
 
     def __init__(self, field_dims, enable_qr, output_dim=1):
         super().__init__()
-        # May change to use embeddingbag(mode='sum')
-        # self.fc = nn.EmbeddingBag(sum(field_dims), output_dim, mode='sum')
         if enable_qr:
             self.fc = ParallelQREmbedding(output_dim, sum(field_dims) // 50, verbose=False)
         else:
-            self.fc = ParallelMixVocabEmbeddingBag(field_dims, output_dim)
-        self.offsets = np.array((0,*np.cumsum(field_dims[:-1])),dtype=np.long)
+            # self.fc = nn.EmbeddingBag(sum(field_dims), output_dim, mode='mean')
+            self.fc = ParallelMixVocabEmbeddingBag(field_dims, output_dim, mode='mean')
         self.bias = nn.Parameter(torch.zeros((output_dim,)))
         
     def forward(self,x):
-        # with record_function('Linear layer lookup'):
-        #     x = x + x.new_tensor(self.offsets).unsqueeze(0)
-        return self.fc(x, self.offsets) + self.bias
-
-    @property
-    def weight(self):
-        return self.fc.weight
+        return self.fc(x) + self.bias
 
 
 class FactorizationMachine(nn.Module):
@@ -72,7 +57,6 @@ class MultiLayerPerceptron(nn.Module):
 
         for i in range(len(emb_dims)-1):
             layers.append(nn.Linear(emb_dims[i],emb_dims[i+1]))
-            # layers.append(col_nn.LayerNorm(emb_dims[i+1]))
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
 
@@ -84,10 +68,6 @@ class MultiLayerPerceptron(nn.Module):
     def forward(self, x):
         with record_function('MLP layer'):
             return self.mlp(x)
-
-    @property
-    def weight(self):
-        return [layer.weight for layer in self.mlp]
         
         
 class DeepFactorizationMachine(nn.Module):
@@ -105,12 +85,9 @@ class DeepFactorizationMachine(nn.Module):
         :param x: Long tensor of size ``(batch_size, num_fields)``
         """
         embed_x = self.embedding(x)
-        # print('### embed x',embed_x.size()) # [16384, 128]
-        # print('### linear',self.linear(x).squeeze(1).size())
-        # print('### fm',self.fm(embed_x).size())
-        # print('### mlp',torch.sum(self.mlp(embed_x).squeeze(-1),dim=1).size())
-        if self.enable_qr:
-            x = self.linear(x) + self.fm(embed_x) + self.mlp(embed_x).squeeze(1)
-        else:
-            x = self.linear(x).squeeze(1) + torch.sum(self.fm(embed_x),dim=1) + torch.sum(self.mlp(embed_x).squeeze(-1),dim=1)
+        # print('[DEBUG] embed x',embed_x.size()) # [16384, 128]
+        # print('[DEBUG] linear',self.linear(x).squeeze(1).size())
+        # print('[DEBUG] fm',self.fm(embed_x).size())
+        # print('[DEBUG] mlp',self.mlp(embed_x).squeeze(-1).size())
+        x = self.linear(x).squeeze(1) + self.fm(embed_x) + self.mlp(embed_x).squeeze(-1)
         return torch.sigmoid(x)

@@ -1,5 +1,5 @@
 import math
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -9,6 +9,8 @@ import numpy as np
 
 from recsys import DISTMGR, ParallelMode, DISTLogger
 from ..functional import reduce_forward
+
+np.random.seed(123)
 
 
 class LoadBalanceManager(object):
@@ -23,6 +25,7 @@ class LoadBalanceManager(object):
     def _initialize(self) -> None:
         dim_indices = np.array(range(len(self.field_dims)))
         np.random.shuffle(dim_indices)
+        # dim_indices = np.argsort(self.field_dims)
         chunk_size = len(self.field_dims) // self.num_groups
         self.groups = []
 
@@ -38,9 +41,15 @@ class LoadBalanceManager(object):
             # scale base embedding dim by total_sum/sum
             div = total_sum / sum([self.field_dims[x] for x in group])
             # divide base dim by a 2^n nearest to div
-            emb_dim = int(self.base_emb_dim / 2**(int(math.log2(div))))
+            emb_dim = max(2, int(self.base_emb_dim / 2**(int(math.log2(div)))))
             self.emb_dims.append(emb_dim)
-
+            
+    def shard_tensor(self, _input: Tensor, rank: int, device = None) -> Tensor:
+        assert hasattr(self, 'groups') and rank in range(0, self.num_groups)
+        group = self.groups[rank]
+        assert min(group) >= 0 and max(group) < _input.size(1)
+        return _input[:, group].to(device)
+            
     def get_group(self, rank: int) -> List[List[int]]:
         assert hasattr(self, 'groups') and rank in range(0, self.num_groups)
         return self.groups[rank]
@@ -56,12 +65,6 @@ class LoadBalanceManager(object):
     def get_base_dim(self) -> int:
         assert hasattr(self, 'base_emb_dim') and self.base_emb_dim is not None
         return self.base_emb_dim
-
-    def shard_tensor(self, _input: Tensor, rank: int) -> Tensor:
-        assert hasattr(self, 'groups')
-        group = self.groups[rank]
-        assert min(group) >= 0 and max(group) < _input.size(1)
-        return _input[:, group]
 
 
 class BlockEmbeddingBag(nn.Module):
@@ -133,6 +136,7 @@ class BlockEmbeddingBag(nn.Module):
         output_parallel = F.embedding_bag(input_, self.embed_weight, offsets, self.max_norm, self.norm_type,
                                           self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
                                           self.include_last_offset, self.padding_idx)
+        
         if self.block_embedding_dim != self.base_embedding_dim:
             output_parallel = F.linear(output_parallel, self.linear_weight, bias=None)
         
@@ -197,12 +201,14 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                 blk_embed: Optional[BlockEmbeddingBag] = None,
                 lbmgr: Optional[LoadBalanceManager] = None,
                 freeze: bool = False,
+                device = None,
                 *args,
                 **kwargs):
         super().__init__()
         self.field_dims = field_dims
         self.embedding_dim = embedding_dim
         self.mode = mode
+        self.device = device if device is not None else torch.device('cuda', torch.cuda.current_device())
 
         # Decide number of nodes
         self.parallel_mode = ParallelMode.DEFAULT if parallel_mode is None else parallel_mode
@@ -218,6 +224,8 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
             self.lbmgr = LoadBalanceManager(field_dims, self.num_groups, embedding_dim)
 
         self.group = self.lbmgr.get_group(self.rank)
+        self.offsets = torch.tensor((0,*np.cumsum(np.array( \
+            self.field_dims, dtype=np.long)[self.group])[:-1]), device=self.device)
         self.block_dim = self.lbmgr.get_block_dim(self.rank)
         self.comm_func = reduce_forward
 
@@ -248,10 +256,15 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                                     *args,
                                     **kwargs)
 
-    def forward(self, x, offsets=None):
-        x_parallel = self.lbmgr.shard_tensor(x, self.rank)
-        output_parallel = self.embed(x_parallel, offsets)
-        output_gather = self.comm_func(output_parallel, self.parallel_mode)#, reduce_op=self.mode)
+    def _shard_tensor(self, _input: Tensor) -> Tensor:
+        assert min(self.group) >= 0 and max(self.group) < _input.size(1)
+        return _input[:, self.group].to(self.device)
+    
+    def forward(self, x):
+        x_parallel = self._shard_tensor(x)
+        x_parallel = x_parallel + self.offsets
+        output_parallel = self.embed(x_parallel)
+        output_gather = self.comm_func(output_parallel, self.parallel_mode, reduce_op=self.mode)
 
         if self.mode == 'mean':
             output_gather = output_gather / self.num_groups

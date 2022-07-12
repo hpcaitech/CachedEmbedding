@@ -34,7 +34,7 @@ class TrainPipelineBase:
         self._optimizer = optimizer
         self._device = device
         self._memcpy_stream: Optional[torch.cuda.streams.Stream] = (
-            torch.cuda.Stream() if device.type == "cuda" else None
+            torch.cuda.Stream() if device is not None and device.type == "cuda" else None
         )
         self._cur_batch = None
         self._label = None
@@ -90,7 +90,7 @@ class TrainPipelineBase:
         with record_function("## copy_batch_to_gpu ##"):
             with torch.cuda.stream(self._memcpy_stream):
                 self._cur_batch = _to_device(self._cur_batch, self._device, non_blocking=True)
-                self._label = _to_device( self._label, self._device, non_blocking=True)
+                self._label = _to_device(self._label, self._device, non_blocking=True)
 
         # Update
         if self._model.training:
