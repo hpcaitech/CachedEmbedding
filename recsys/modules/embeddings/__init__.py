@@ -4,10 +4,11 @@ from .pep_embedding import PEPEmbeddingBag
 from .parallel_embeddings import (VocabParallelEmbedding, ColumnParallelEmbeddingBag, FusedHybridParallelEmbeddingBag,
                                   ParallelQREmbedding)
 from .parallel_mix_vocab_embedding import LoadBalanceManager, ParallelMixVocabEmbeddingBag, BlockEmbeddingBag
-from .cached_embeddings import CacheReplacePolicy, CachedEmbeddingBag
+from .cached_embeddings import CacheReplacePolicy, CachedEmbeddingBag, ParallelCachedEmbeddingBag
 
 __all__ = [
     'MixDimensionEmbeddingBag', 'QREmbeddingBag', 'PEPEmbeddingBag', 'VocabParallelEmbedding',
     'ColumnParallelEmbeddingBag', 'FusedHybridParallelEmbeddingBag', 'ParallelQREmbedding', 'LoadBalanceManager',
-    'ParallelMixVocabEmbeddingBag', 'BlockEmbeddingBag', 'CacheReplacePolicy', 'CachedEmbeddingBag'
+    'ParallelMixVocabEmbeddingBag', 'BlockEmbeddingBag', 'CacheReplacePolicy', 'CachedEmbeddingBag',
+    'ParallelCachedEmbeddingBag'
 ]

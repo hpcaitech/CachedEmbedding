@@ -13,7 +13,7 @@ def get_mem_info(prefix=''):
 @contextmanager
 def compute_throughput(batch_size) -> float:
     start = perf_counter()
-    yield lambda : batch_size / ((perf_counter() - start)*1000)
+    yield lambda: batch_size / ((perf_counter() - start) * 1000)
 
 
 @contextmanager
@@ -109,3 +109,22 @@ class Timer:
         self._history = []
         self._started = False
         self._elapsed = 0
+
+
+def get_partition(embedding_dim, rank, world_size):
+    if world_size == 1:
+        return 0, embedding_dim, True
+
+    assert embedding_dim >= world_size, \
+        f"Embedding dimension {embedding_dim} must be larger than the world size " \
+        f"{world_size} of the process group"
+    chunk_size = embedding_dim // world_size
+    threshold = embedding_dim % world_size
+    # if embedding dim is divisible by world size
+    if threshold == 0:
+        return rank * chunk_size, (rank + 1) * chunk_size, True
+
+    # align with the split strategy of torch.tensor_split
+    size_list = [chunk_size + 1 if i < threshold else chunk_size for i in range(world_size)]
+    offset = sum(size_list[:rank])
+    return offset, offset + size_list[rank], False
