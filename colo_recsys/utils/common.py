@@ -12,9 +12,13 @@ from colossalai.context.parallel_mode import ParallelMode
 from recsys import DISTMGR
 
 
-def get_mem_info(prefix=''):
-    return f'{prefix}GPU memory usage: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, ' \
-           f'CPU memory usage: {psutil.Process().memory_info().rss / 1024**3:.2f} GB'
+def get_model_mem(model, name=''): 
+    mem_params = sum([param.nelement()*param.element_size() 
+                    for param in model.parameters()])
+    mem_bufs = sum([buf.nelement()*buf.element_size() 
+                    for buf in model.buffers()])
+    mem = mem_params + mem_bufs
+    return f"{name} {mem / 1024**3} GB"
 
 
 def count_parameters(model, prefix=''):

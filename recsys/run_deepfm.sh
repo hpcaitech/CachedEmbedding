@@ -1,0 +1,1 @@
+torchrun --nproc_per_node=4 --nnodes=1 --node_rank=0 --rdzv_backend='c10d' --rdzv_endpoint='127.0.0.1:29502' deepfm_main.py --dataset 'criteo' --repeated_run 1 --enable_qr --group 'deepfm-mvemb' # --memory_fraction 0.4

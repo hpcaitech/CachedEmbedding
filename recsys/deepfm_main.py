@@ -3,29 +3,29 @@ import datetime
 import itertools
 from tqdm import tqdm
 
-import colossalai
-from colossalai.core import global_context as gpc
-from colossalai.logging import get_dist_logger
-from colossalai.context import ParallelMode
-from colossalai.utils import get_current_device
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
-from sklearn.metrics import roc_auc_score
 import wandb
+from sklearn.metrics import roc_auc_score
 
+from recsys.utils import get_default_parser
+from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, DISTMGR as dist_manager, DISTLogger as
+                    dist_logger)
 from colo_recsys.datasets import CriteoDataset
-from colo_recsys.models import DeepFactorizationMachine
+from recsys.datasets import criteo
+from recsys.models import DeepFactorizationMachine
 from colo_recsys.utils import (
+    count_parameters,
+    EarlyStopper,
     get_model_mem,
 )
-from colo_recsys.modules.engine import TrainPipelineBase
-from recsys.datasets import criteo
+from recsys.modules.engine import TrainPipelineBase
 
 args = None
 
 
-def parse_dfm_args():    
-    parser = colossalai.get_default_parser()
+def parse_dfm_args():
+    parser = get_default_parser()
 
     parser.add_argument('--seed', type=int, default=2022,
                         help='Random seed.')
@@ -53,8 +53,8 @@ def parse_dfm_args():
         default=None,
         help="number of test batches",
     )
-    parser.add_argument("--num_embeddings", type=int, default=100)
-    
+    parser.add_argument("--num_embeddings", type=int, default=10000)
+
     # Model setting
     parser.add_argument(
         "--num_embeddings_per_feature",
@@ -63,7 +63,7 @@ def parse_dfm_args():
         help="Comma separated max_ind_size per sparse feature. The number of embeddings"
         " in each embedding table. 26 values are expected for the Criteo dataset.",
     )
-    parser.add_argument('--embed_dim', type=int, default=128,
+    parser.add_argument('--embed_dim', type=int, default=1024,
                         help='User / entity Embedding size.')
     parser.add_argument(
         "--mlp",
@@ -86,6 +86,9 @@ def parse_dfm_args():
     parser.add_argument('--repeated_runs', type=int, default=1)
     parser.add_argument('--group', type=str, default='')
 
+    # Embed
+    parser.add_argument('--enable_qr', action='store_true')
+    
     # Tensorboard
     parser.add_argument('--tboard_name', type=str, default='mvembed-4tp')
     
@@ -94,19 +97,19 @@ def parse_dfm_args():
     if args.kaggle:
         setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
     if args.num_embeddings_per_feature is not None:
-        args.num_embeddings_per_feature = list(map(lambda x:int(x), args.num_embeddings_per_feature.split(",")))
+        args.num_embeddings_per_feature = list(map(lambda x:int(x)*5, args.num_embeddings_per_feature.split(",")))
 
     for stage in criteo.STAGES:
         attr = f"limit_{stage}_batches"
         if getattr(args, attr) is None:
-            setattr(args, attr, 100)
+            setattr(args, attr, 1000)
 
     return args
 
-def train(model, data_loader, device, prof, epoch, log_interval=100):
+def train(model, criterion, optimizer, data_loader, device, prof, epoch, log_interval=100):
     model.train()
     total_loss = 0
-    pipe = TrainPipelineBase(model, device)
+    pipe = TrainPipelineBase(model, criterion, optimizer, device=device)
     iterator = iter(data_loader)
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
@@ -114,21 +117,23 @@ def train(model, data_loader, device, prof, epoch, log_interval=100):
         try:
             losses, _, _ = pipe.progress(iterator)
             prof.step()
-            
+        
             total_loss += losses
+            
             if args.use_wandb:
                 wandb.log({'loss':losses})
+
         except StopIteration:
             break
     
     return total_loss
 
-def test(model, data_loader, device, epoch=0):
+def test(model, criterion, data_loader, device, epoch=0):
     model.eval()
 
     targets, predicts = list(), list()
 
-    pipe = TrainPipelineBase(model, device)
+    pipe = TrainPipelineBase(model, criterion, device=device)
     iterator = iter(data_loader)
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
@@ -145,11 +150,7 @@ def test(model, data_loader, device, epoch=0):
     return roc_auc_score(targets, predicts)
 
 def main(args):
-    colossalai.logging.disable_existing_loggers()
-    logger = get_dist_logger()
-    
-    curr_device = get_current_device()
-    
+    curr_device = torch.device('cuda', torch.cuda.current_device())
     train_dataset, valid_dataset, test_dataset = CriteoDataset(args).train_val_splits()
     
     train_data_loader = train_dataset# get_dataloader(train_dataset, batch_size=args.batch_size, pin_memory=True)
@@ -157,14 +158,12 @@ def main(args):
     test_data_loader = test_dataset# get_dataloader(test_dataset, batch_size=args.batch_size, pin_memory=True)
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
-                    args.embed_dim, eval(args.mlp), args.dropout).to(curr_device)
+                    args.embed_dim, eval(args.mlp), args.dropout, args.enable_qr).to(curr_device)
 
-    logger.info(get_model_mem(model,f'[rank{gpc.get_global_rank()}]model'), ranks=[0])
+    dist_logger.info(count_parameters(model,f'[rank{dist_manager.get_rank()}]model'), ranks=[0])
 
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-
-    engine, _, _, _ = colossalai.initialize(model,optimizer,criterion)
 
     with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -175,38 +174,47 @@ def main(args):
     ) as prof:
         t0 = time.time()
     
+        early_stopper = EarlyStopper(verbose=True)
+        
         for epoch_i in range(args.epoch):
-            train_loss = train(engine, train_data_loader, curr_device, prof, epoch_i)
-            auc = test(engine, valid_data_loader, curr_device)
+            train_loss = train(model, criterion, optimizer, train_data_loader, curr_device, prof, epoch_i)
+            auc = test(model, criterion, valid_data_loader, curr_device, epoch_i)
 
-            logger.info(
+            dist_logger.info(
             f"Epoch {epoch_i} - train loss: {train_loss:.5}, auc: {auc:.5}",ranks=[0])
 
             if args.use_wandb:
                 wandb.log({'AUC score': auc})
 
-        t3 = time.time()
-        logger.info(f'overall training time:{t3-t0}s',ranks=[0])
+            early_stopper(auc)
 
-        auc = test(engine, test_data_loader, curr_device)
-        logger.info(f'test auc: {auc:.5}\n',ranks=[0])
+            if early_stopper.early_stop:
+                dist_logger.info("Early stopping", ranks=[0])
+                break
+
+        t3 = time.time()
+        dist_logger.info(f'overall training time:{t3-t0}s',ranks=[0])
+        auc = test(model, criterion, test_data_loader, curr_device)
+        dist_logger.info(f'test auc: {auc:.5}\n',ranks=[0])
 
 
 if __name__ == '__main__':
     # launch distributed environment
     args = parse_dfm_args()
+    disable_existing_loggers()
     
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
-    colossalai.launch_from_torch(args.config, verbose=False)
+    launch_from_torch(backend='nccl', seed=args.seed)
+    # dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
+    print(dist_manager.get_distributed_info())
 
     if args.use_wandb:
-        run = wandb.init(project="deepfm-colossal", entity="jiatongg", group=args.group, name=f'run{args.repeated_runs}-{gpc.get_world_size(ParallelMode.GLOBAL)}GPUs-{datetime.datetime.now().strftime("%x")}')
+        run = wandb.init(project="deepfm-colossal", entity="jiatongg", group=args.group, name=f'run{args.repeated_runs}-{dist_manager.get_world_size(ParallelMode.DATA)}GPUs-{datetime.datetime.now().strftime("%x")}')
         wandb.config = {
             'batch_size': args.batch_size,
             'epochs': args.epoch,
-            'parallel_mode': gpc.config.parallel,
-            'amp': hasattr(gpc.config, 'fp16')
+            'parallel_mode': dist_manager.get_distributed_info(),
         }
 
     main(args)

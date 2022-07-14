@@ -1,16 +1,22 @@
 import math
-from typing import List, Optional, Union
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.distributed import ReduceOp
 import numpy as np
 
-from recsys import DISTMGR, ParallelMode, DISTLogger
-from ..functional import reduce_forward
+from colossalai.utils import get_current_device
+from colossalai.core import global_context as gpc
+from colossalai.logging import get_dist_logger
+from colossalai.context import ParallelMode
+from colossalai.communication import all_reduce
 
 np.random.seed(123)  
+_reduce_ops = dict(sum=ReduceOp.SUM, max=ReduceOp.MAX, mean=ReduceOp.SUM)
+logger = get_dist_logger()
 
 
 class LoadBalanceManager(object):
@@ -208,12 +214,12 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         self.field_dims = field_dims
         self.embedding_dim = embedding_dim
         self.mode = mode
-        self.device = device if device is not None else torch.device('cuda', torch.cuda.current_device())
+        self.device = device if device is not None else get_current_device()
 
         # Decide number of nodes
         self.parallel_mode = ParallelMode.DEFAULT if parallel_mode is None else parallel_mode
-        self.world_size = DISTMGR.get_world_size(self.parallel_mode)
-        self.rank = DISTMGR.get_rank(self.parallel_mode)
+        self.world_size = gpc.get_world_size(self.parallel_mode)
+        self.rank = gpc.get_local_rank(self.parallel_mode)
         self.num_groups = self.world_size # default setting
 
         if lbmgr is not None:
@@ -227,7 +233,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         self.offsets = torch.tensor((0,*np.cumsum(np.array( \
             self.field_dims, dtype=np.long)[self.group])[:-1]), device=self.device)
         self.block_dim = self.lbmgr.get_block_dim(self.rank)
-        self.comm_func = reduce_forward
+        self.comm_func = all_reduce
 
         if blk_embed is not None:
             weights = blk_embed.get_weights(detach=True)
@@ -240,8 +246,8 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                     'passed linear layer dimensions are wrong: {x1} vs {x2} \
                     '.format(x1=weights[1].size(), x2=(self.embedding_dim, self.block_dim))
             if base_embedding_dim != self.embedding_dim:
-                DISTLogger.warning('Base embedding dimension provided by blk_embed is different from \
-                    default or manually passed. Will overwrite by blk_embed.base_embedding_dim')
+                logger.warning('Base embedding dimension provided by blk_embed is different from \
+                    default or manually passed. Will overwrite by blk_embed.base_embedding_dim', ranks=[0])
                 self.embedding_dim = base_embedding_dim
             self.embed = BlockEmbeddingBag.from_pretrained(
                                                 weights=weights,
@@ -264,7 +270,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         x_parallel = self._shard_tensor(x)
         x_parallel = x_parallel + self.offsets
         output_parallel = self.embed(x_parallel)
-        output_gather = self.comm_func(output_parallel, self.parallel_mode, reduce_op=self.mode)
+        output_gather = self.comm_func(output_parallel, self.parallel_mode, op=_reduce_ops[self.mode])
 
         if self.mode == 'mean':
             output_gather = output_gather / self.num_groups

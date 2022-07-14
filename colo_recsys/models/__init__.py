@@ -1,3 +1,3 @@
-from .deepFM import DeepFactorizationMachine
+from .colossal_deepfm import DeepFactorizationMachine
 
 __all__ = ['DeepFactorizationMachine']

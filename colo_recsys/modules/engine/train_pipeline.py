@@ -1,9 +1,8 @@
 from typing import Optional
 
 import torch
-import torch.nn as nn
 from torch.profiler import record_function
-import torchmetrics as metrics
+
 
 def _to_device(batch, device: torch.device, non_blocking: bool):
     return batch.to(device=device, non_blocking=non_blocking)
@@ -25,19 +24,13 @@ class TrainPipelineBase:
 
     def __init__(
         self,
-        model: nn.Module,
-        criterion,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        device: Optional[torch.device] = None,
-        metric: Optional[metrics.Metric] = None,
+        engine: torch.nn.Module,
+        device: torch.device,
     ) -> None:
-        self._model = model
-        self._criterion = criterion
-        self._optimizer = optimizer
+        self._model = engine
         self._device = device
-        self._metric = metric
         self._memcpy_stream: Optional[torch.cuda.streams.Stream] = (
-            torch.cuda.Stream() if device is not None and device.type == "cuda" else None
+            torch.cuda.Stream() if device.type == "cuda" else None
         )
         self._cur_batch = None
         self._connected = False
@@ -71,11 +64,11 @@ class TrainPipelineBase:
             output = self._model(cur_batch.sparse_features, cur_batch.dense_features)
 
         with record_function("## criterion ##"):
-            losses = self._criterion(output, cur_batch.labels)
+            losses = self._model.criterion(output, cur_batch.labels)
 
         if self._model.training:
             with record_function("## backward ##"):
-                losses.backward()
+                self._model.backward(losses)
 
         # Copy the next batch to GPU
         self._cur_batch = next_batch
@@ -87,6 +80,6 @@ class TrainPipelineBase:
         # Update
         if self._model.training:
             with record_function("## optimizer ##"):
-                self._optimizer.step()
+                self._model.step()
 
         return losses, output, cur_batch.labels
