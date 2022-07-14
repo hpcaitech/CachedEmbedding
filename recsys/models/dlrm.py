@@ -22,6 +22,7 @@ from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
 from ..modules.embeddings import ColumnParallelEmbeddingBag, FusedHybridParallelEmbeddingBag
 from .. import ParallelMode, DISTLogger, DISTMGR as dist_manager
 from ..utils import get_time_elapsed
+from ..datasets.utils import KJTAllToAll
 
 
 class SparseArch(nn.Module):
@@ -115,6 +116,10 @@ class DLRM(nn.Module):
         return logits
 
 
+def sparse_embedding_shape_hook(embeddings, feature_size, batch_size):
+    return embeddings.view(feature_size, batch_size, -1).transpose(0, 1)
+
+
 class FusedSparseModules(nn.Module):
 
     def __init__(self,
@@ -134,25 +139,20 @@ class FusedSparseModules(nn.Module):
                                                      sparse=sparse,
                                                      include_last_offset=True,
                                                      output_device_type=output_device_type)
-
-        offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
-        self.register_buffer('offsets', torch.from_numpy(offsets).requires_grad_(False), False)
         self.world_size = dist_manager.get_world_size(parallel_mode)
+        self.kjt_collector = KJTAllToAll(dist_manager.get_group(parallel_mode))
 
     def forward(self, sparse_features):
-        keys = sparse_features.keys()
-        assert len(keys) == len(self.offsets), f"keys len: {len(keys)}, offsets len: {len(self.offsets)}"
+        sparse_features = self.kjt_collector.all_to_all(sparse_features)
+        keys, batch_size = sparse_features.keys(), sparse_features.stride()
 
-        sparse_dict = sparse_features.to_dict()
-        flattened_sparse_features = torch.cat(
-            [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
+        flattened_sparse_features = sparse_features.values()
         batch_offsets = sparse_features.offsets()
 
-        batch_size = len(sparse_features.lengths()) // len(keys)
-        feature_size = len(keys)
-        flattened_sparse_embeddings = self.embed(flattened_sparse_features,
-                                                 batch_offsets,
-                                                 send_shape=(batch_size, feature_size, -1))
+        flattened_sparse_embeddings = self.embed(
+            flattened_sparse_features,
+            batch_offsets,
+            shape_hook=lambda x: sparse_embedding_shape_hook(x, len(keys), batch_size))
         return flattened_sparse_embeddings
 
 

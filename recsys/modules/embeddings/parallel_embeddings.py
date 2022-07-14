@@ -262,7 +262,7 @@ class FusedHybridParallelEmbeddingBag(ColumnParallelEmbeddingBag):
 
         self.fused_op = fused_op
 
-    def forward(self, input_, offsets=None, per_sample_weights=None, send_shape=None, scatter_dim=0, gather_dim=-1):
+    def forward(self, input_, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
         output_parallel = F.embedding_bag(input_, self.weight, offsets, self.max_norm, self.norm_type,
                                           self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
                                           self.include_last_offset, self.padding_idx)
@@ -270,8 +270,8 @@ class FusedHybridParallelEmbeddingBag(ColumnParallelEmbeddingBag):
         if self.output_device_type == 'cuda' and output_parallel.device.type == 'cpu':
             output_parallel = output_parallel.cuda()
 
-        if send_shape is not None:
-            output_parallel = output_parallel.view(*send_shape)
+        if shape_hook is not None:
+            output_parallel = shape_hook(output_parallel)
 
         if self.fused_op == 'all_to_all':
             # TODO: check situations when the scatter dim is indivisible by world size
@@ -292,7 +292,7 @@ class ParallelQREmbedding(nn.Module):
         self,
         embedding_dim: int,
         num_buckets: int,
-    ):                 
+    ):
         super().__init__()
         self.num_buckets = num_buckets
         self.q_embeddings = ColumnParallelEmbeddingBag(

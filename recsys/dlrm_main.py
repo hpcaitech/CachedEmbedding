@@ -179,10 +179,7 @@ def parse_args():
 
 
 def put_data_in_device(batch, dense_device, sparse_device, rank, world_size):
-    # TODO: consider reading in different data in different rank
-    dense = torch.tensor_split(batch.dense_features.to(dense_device), world_size, dim=0)[rank]
-    labels = torch.tensor_split(batch.labels.to(dense_device), world_size, 0)[rank]
-    return dense, batch.sparse_features.to(sparse_device), labels
+    return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(dense_device)
 
 
 @dataclass
@@ -305,15 +302,13 @@ def main():
     launch_from_torch(backend='nccl', seed=args.seed)
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
-    # TODO: remove this group when using hybrid parallelism
-    dist_manager.new_process_group(1, ParallelMode.DATA)
 
     dist_logger.info(f"launch rank: {dist_manager.get_rank()}, {dist_manager.get_distributed_info()}")
     dist_logger.info(f"config: {args}", ranks=[0])
 
-    train_dataloader = criteo.get_dataloader(args, 'train', ParallelMode.DATA)
-    val_dataloader = criteo.get_dataloader(args, "val", ParallelMode.DATA)
-    test_dataloader = criteo.get_dataloader(args, "test", ParallelMode.DATA)
+    train_dataloader = criteo.get_dataloader(args, 'train')
+    val_dataloader = criteo.get_dataloader(args, "val")
+    test_dataloader = criteo.get_dataloader(args, "test")
     if args.in_memory_binary_criteo_path is not None:
         dist_logger.info(
             f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "

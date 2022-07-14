@@ -17,6 +17,8 @@ class KJTAllToAll:
 
     @torch.no_grad()
     def all_to_all(self, kjt):
+        if self.world_size == 1:
+            return kjt
         # TODO: add sample weights
         values, lengths = kjt.values(), kjt.lengths()
         keys, batch_size = kjt.keys(), kjt.stride()
@@ -47,5 +49,4 @@ class KJTAllToAll:
             keys=keys,
             values=all_values,
             lengths=all_lengths,
-            stride=batch_size,
         )
