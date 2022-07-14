@@ -13,6 +13,7 @@ from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, D
                     dist_logger)
 from colo_recsys.datasets import CriteoDataset
 from recsys.datasets import criteo
+from recsys.modules.dataloader import get_dataloader
 from recsys.models import DeepFactorizationMachine
 from colo_recsys.utils import (
     count_parameters,
@@ -34,6 +35,8 @@ def parse_dfm_args():
     parser.add_argument("--kaggle", action='store_false')
     parser.add_argument('--dataset_path', nargs='?', default='/criteo/train/')
     parser.add_argument('--cache_path', nargs='?', default='.criteo') #'../../deepfm-colossal/.criteo'
+    
+    # Scale
     parser.add_argument("--memory_fraction", type=float, default=None)
     parser.add_argument(
         "--limit_train_batches",
@@ -97,12 +100,12 @@ def parse_dfm_args():
     if args.kaggle:
         setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
     if args.num_embeddings_per_feature is not None:
-        args.num_embeddings_per_feature = list(map(lambda x:int(x)*5, args.num_embeddings_per_feature.split(",")))
+        args.num_embeddings_per_feature = list(map(lambda x:int(x)*500, args.num_embeddings_per_feature.split(",")))
 
     for stage in criteo.STAGES:
         attr = f"limit_{stage}_batches"
         if getattr(args, attr) is None:
-            setattr(args, attr, 10000)
+            setattr(args, attr, 100)
 
     return args
 
@@ -151,11 +154,14 @@ def test(model, criterion, data_loader, device, epoch=0):
 
 def main(args):
     curr_device = torch.device('cuda', torch.cuda.current_device())
-    train_dataset, valid_dataset, test_dataset = CriteoDataset(args).train_val_splits()
+
+    # train_data_loader = criteo.get_dataloader(args, 'train', ParallelMode.DATA)
+    # valid_data_loader = criteo.get_dataloader(args, "val", ParallelMode.DATA)
+    # test_data_loader = criteo.get_dataloader(args, "test", ParallelMode.DATA)
     
-    train_data_loader = train_dataset# get_dataloader(train_dataset, batch_size=args.batch_size, pin_memory=True)
-    valid_data_loader = valid_dataset# get_dataloader(valid_dataset, batch_size=args.batch_size, pin_memory=True)
-    test_data_loader = test_dataset# get_dataloader(test_dataset, batch_size=args.batch_size, pin_memory=True)
+    train_data_loader = CriteoDataset(args,mode='train')
+    valid_data_loader = CriteoDataset(args,mode='val')
+    test_data_loader = CriteoDataset(args,mode='test')
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
                     args.embed_dim, eval(args.mlp), args.dropout, args.enable_qr).to(curr_device)
@@ -207,6 +213,7 @@ if __name__ == '__main__':
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
     dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
+    dist_manager.new_process_group(1, ParallelMode.DATA)
     print(dist_manager.get_distributed_info())
 
     if args.use_wandb:
