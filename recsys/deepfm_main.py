@@ -38,19 +38,19 @@ def parse_dfm_args():
     parser.add_argument(
         "--limit_train_batches",
         type=int,
-        default=None,
+        default=100,
         help="number of train batches",
     )
     parser.add_argument(
         "--limit_val_batches",
         type=int,
-        default=None,
+        default=20,
         help="number of validation batches",
     )
     parser.add_argument(
         "--limit_test_batches",
         type=int,
-        default=None,
+        default=20,
         help="number of test batches",
     )
     parser.add_argument("--num_embeddings", type=int, default=10000)
@@ -102,7 +102,7 @@ def parse_dfm_args():
     for stage in criteo.STAGES:
         attr = f"limit_{stage}_batches"
         if getattr(args, attr) is None:
-            setattr(args, attr, 1000)
+            setattr(args, attr, 10000)
 
     return args
 
@@ -206,7 +206,7 @@ if __name__ == '__main__':
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
-    # dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
+    dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
     print(dist_manager.get_distributed_info())
 
     if args.use_wandb:
