@@ -321,7 +321,7 @@ class ParallelQREmbedding(nn.Module):
         remainder_embedding = self.r_embeddings(remainder_index)
 
         # Use multiplication as a combiner operation
-        return torch.sum(quotient_embedding * remainder_embedding, dim=1)
+        return quotient_embedding * remainder_embedding
 
     @property
     def weight(self):

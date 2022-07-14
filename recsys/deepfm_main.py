@@ -4,20 +4,20 @@ import itertools
 from tqdm import tqdm
 
 import torch
-import torchmetrics as metrics
-from torch.profiler import profile, record_function, ProfilerActivity, schedule, tensorboard_trace_handler
+from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
 import wandb
 from sklearn.metrics import roc_auc_score
 
 from recsys.utils import get_default_parser
 from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, DISTMGR as dist_manager, DISTLogger as
                     dist_logger)
-from recsys.modules.dataloader import get_dataloader
 from colo_recsys.datasets import CriteoDataset
+from recsys.datasets import criteo
 from recsys.models import DeepFactorizationMachine
-from colo_recsys.utils.common import (
+from colo_recsys.utils import (
     count_parameters,
     EarlyStopper,
+    get_model_mem,
 )
 from recsys.modules.engine import TrainPipelineBase
 
@@ -31,15 +31,46 @@ def parse_dfm_args():
                         help='Random seed.')
 
     # Dataset
-    parser.add_argument('--dataset', type=str, default='criteo')
-    parser.add_argument('--dataset_path', nargs='?', default=None)
-    parser.add_argument('--cache_path', nargs='?', default='../../deepfm-colossal/.criteo')
-    
+    parser.add_argument("--kaggle", action='store_false')
+    parser.add_argument('--dataset_path', nargs='?', default='/criteo/train/')
+    parser.add_argument('--cache_path', nargs='?', default='.criteo') #'../../deepfm-colossal/.criteo'
+    parser.add_argument("--memory_fraction", type=float, default=None)
+    parser.add_argument(
+        "--limit_train_batches",
+        type=int,
+        default=None,
+        help="number of train batches",
+    )
+    parser.add_argument(
+        "--limit_val_batches",
+        type=int,
+        default=None,
+        help="number of validation batches",
+    )
+    parser.add_argument(
+        "--limit_test_batches",
+        type=int,
+        default=None,
+        help="number of test batches",
+    )
+    parser.add_argument("--num_embeddings", type=int, default=10000)
+
     # Model setting
-    parser.add_argument('--embed_dim', type=int, default=128,
+    parser.add_argument(
+        "--num_embeddings_per_feature",
+        type=str,
+        default=None,
+        help="Comma separated max_ind_size per sparse feature. The number of embeddings"
+        " in each embedding table. 26 values are expected for the Criteo dataset.",
+    )
+    parser.add_argument('--embed_dim', type=int, default=1024,
                         help='User / entity Embedding size.')
-    parser.add_argument('--mlp_dims', nargs='?', default='[128]',
-                        help='Output sizes of every hidden layer.')
+    parser.add_argument(
+        "--mlp",
+        type=str,
+        default="[128]",
+        help="Comma separated layer sizes for dense arch.",
+    )
     parser.add_argument('--dropout', nargs='?', default=0.2,
                         help='Dropout probability w.r.t. message dropout for bi-interaction layer and each hidden layer. 0: no dropout.')
     parser.add_argument('--batch_size', type=int, default=16384,
@@ -58,10 +89,20 @@ def parse_dfm_args():
     # Embed
     parser.add_argument('--enable_qr', action='store_true')
     
-    # Visual
-    parser.add_argument('--tboard_name', type=str, default='mvembed-4tp2dp')
+    # Tensorboard
+    parser.add_argument('--tboard_name', type=str, default='mvembed-4tp')
     
     args = parser.parse_args()
+    
+    if args.kaggle:
+        setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+    if args.num_embeddings_per_feature is not None:
+        args.num_embeddings_per_feature = list(map(lambda x:int(x)*5, args.num_embeddings_per_feature.split(",")))
+
+    for stage in criteo.STAGES:
+        attr = f"limit_{stage}_batches"
+        if getattr(args, attr) is None:
+            setattr(args, attr, 1000)
 
     return args
 
@@ -91,8 +132,6 @@ def test(model, criterion, data_loader, device, epoch=0):
     model.eval()
 
     targets, predicts = list(), list()
-    # auroc = metrics.AUROC(compute_on_step=False).to(device)
-    # accuracy = metrics.Accuracy(compute_on_step=False).to(device)
 
     pipe = TrainPipelineBase(model, criterion, device=device)
     iterator = iter(data_loader)
@@ -101,47 +140,29 @@ def test(model, criterion, data_loader, device, epoch=0):
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
             with torch.no_grad():
-                # try:
                 _, output, label = pipe.progress(iterator)
-                #     auroc(output, label)
-                #     accuracy(output, label)
-                # except:
-                #     break
                 targets.extend(label.tolist())
                 predicts.extend(output.tolist())
 
         except StopIteration:
             break
 
-    # auroc_result = auroc.compute().item()
-    # accuracy_result = accuracy.compute().item()
-
     return roc_auc_score(targets, predicts)
 
 def main(args):
     curr_device = torch.device('cuda', torch.cuda.current_device())
-    if args.dataset == 'criteo':
-        dataset = CriteoDataset(args.dataset_path, args.cache_path)
-    else:
-        dist_logger.warning('dataset not supported',ranks=[0])
-        dataset = CriteoDataset(args.dataset_path, args.cache_path)
+    train_dataset, valid_dataset, test_dataset = CriteoDataset(args).train_val_splits()
     
-    train_length = int(len(dataset) * 0.8)
-    valid_length = int(len(dataset) * 0.1)
-    test_length = len(dataset) - train_length - valid_length
-    train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
-        dataset, (train_length, valid_length, test_length))
-    
-    train_data_loader = get_dataloader(train_dataset, shuffle=True, batch_size=args.batch_size, pin_memory=True, num_workers=16)
-    valid_data_loader = get_dataloader(valid_dataset, shuffle=True, batch_size=args.batch_size, pin_memory=True, num_workers=16)
-    test_data_loader = get_dataloader(test_dataset, shuffle=True, batch_size=args.batch_size, pin_memory=True, num_workers=16)
+    train_data_loader = train_dataset# get_dataloader(train_dataset, batch_size=args.batch_size, pin_memory=True)
+    valid_data_loader = valid_dataset# get_dataloader(valid_dataset, batch_size=args.batch_size, pin_memory=True)
+    test_data_loader = test_dataset# get_dataloader(test_dataset, batch_size=args.batch_size, pin_memory=True)
 
-    model = DeepFactorizationMachine(dataset.field_dims, \
-                    args.embed_dim, eval(args.mlp_dims), args.dropout, args.enable_qr).to(curr_device)
+    model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
+                    args.embed_dim, eval(args.mlp), args.dropout, args.enable_qr).to(curr_device)
 
-    dist_logger.info(count_parameters(model,'Number of parameters'), ranks=[0])
+    dist_logger.info(count_parameters(model,f'[rank{dist_manager.get_rank()}]model'), ranks=[0])
 
-    criterion = torch.nn.BCELoss()
+    criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     with profile(
@@ -149,7 +170,6 @@ def main(args):
             profile_memory=True, 
             record_shapes=True,
             schedule=schedule(wait=0, warmup=30, active=2, repeat=1),
-            # on_trace_ready=trace_handler, 
             on_trace_ready=tensorboard_trace_handler(f'log/{args.tboard_name}'),
     ) as prof:
         t0 = time.time()
@@ -174,7 +194,6 @@ def main(args):
 
         t3 = time.time()
         dist_logger.info(f'overall training time:{t3-t0}s',ranks=[0])
-
         auc = test(model, criterion, test_data_loader, curr_device)
         dist_logger.info(f'test auc: {auc:.5}\n',ranks=[0])
 
@@ -184,9 +203,10 @@ if __name__ == '__main__':
     args = parse_dfm_args()
     disable_existing_loggers()
     
+    if args.memory_fraction is not None:
+        torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
-    dist_manager.new_process_group(2, ParallelMode.DATA)
-    dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
+    # dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
     print(dist_manager.get_distributed_info())
 
     if args.use_wandb:

@@ -1,16 +1,51 @@
-import math
-import shutil
-import struct
+from typing import Tuple, List, Optional, Iterator
 from collections import defaultdict
 from pathlib import Path
-from typing import Tuple
+from dataclasses import dataclass
+import math
+import struct
 
-import lmdb
 import torch
 import torch.utils.data
+from torch.utils.data.dataset import IterableDataset
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
+import lmdb
+
+INT_FEATURE_COUNT = 13
+CAT_FEATURE_COUNT = 26
+DEFAULT_INT_NAMES: List[str] = [f"int_{idx}" for idx in range(INT_FEATURE_COUNT)]
+DEFAULT_CAT_NAMES: List[str] = [f"cat_{idx}" for idx in range(CAT_FEATURE_COUNT)]
+
+
+@dataclass
+class Batch:
+    dense_features: torch.Tensor
+    sparse_features: torch.Tensor
+    labels: torch.Tensor
+
+    def to(self, device: torch.device, non_blocking: bool = False) -> "Batch":
+        return Batch(
+            dense_features=self.dense_features.to(
+                device=device, non_blocking=non_blocking
+            ),
+            sparse_features=self.sparse_features.to(
+                device=device, non_blocking=non_blocking
+            ),
+            labels=self.labels.to(device=device, non_blocking=non_blocking),
+        )
+
+    def record_stream(self, stream: torch.cuda.streams.Stream) -> None:
+        self.dense_features.record_stream(stream)
+        self.sparse_features.record_stream(stream)
+        self.labels.record_stream(stream)
+
+    def pin_memory(self) -> "Batch":
+        return Batch(
+            dense_features=self.dense_features.pin_memory(),
+            sparse_features=self.sparse_features.pin_memory(),
+            labels=self.labels.pin_memory(),
+        )
 
 
 class _RandomRecBatch:
@@ -22,6 +57,7 @@ class _RandomRecBatch:
         batch_size: int,
         hash_sizes: List[int],
         ids_per_features: List[int],
+        num_dense: int,
         manual_seed: Optional[int] = None,
         num_generated_batches: int = 10,
         num_batches: Optional[int] = None,
@@ -32,17 +68,17 @@ class _RandomRecBatch:
         self.batch_size = batch_size
         self.hash_sizes = hash_sizes
         self.ids_per_features = ids_per_features
+        self.num_dense = num_dense
         self.num_batches = num_batches
         self.num_generated_batches = num_generated_batches
 
         if manual_seed is not None:
             self.generator = torch.Generator()
-            # pyre-ignore[16]
             self.generator.manual_seed(manual_seed)
         else:
             self.generator = None
 
-        self._generated_batches: List[Batch] = [
+        self._generated_batches: List[Tuple] = [
             self._generate_batch()
         ] * num_generated_batches
         self.batch_index = 0
@@ -51,7 +87,7 @@ class _RandomRecBatch:
         self.batch_index = 0
         return self
 
-    def __next__(self) -> Tuple:
+    def __next__(self) -> Batch:
         if self.batch_index == self.num_batches:
             raise StopIteration
         if self.num_generated_batches >= 0:
@@ -63,10 +99,9 @@ class _RandomRecBatch:
         self.batch_index += 1
         return batch
 
-    def _generate_batch(self) -> Tuple:
+    def _generate_batch(self) -> Batch:
 
         values = []
-        lengths = []
         for key_idx, _ in enumerate(self.keys):
             hash_size = self.hash_sizes[key_idx]
             num_ids_in_batch = self.ids_per_features[key_idx]
@@ -79,9 +114,14 @@ class _RandomRecBatch:
                     generator=self.generator,
                 )
             )
-            lengths.extend([num_ids_in_batch] * self.batch_size)
-
-        sparse_features = dict(values=values, lengths=lengths)
+            
+        sparse_features = torch.cat([y.unsqueeze(1) for y in values], dim=1)
+        
+        dense_features = torch.randn(
+            self.batch_size,
+            self.num_dense,
+            generator=self.generator,
+        )
 
         labels = torch.randint(
             low=0,
@@ -90,15 +130,16 @@ class _RandomRecBatch:
             generator=self.generator,
         )
 
-        batch = (
-            sparse_features,
-            labels,
+        batch = Batch(
+            sparse_features=sparse_features,
+            dense_features=dense_features,
+            labels=labels.float(),
         )
         return batch
 
 
-class RandomCriteoDataset(torch.utils.data.Dataset):
-    
+class RandomCriteoDataset(IterableDataset[Batch]):
+
     def __init__(
         self,
         keys: List[str],
@@ -107,6 +148,7 @@ class RandomCriteoDataset(torch.utils.data.Dataset):
         hash_sizes: Optional[List[int]] = None,
         ids_per_feature: Optional[int] = 2,
         ids_per_features: Optional[List[int]] = None,
+        num_dense: int = 50,
         manual_seed: Optional[int] = None,
         num_batches: Optional[int] = None,
         num_generated_batches: int = 10,
@@ -142,7 +184,7 @@ class RandomCriteoDataset(torch.utils.data.Dataset):
             num_generated_batches=num_generated_batches,
         )
 
-    def __iter__(self) -> Iterator[Tuple]:
+    def __iter__(self) -> Iterator[Batch]:
         return iter(self.batch_generator)
 
 
@@ -161,24 +203,39 @@ class CriteoDataset(torch.utils.data.Dataset):
         https://www.csie.ntu.edu.tw/~r01922136/kaggle-2014-criteo.pdf
     """
 
-    def __init__(self, dataset_path=None, cache_path='.criteo', rebuild_cache=False, min_threshold=10):
+    def __init__(self, args, rebuild_cache=False, min_threshold=10):
         self.NUM_FEATS = 39
         self.NUM_INT_FEATS = 13
         self.min_threshold = min_threshold
-        if not Path(cache_path).exists() and not rebuild_cache:
+        if not Path(args.cache_path).exists() and not rebuild_cache:
             print('Random dataset generated')
             self.env = None
-            self.dataset = iter(RandomCriteoDataset(
-                    keys=[f"feat{i}" for i in range(self.NUM_FEATS)],
-                    batch_size=16,
-                    hash_size=100_000,
-                    ids_per_feature=1000,))
-            self.length = 100_000
+            for stage in ['train', 'val', 'test']:
+                setattr(self, f'{stage}_dataset', RandomCriteoDataset(
+                        keys=DEFAULT_CAT_NAMES,
+                        batch_size=args.batch_size,
+                        hash_size=args.num_embeddings,
+                        hash_sizes=args.num_embeddings_per_feature if hasattr(args, "num_embeddings_per_feature") else None,
+                        manual_seed=args.seed if hasattr(args, "seed") else None,
+                        ids_per_feature=1,
+                        num_dense=len(DEFAULT_INT_NAMES),
+                        num_batches=getattr(args, f"limit_{stage}_batches"),))
         else:
-            self.env = lmdb.open(cache_path, create=False, lock=False, readonly=True)
+            self.env = lmdb.open(args.cache_path, create=False, lock=False, readonly=True)
             with self.env.begin(write=False) as txn:
                 self.length = txn.stat()['entries'] - 1
                 self.field_dims = np.frombuffer(txn.get(b'field_dims'), dtype=np.uint32)
+        
+    def train_val_splits(self):
+        if self.env is not None:
+            train_length = int(self.__len__() * 0.8)
+            valid_length = int(self.__len__() * 0.1)
+            test_length = self.__len__() - train_length - valid_length
+            train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
+                self, (train_length, valid_length, test_length))
+            return (train_dataset, valid_dataset, test_dataset)
+        else:
+            return (self.train_dataset, self.val_dataset, self.test_dataset)
 
     def __getitem__(self, index):
         if self.env is not None:
@@ -187,10 +244,13 @@ class CriteoDataset(torch.utils.data.Dataset):
                     txn.get(struct.pack('>I', index)), dtype=np.uint32).astype(dtype=np.long)
             return np_array[1:], np_array[0]
         else:
-            return next(self.dataset)
+            raise NotImplementedError()
 
     def __len__(self):
-        return self.length
+        if self.env is not None:
+            return self.length
+        else:
+            raise NotImplementedError()
 
     def _build_cache(self, path, cache_path):
         feat_mapper, defaults = self._get_feat_mapper(path)

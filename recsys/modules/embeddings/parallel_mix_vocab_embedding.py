@@ -10,7 +10,7 @@ import numpy as np
 from recsys import DISTMGR, ParallelMode, DISTLogger
 from ..functional import reduce_forward
 
-np.random.seed(123)
+np.random.seed(123)  
 
 
 class LoadBalanceManager(object):
