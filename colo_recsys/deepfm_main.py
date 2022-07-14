@@ -13,7 +13,7 @@ from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trac
 from sklearn.metrics import roc_auc_score
 import wandb
 
-from colo_recsys.datasets.colossal_dataloader import get_dataloader
+from colo_recsys.datasets import CriteoDataset
 from colo_recsys.models import DeepFactorizationMachine
 from colo_recsys.utils import (
     get_model_mem,
@@ -31,46 +31,9 @@ def parse_dfm_args():
                         help='Random seed.')
 
     # Dataset
-    parser.add_argument("--kaggle", action='store_true')
-    parser.add_argument(
-        "--pin_memory",
-        dest="pin_memory",
-        action="store_true",
-        help="Use pinned memory when loading data.",
-    )
-    parser.add_argument(
-        "--mmap_mode",
-        dest="mmap_mode",
-        action="store_true",
-        help="--mmap_mode mmaps the dataset."
-        " That is, the dataset is kept on disk but is accessed as if it were in memory."
-        " --mmap_mode is intended mostly for faster debugging. Use --mmap_mode to bypass"
-        " preloading the dataset when preloading takes too long or when there is "
-        " insufficient memory available to load the full dataset.",
-    )
-    parser.add_argument(
-        "--in_memory_binary_criteo_path",
-        type=str,
-        default=None,
-        help="Path to a folder containing the binary (npy) files for the Criteo dataset."
-        " When supplied, InMemoryBinaryCriteoIterDataPipe is used.",
-    )
-    parser.add_argument(
-        "--shuffle_batches",
-        dest="shuffle_batches",
-        action="store_true",
-        help="Shuffle each batch during training.",
-    )
-
-    # Model
-    parser.add_argument(
-        "--num_embeddings_per_feature",
-        type=str,
-        default=None,
-        help="Comma separated max_ind_size per sparse feature. The number of embeddings"
-        " in each embedding table. 26 values are expected for the Criteo dataset.",
-    )
-    
+    parser.add_argument("--kaggle", action='store_false')
+    parser.add_argument('--dataset_path', nargs='?', default='/criteo/train/')
+    parser.add_argument('--cache_path', nargs='?', default='.criteo') #'../../deepfm-colossal/.criteo'
     parser.add_argument("--memory_fraction", type=float, default=None)
     parser.add_argument(
         "--limit_train_batches",
@@ -90,8 +53,7 @@ def parse_dfm_args():
         default=None,
         help="number of test batches",
     )
-    parser.add_argument("--num_embeddings", type=int, default=10000)
-
+    parser.add_argument("--num_embeddings", type=int, default=100)
     
     # Model setting
     parser.add_argument(
@@ -101,7 +63,7 @@ def parse_dfm_args():
         help="Comma separated max_ind_size per sparse feature. The number of embeddings"
         " in each embedding table. 26 values are expected for the Criteo dataset.",
     )
-    parser.add_argument('--embed_dim', type=int, default=1024,
+    parser.add_argument('--embed_dim', type=int, default=128,
                         help='User / entity Embedding size.')
     parser.add_argument(
         "--mlp",
@@ -188,9 +150,11 @@ def main(args):
     
     curr_device = get_current_device()
     
-    train_dataloader = get_dataloader(args, 'train')
-    val_dataloader = get_dataloader(args, "val")
-    test_dataloader = get_dataloader(args, "test")
+    train_dataset, valid_dataset, test_dataset = CriteoDataset(args).train_val_splits()
+    
+    train_data_loader = train_dataset# get_dataloader(train_dataset, batch_size=args.batch_size, pin_memory=True)
+    valid_data_loader = valid_dataset# get_dataloader(valid_dataset, batch_size=args.batch_size, pin_memory=True)
+    test_data_loader = test_dataset# get_dataloader(test_dataset, batch_size=args.batch_size, pin_memory=True)
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
                     args.embed_dim, eval(args.mlp), args.dropout).to(curr_device)
@@ -212,7 +176,8 @@ def main(args):
         t0 = time.time()
     
         for epoch_i in range(args.epoch):
-            train_loss = train(engine, train_dataloader, curr_device, prof, epoch_i)
+            train_loss = train(engine, train_data_loader, curr_device, prof, epoch_i)
+            auc = test(engine, valid_data_loader, curr_device)
 
             logger.info(
             f"Epoch {epoch_i} - train loss: {train_loss:.5}, auc: {auc:.5}",ranks=[0])
@@ -223,7 +188,7 @@ def main(args):
         t3 = time.time()
         logger.info(f'overall training time:{t3-t0}s',ranks=[0])
 
-        auc = test(engine, test_dataloader, curr_device)
+        auc = test(engine, test_data_loader, curr_device)
         logger.info(f'test auc: {auc:.5}\n',ranks=[0])
 
 

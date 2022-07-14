@@ -219,7 +219,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         # Decide number of nodes
         self.parallel_mode = ParallelMode.DEFAULT if parallel_mode is None else parallel_mode
         self.world_size = gpc.get_world_size(self.parallel_mode)
-        self.rank = gpc.get_rank(self.parallel_mode)
+        self.rank = gpc.get_local_rank(self.parallel_mode)
         self.num_groups = self.world_size # default setting
 
         if lbmgr is not None:
@@ -270,7 +270,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         x_parallel = self._shard_tensor(x)
         x_parallel = x_parallel + self.offsets
         output_parallel = self.embed(x_parallel)
-        output_gather = self.comm_func(output_parallel, self.parallel_mode, reduce_op=_reduce_ops[self.mode])
+        output_gather = self.comm_func(output_parallel, self.parallel_mode, op=_reduce_ops[self.mode])
 
         if self.mode == 'mean':
             output_gather = output_gather / self.num_groups

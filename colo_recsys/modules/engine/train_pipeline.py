@@ -68,7 +68,7 @@ class TrainPipelineBase:
 
         if self._model.training:
             with record_function("## backward ##"):
-                self._model.backward()
+                self._model.backward(losses)
 
         # Copy the next batch to GPU
         self._cur_batch = next_batch
