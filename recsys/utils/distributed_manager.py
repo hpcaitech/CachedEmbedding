@@ -58,6 +58,9 @@ class DistributedManager(metaclass=SingletonMeta):
                 cpu_group = group_cpu
                 ranks_in_group = ranks
         self.add_process_group(mode, process_group, cpu_group, ranks_in_group)
+        
+    def is_initialized(self, name=ParallelMode.DEFAULT):
+        return name in self.process_groups
 
     def get_distributed_info(self):
         info_str = "\n"

@@ -5,9 +5,9 @@ from colossalai.amp import AMP_TYPE
 # )
 
 parallel = dict(
-     data=2,
-     pipeline=1,
-     #tensor=dict(size=2, mode='1d')
+     # data=2,
+     # pipeline=1,
+     tensor=dict(size=4, mode='1d')
 ) 
 
 inspect_time = False

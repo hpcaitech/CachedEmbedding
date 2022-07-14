@@ -1,23 +1,22 @@
-import math
-
 import torch
 import torch.nn as nn
+import numpy as np
 from torch.profiler import record_function
 
-from recsys import ParallelMode, DISTLogger, DISTMGR
-from recsys.modules.embeddings import ParallelMixVocabEmbeddingBag, ParallelQREmbedding
+from colossalai.core import global_context as gpc
+from colossalai.logging import get_dist_logger
+from colossalai.context import ParallelMode
+from colo_recsys.modules.embeddings import ParallelMixVocabEmbeddingBag
 from colo_recsys.utils import count_parameters
+
+logger = get_dist_logger()
 
 
 class FeatureEmbedding(nn.Module):
     
-    def __init__(self, field_dims, emb_dim, enable_qr):
+    def __init__(self, field_dims, emb_dim):
         super().__init__()
-        if enable_qr:
-            self.embedding = ParallelQREmbedding(emb_dim, math.ceil(math.sqrt(sum(field_dims))))
-            print('Saved params (M)',emb_dim*(sum(field_dims) - math.ceil(math.sqrt(sum(field_dims))))//1_000_000)
-        else:
-            self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='mean', parallel_mode=ParallelMode.TENSOR_PARALLEL)
+        self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='mean', parallel_mode=ParallelMode.TENSOR)
 
     def forward(self,x):
         return self.embedding(x)
@@ -71,19 +70,19 @@ class MultiLayerPerceptron(nn.Module):
         
 class DeepFactorizationMachine(nn.Module):
     
-    def __init__(self, num_embed_per_feature, dense_input_dim, embed_dim, mlp_dims, dropout, enable_qr):
+    def __init__(self, num_embed_per_feature, dense_input_dim, embed_dim, mlp_dims, dropout):
         super().__init__()
-        world_size = DISTMGR.get_world_size()
-        rank = DISTMGR.get_rank()
+        world_size = gpc.get_world_size()
+        rank = gpc.get_local_rank()
         self.linear = FeatureLinear(dense_input_dim, embed_dim)
         self.fm = FactorizationMachine(reduce_sum=True)
-        self.embedding = FeatureEmbedding(num_embed_per_feature, embed_dim, enable_qr)
+        self.embedding = FeatureEmbedding(num_embed_per_feature, embed_dim)
         self.mlp = MultiLayerPerceptron([embed_dim*2]+mlp_dims, dropout)
         
-        # DISTLogger.info(count_parameters(self.linear,f'[rank{rank}]linear'), ranks=list(range(world_size)))
-        # DISTLogger.info(count_parameters(self.fm,f'[rank{rank}]fm'), ranks=list(range(world_size)))
-        # DISTLogger.info(count_parameters(self.embedding,f'[rank{rank}]embed'), ranks=list(range(world_size)))
-        # DISTLogger.info(count_parameters(self.mlp,f'[rank{rank}]mlp'), ranks=list(range(world_size)))
+        logger.info(count_parameters(self.linear,f'[rank{rank}]linear'), ranks=list(range(world_size)))
+        logger.info(count_parameters(self.fm,f'[rank{rank}]fm'), ranks=list(range(world_size)))
+        logger.info(count_parameters(self.embedding,f'[rank{rank}]embed'), ranks=list(range(world_size)))
+        logger.info(count_parameters(self.mlp,f'[rank{rank}]mlp'), ranks=list(range(world_size)))
 
     def forward(self, sparse_feats, dense_feats):
         """
