@@ -156,7 +156,8 @@ class FusedSparseModules(nn.Module):
         self.kjt_collector = KJTAllToAll(dist_manager.get_group(parallel_mode))
 
     def forward(self, sparse_features):
-        sparse_features = self.kjt_collector.all_to_all(sparse_features)
+        with record_function("(zhg)KJT AllToAll collective"):
+            sparse_features = self.kjt_collector.all_to_all(sparse_features)
 
         keys, batch_size = sparse_features.keys(), sparse_features.stride()
 
@@ -250,10 +251,6 @@ class HybridParallelDLRM(nn.Module):
         self.stat_str = stat_str
 
     def forward(self, dense_features, sparse_features, inspect_time=False):
-        """
-        dense_features:     B // world size, dense feature dim
-        sparse_features:    B,               sparse feature dim
-        """
         ctx1 = get_time_elapsed(DISTLogger, "embedding lookup in forward pass") \
             if inspect_time else nullcontext()
         with ctx1:
