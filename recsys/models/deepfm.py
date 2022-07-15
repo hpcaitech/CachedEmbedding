@@ -19,8 +19,21 @@ class FeatureEmbedding(nn.Module):
             
         # print('Saved params (M)',emb_dim*(sum(field_dims) - math.ceil(math.sqrt(sum(field_dims))))//1_000_000)
 
-    def forward(self,x):
-        return self.embedding(x)
+    def forward(self,sparse_features):
+        keys = sparse_features.keys()
+        assert len(keys) == len(self.offsets), f"keys len: {len(keys)}, offsets len: {len(self.offsets)}"
+
+        sparse_dict = sparse_features.to_dict()
+        flattened_sparse_features = torch.cat(
+            [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
+        batch_offsets = sparse_features.offsets()
+
+        batch_size = len(sparse_features.lengths()) // len(keys)
+        feature_size = len(keys)
+        flattened_sparse_embeddings = self.embedding(flattened_sparse_features,
+                                                 batch_offsets,
+                                                 send_shape=(batch_size, feature_size, -1))
+        return flattened_sparse_embeddings
     
 
 class FeatureLinear(nn.Module):

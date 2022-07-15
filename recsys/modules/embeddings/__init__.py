@@ -1,13 +1,11 @@
-from .md_embedding import MixDimensionEmbeddingBag
-from .qr_embedding import QREmbeddingBag
 from .pep_embedding import PEPEmbeddingBag
 from .parallel_embeddings import (VocabParallelEmbedding, ColumnParallelEmbeddingBag, FusedHybridParallelEmbeddingBag,
                                   ParallelQREmbedding)
-from .parallel_mix_vocab_embedding import LoadBalanceManager, ParallelMixVocabEmbeddingBag, BlockEmbeddingBag
+from .parallel_mix_vocab_embedding import LoadBalanceManager, ParallelMixVocabEmbeddingBag, BlockEmbeddingBag, QREmbeddingBag
 from .cached_embeddings import CacheReplacePolicy, CachedEmbeddingBag, ParallelCachedEmbeddingBag
 
 __all__ = [
-    'MixDimensionEmbeddingBag', 'QREmbeddingBag', 'PEPEmbeddingBag', 'VocabParallelEmbedding',
+    'QREmbeddingBag', 'PEPEmbeddingBag', 'VocabParallelEmbedding',
     'ColumnParallelEmbeddingBag', 'FusedHybridParallelEmbeddingBag', 'ParallelQREmbedding', 'LoadBalanceManager',
     'ParallelMixVocabEmbeddingBag', 'BlockEmbeddingBag', 'CacheReplacePolicy', 'CachedEmbeddingBag',
     'ParallelCachedEmbeddingBag'

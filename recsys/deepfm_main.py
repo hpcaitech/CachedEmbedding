@@ -32,28 +32,58 @@ def parse_dfm_args():
                         help='Random seed.')
 
     # Dataset
+    parser.add_argument('--use_torchrec_dl', action='store_true')
     parser.add_argument("--kaggle", action='store_false')
     parser.add_argument('--dataset_path', nargs='?', default='/criteo/train/')
     parser.add_argument('--cache_path', nargs='?', default='.criteo') #'../../deepfm-colossal/.criteo'
-    
+    parser.add_argument(
+        "--pin_memory",
+        dest="pin_memory",
+        action="store_true",
+        help="Use pinned memory when loading data.",
+    )
+    parser.add_argument(
+        "--mmap_mode",
+        dest="mmap_mode",
+        action="store_true",
+        help="--mmap_mode mmaps the dataset."
+        " That is, the dataset is kept on disk but is accessed as if it were in memory."
+        " --mmap_mode is intended mostly for faster debugging. Use --mmap_mode to bypass"
+        " preloading the dataset when preloading takes too long or when there is "
+        " insufficient memory available to load the full dataset.",
+    )
+    parser.add_argument(
+        "--in_memory_binary_criteo_path",
+        type=str,
+        default=None,
+        help="Path to a folder containing the binary (npy) files for the Criteo dataset."
+        " When supplied, InMemoryBinaryCriteoIterDataPipe is used.",
+    )
+    parser.add_argument(
+        "--shuffle_batches",
+        dest="shuffle_batches",
+        action="store_true",
+        help="Shuffle each batch during training.",
+    )
+
     # Scale
     parser.add_argument("--memory_fraction", type=float, default=None)
     parser.add_argument(
         "--limit_train_batches",
         type=int,
-        default=100,
+        default=500,
         help="number of train batches",
     )
     parser.add_argument(
         "--limit_val_batches",
         type=int,
-        default=20,
+        default=100,
         help="number of validation batches",
     )
     parser.add_argument(
         "--limit_test_batches",
         type=int,
-        default=20,
+        default=100,
         help="number of test batches",
     )
     parser.add_argument("--num_embeddings", type=int, default=10000)
@@ -66,7 +96,7 @@ def parse_dfm_args():
         help="Comma separated max_ind_size per sparse feature. The number of embeddings"
         " in each embedding table. 26 values are expected for the Criteo dataset.",
     )
-    parser.add_argument('--embed_dim', type=int, default=1024,
+    parser.add_argument('--embed_dim', type=int, default=128,
                         help='User / entity Embedding size.')
     parser.add_argument(
         "--mlp",
@@ -90,7 +120,7 @@ def parse_dfm_args():
     parser.add_argument('--group', type=str, default='')
 
     # Embed
-    parser.add_argument('--enable_qr', action='store_true')
+    parser.add_argument('--enable_qr', action='store_false')
     
     # Tensorboard
     parser.add_argument('--tboard_name', type=str, default='mvembed-4tp')
@@ -155,13 +185,14 @@ def test(model, criterion, data_loader, device, epoch=0):
 def main(args):
     curr_device = torch.device('cuda', torch.cuda.current_device())
 
-    # train_data_loader = criteo.get_dataloader(args, 'train', ParallelMode.DATA)
-    # valid_data_loader = criteo.get_dataloader(args, "val", ParallelMode.DATA)
-    # test_data_loader = criteo.get_dataloader(args, "test", ParallelMode.DATA)
-    
-    train_data_loader = CriteoDataset(args,mode='train')
-    valid_data_loader = CriteoDataset(args,mode='val')
-    test_data_loader = CriteoDataset(args,mode='test')
+    if args.use_torchrec_dl:
+        train_data_loader = criteo.get_dataloader(args, 'train')
+        valid_data_loader = criteo.get_dataloader(args, "val")
+        test_data_loader = criteo.get_dataloader(args, "test")
+    else:
+        train_data_loader = CriteoDataset(args,mode='train')
+        valid_data_loader = CriteoDataset(args,mode='val')
+        test_data_loader = CriteoDataset(args,mode='test')
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
                     args.embed_dim, eval(args.mlp), args.dropout, args.enable_qr).to(curr_device)
@@ -213,7 +244,7 @@ if __name__ == '__main__':
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
     dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
-    dist_manager.new_process_group(1, ParallelMode.DATA)
+    # dist_manager.new_process_group(1, ParallelMode.DATA)
     print(dist_manager.get_distributed_info())
 
     if args.use_wandb:
