@@ -45,16 +45,17 @@ class LoadBalanceManager(object):
             self.emb_dims.append(emb_dim)
             
     def shard_tensor(self, _input: Tensor, rank: int, device = None) -> Tensor:
+        """Deprecated"""
         assert hasattr(self, 'groups') and rank in range(0, self.num_groups)
         group = self.groups[rank]
         assert min(group) >= 0 and max(group) < _input.size(1)
         return _input[:, group].to(device)
             
-    def get_group(self, rank: int) -> List[List[int]]:
+    def get_group(self, rank: int) -> List[int]:
         assert hasattr(self, 'groups') and rank in range(0, self.num_groups)
         return self.groups[rank]
 
-    def get_block_dim(self, rank: int) -> List[int]:
+    def get_block_dim(self, rank: int) -> int:
         assert rank in range(0, self.num_groups)
         return self.emb_dims[rank]
 
