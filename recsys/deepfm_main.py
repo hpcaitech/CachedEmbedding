@@ -34,7 +34,7 @@ def parse_dfm_args():
     # Dataset
     parser.add_argument("--kaggle", action='store_false')
     parser.add_argument('--dataset_path', nargs='?', default='/criteo/train/')
-    parser.add_argument('--cache_path', nargs='?', default='.criteo') #'../../deepfm-colossal/.criteo'
+    parser.add_argument('--cache_path', nargs='?', default='../../deepfm-colossal/.criteo') #'../../deepfm-colossal/.criteo'
     
     # Scale
     parser.add_argument("--memory_fraction", type=float, default=None)
@@ -100,7 +100,7 @@ def parse_dfm_args():
     if args.kaggle:
         setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
     if args.num_embeddings_per_feature is not None:
-        args.num_embeddings_per_feature = list(map(lambda x:int(x)*500, args.num_embeddings_per_feature.split(",")))
+        args.num_embeddings_per_feature = list(map(lambda x:int(x), args.num_embeddings_per_feature.split(",")))
 
     for stage in criteo.STAGES:
         attr = f"limit_{stage}_batches"

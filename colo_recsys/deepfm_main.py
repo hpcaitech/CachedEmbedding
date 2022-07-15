@@ -33,7 +33,7 @@ def parse_dfm_args():
     # Dataset
     parser.add_argument("--kaggle", action='store_false')
     parser.add_argument('--dataset_path', nargs='?', default='/criteo/train/')
-    parser.add_argument('--cache_path', nargs='?', default='.criteo') #'../../deepfm-colossal/.criteo'
+    parser.add_argument('--cache_path', nargs='?', default='../../deepfm-colossal/.criteo') #'../../deepfm-colossal/.criteo'
     parser.add_argument("--memory_fraction", type=float, default=None)
     parser.add_argument(
         "--limit_train_batches",
@@ -85,6 +85,9 @@ def parse_dfm_args():
     parser.add_argument('--use_wandb', action='store_true')
     parser.add_argument('--repeated_runs', type=int, default=1)
     parser.add_argument('--group', type=str, default='')
+
+    # Embed
+    parser.add_argument('--enable_qr', action='store_false')
 
     # Tensorboard
     parser.add_argument('--tboard_name', type=str, default='mvembed-4tp')
@@ -150,14 +153,12 @@ def main(args):
     
     curr_device = get_current_device()
     
-    train_dataset, valid_dataset, test_dataset = CriteoDataset(args).train_val_splits()
-    
-    train_data_loader = train_dataset# get_dataloader(train_dataset, batch_size=args.batch_size, pin_memory=True)
-    valid_data_loader = valid_dataset# get_dataloader(valid_dataset, batch_size=args.batch_size, pin_memory=True)
-    test_data_loader = test_dataset# get_dataloader(test_dataset, batch_size=args.batch_size, pin_memory=True)
+    train_data_loader = CriteoDataset(args, mode='train')
+    valid_data_loader = CriteoDataset(args, mode='val')
+    test_data_loader = CriteoDataset(args, mode='test')
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
-                    args.embed_dim, eval(args.mlp), args.dropout).to(curr_device)
+                    args.embed_dim, eval(args.mlp), args.dropout, args.enable_qr).to(curr_device)
 
     logger.info(get_model_mem(model,f'[rank{gpc.get_global_rank()}]model'), ranks=[0])
 

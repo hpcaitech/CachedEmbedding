@@ -55,19 +55,16 @@ class LoadBalanceManager(object):
         return self.groups[rank]
 
     def get_block_dim(self, rank: int) -> List[int]:
-        assert hasattr(self, 'emb_dims') and rank in range(0, self.num_groups)
+        assert rank in range(0, self.num_groups)
         return self.emb_dims[rank]
 
     def get_field_dims(self) -> List[int]:
-        assert hasattr(self, 'field_dims') and self.field_dims is not None
         return self.field_dims
 
     def get_base_dim(self) -> int:
-        assert hasattr(self, 'base_emb_dim') and self.base_emb_dim is not None
         return self.base_emb_dim
     
     def get_qr_bucket_size(self, rank: int) -> int:
-        assert hasattr(self, 'field_dims') and self.field_dims is not None
         group = self.get_group(rank)
         group_sum = sum([self.field_dims[x] for x in group])
         qr_bucket_size = math.ceil(math.sqrt(group_sum))
@@ -186,7 +183,6 @@ class QREmbeddingBag(nn.Module):
         return embeddingbag
 
     def get_num_embeddings(self) -> int:
-        assert hasattr(self, 'num_embeddings')
         return self.num_embeddings
 
     def get_weights(self, detach: bool = False) -> List[Optional[Tensor]]:
@@ -308,7 +304,6 @@ class BlockEmbeddingBag(nn.Module):
         return embeddingbag
 
     def get_base_embedding_dim(self) -> int:
-        assert hasattr(self, 'base_embedding_dim')
         return self.base_embedding_dim
 
     def get_weights(self, detach: bool = False) -> List[Optional[Tensor]]:
@@ -365,8 +360,8 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         cls = BlockEmbeddingBag if not enable_qr else QREmbeddingBag
 
         if pretrain_embed is not None:
+            assert isinstance(pretrain_embed, cls), f"{type(pretrain_embed)} isn't {cls}"
             if not enable_qr:
-                assert isinstance(pretrain_embed, cls)
                 weights = pretrain_embed.get_weights(detach=True)
                 base_embedding_dim = pretrain_embed.get_base_embedding_dim()
                 assert weights[0].size() == (sum([self.field_dims[i] for i in self.group]), self.block_dim), \
@@ -384,7 +379,6 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                                             base_embedding_dim=base_embedding_dim,
                                             freeze=freeze)
             else:
-                assert isinstance(pretrain_embed, cls)
                 weights = pretrain_embed.get_weights(detach=True)
                 num_embeddings = pretrain_embed.get_num_embeddings()
                 assert num_embeddings == sum([self.field_dims[i] for i in self.group]), \
@@ -401,7 +395,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
             if not enable_qr:
                 self.embed = cls(sum([self.field_dims[i] for i in self.group]), 
                                 block_embedding_dim=self.block_dim,
-                                embedding_dim=self.embedding_dim,
+                                base_embedding_dim=self.embedding_dim,
                                 mode=mode,
                                 *args,
                                 **kwargs)
@@ -417,10 +411,10 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         assert min(self.group) >= 0 and max(self.group) < _input.size(1)
         return _input[:, self.group].to(self.device)
     
-    def forward(self, x):
+    def forward(self, x, offsets=None):
         x_parallel = self._shard_tensor(x)
         x_parallel = x_parallel + self.offsets
-        output_parallel = self.embed(x_parallel)
+        output_parallel = self.embed(x_parallel) # [BUG] User provided offsets are not used
         output_gather = self.comm_func(output_parallel, self.parallel_mode, reduce_op=self.mode)
 
         if self.mode == 'mean':
@@ -431,8 +425,9 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
 
     @classmethod
     def from_pretrained(cls,
-                        blk_embed: BlockEmbeddingBag,
+                        pretrain_embed: Union[BlockEmbeddingBag, QREmbeddingBag],
                         lbmgr: LoadBalanceManager,
+                        enable_qr: bool = False,
                         mode: str = 'sum',
                         freeze: bool = False,
                         field_dims: Optional[List[int]] = None,
@@ -440,8 +435,6 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                         parallel_mode: Optional[ParallelMode] = None,
                         *args,
                         **kwargs) -> 'ParallelMixVocabEmbeddingBag':
-        assert not (field_dims is None and blk_embed is None),\
-             'field_dims and blk_embed cannot both be None'
         assert not (field_dims is None and lbmgr is None), \
             'field_dims and load balance manager cannot both be None'
         embeddingbag = cls(
@@ -449,7 +442,8 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                     embedding_dim=embedding_dim,
                     parallel_mode=parallel_mode,
                     mode=mode,
-                    blk_embed=blk_embed,
+                    pretrain_embed=pretrain_embed,
+                    enable_qr=enable_qr,
                     lbmgr=lbmgr,
                     freeze=freeze,
                     *args,
@@ -458,5 +452,5 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         return embeddingbag
     
     def get_weights(self, detach: bool = False) -> List[Tensor]:
-        assert hasattr(self, 'embed') and isinstance(self.embed, BlockEmbeddingBag)
+        assert hasattr(self, 'embed') and isinstance(self.embed, (BlockEmbeddingBag, QREmbeddingBag))
         return self.embed.get_weights(detach)
