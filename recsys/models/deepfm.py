@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.profiler import record_function
 
 from recsys import ParallelMode, DISTLogger, DISTMGR
-from recsys.modules.embeddings import ParallelMixVocabEmbeddingBag, ParallelQREmbedding
+from recsys.modules.embeddings import ParallelMixVocabEmbeddingBag
 from colo_recsys.utils import count_parameters
 
 
@@ -13,14 +13,14 @@ class FeatureEmbedding(nn.Module):
     
     def __init__(self, field_dims, emb_dim, enable_qr):
         super().__init__()
-        if enable_qr:
-            self.embedding = ParallelQREmbedding(emb_dim, math.ceil(math.sqrt(sum(field_dims))))
-            print('Saved params (M)',emb_dim*(sum(field_dims) - math.ceil(math.sqrt(sum(field_dims))))//1_000_000)
-        else:
-            self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='mean', parallel_mode=ParallelMode.TENSOR_PARALLEL)
+        self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='mean',
+                                                          parallel_mode=ParallelMode.TENSOR_PARALLEL,
+                                                          enable_qr=enable_qr)
+            
+        # print('Saved params (M)',emb_dim*(sum(field_dims) - math.ceil(math.sqrt(sum(field_dims))))//1_000_000)
 
-    def forward(self,x):
-        return self.embedding(x)
+    def forward(self,sparse_features):
+        return self.embedding(sparse_features)
     
 
 class FeatureLinear(nn.Module):

@@ -71,7 +71,7 @@ class TrainPipelineBase:
             output = self._model(cur_batch.sparse_features, cur_batch.dense_features)
 
         with record_function("## criterion ##"):
-            losses = self._criterion(output, cur_batch.labels)
+            losses = self._criterion(output, cur_batch.labels.float())
 
         if self._model.training:
             with record_function("## backward ##"):
@@ -89,4 +89,4 @@ class TrainPipelineBase:
             with record_function("## optimizer ##"):
                 self._optimizer.step()
 
-        return losses, output, cur_batch.labels
+        return losses.item(), output, cur_batch.labels

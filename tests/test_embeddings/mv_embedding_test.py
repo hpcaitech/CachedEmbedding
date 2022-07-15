@@ -11,7 +11,8 @@ from colossalai.testing import rerun_if_address_is_in_use
 from colossalai.utils import free_port, get_current_device
 from recsys import DISTMGR, launch, ParallelMode
 from recsys import disable_existing_loggers
-from recsys.modules.embeddings import LoadBalanceManager, BlockEmbeddingBag, ParallelMixVocabEmbeddingBag
+from recsys.modules.embeddings import (LoadBalanceManager, BlockEmbeddingBag, ParallelMixVocabEmbeddingBag,
+                                       QREmbeddingBag)
 
 from common import EMBEDDING_DIM, FIELD_DIMS, BATCH_SIZE, REDUCE_OPS, check_equal
 from recsys.modules.functional import reduce_forward
@@ -80,7 +81,7 @@ def check_block_embeddingbag():
     check_equal(blk_embed_ws[1].grad, linear.weight.grad)
     _print_rank_0('embed backward: pass')
 
-def check_mv_embeddingbag():
+def check_mv_embeddingbag(enable_qr):
     device = get_current_device()
     dtype = torch.float32
     world_size = DISTMGR.get_world_size()
@@ -91,21 +92,28 @@ def check_mv_embeddingbag():
 
     group = lbmgr.get_group(rank)
     block_dim = lbmgr.get_block_dim(rank)
+    qr_bucket_size = lbmgr.get_qr_bucket_size(rank)
     offsets = torch.tensor((0,*np.cumsum(np.array( \
             FIELD_DIMS, dtype=np.long)[group])[:-1]), device=device)
     comm_func = reduce_forward # need all_reduce
-
-    blk_embed = BlockEmbeddingBag(
-                    sum([FIELD_DIMS[i] for i in group]),
-                    block_dim,
-                    EMBEDDING_DIM)
-
-    blk_embed = blk_embed.to(dtype).to(device)
-
+    
+    if enable_qr:
+        pretrain_embed = QREmbeddingBag(sum([FIELD_DIMS[i] for i in group]),
+                                  qr_bucket_size,
+                                  EMBEDDING_DIM)
+    else:
+        pretrain_embed = BlockEmbeddingBag(
+                        sum([FIELD_DIMS[i] for i in group]),
+                        block_dim,
+                        EMBEDDING_DIM)
+            
+    pretrain_embed = pretrain_embed.to(dtype).to(device)
+    
     test_embed = ParallelMixVocabEmbeddingBag.from_pretrained(
-                    blk_embed=blk_embed, 
+                    pretrain_embed=pretrain_embed, 
                     lbmgr=lbmgr,
-                    mode=REDUCE_OPS)
+                    mode=REDUCE_OPS,
+                    enable_qr=enable_qr)
 
     test_embed = test_embed.to(dtype).to(device)
 
@@ -116,7 +124,7 @@ def check_mv_embeddingbag():
 
     A_parallel = lbmgr.shard_tensor(A_master, rank)
     A_parallel = A_parallel + offsets
-    A_output_parallel = blk_embed(A_parallel)
+    A_output_parallel = pretrain_embed(A_parallel)
 
     A_output_gather = comm_func(
                     A_output_parallel, 
@@ -142,7 +150,7 @@ def check_mv_embeddingbag():
     grad_master = grad_master.clone()
     test_out.backward(grad_master)
 
-    blk_weights = blk_embed.get_weights(detach=False)
+    blk_weights = pretrain_embed.get_weights(detach=False)
     test_weights = test_embed.get_weights(detach=False)
 
     for (w1,w2) in zip(blk_weights, test_weights):
@@ -153,20 +161,21 @@ def check_mv_embeddingbag():
 
     _print_rank_0('embed backward: pass')
 
-def check_layer(rank, world_size, port):
+def check_layer(rank, world_size, port, enable_qr):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
     check_block_embeddingbag()
-    check_mv_embeddingbag()
+    check_mv_embeddingbag(enable_qr)
     
     DISTMGR.destroy()
     torch.cuda.empty_cache()
 
+@pytest.mark.parametrize('enable_qr', [True,False])
 @pytest.mark.parametrize('world_size', [1,4])
 @rerun_if_address_is_in_use()
-def test_layer(world_size):
-    run_func = partial(check_layer, world_size=world_size, port=free_port())
+def test_layer(world_size, enable_qr):
+    run_func = partial(check_layer, world_size=world_size, port=free_port(), enable_qr=enable_qr)
     mp.spawn(run_func, nprocs=world_size)
 
 if __name__ == '__main__':

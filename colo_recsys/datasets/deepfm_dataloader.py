@@ -188,7 +188,7 @@ class RandomCriteoDataset(IterableDataset[Batch]):
         return iter(self.batch_generator)
 
 
-class CriteoDataset(torch.utils.data.Dataset):
+class CriteoDataset(IterableDataset[Batch]):
     """
     Criteo Display Advertising Challenge Dataset
     Data prepration:
@@ -203,46 +203,72 @@ class CriteoDataset(torch.utils.data.Dataset):
         https://www.csie.ntu.edu.tw/~r01922136/kaggle-2014-criteo.pdf
     """
 
-    def __init__(self, args, rebuild_cache=False, min_threshold=10):
+    def __init__(self, args, rebuild_cache=False, min_threshold=10, mode='train'):
         self.NUM_FEATS = 39
         self.NUM_INT_FEATS = 13
         self.min_threshold = min_threshold
-        if not Path(args.cache_path).exists() and not rebuild_cache:
+        self.batch_size = args.batch_size
+        self.mode = mode
+        if not Path(args.cache_path).exists() or not rebuild_cache:
             print('Random dataset generated')
             self.env = None
-            for stage in ['train', 'val', 'test']:
-                setattr(self, f'{stage}_dataset', RandomCriteoDataset(
-                        keys=DEFAULT_CAT_NAMES,
-                        batch_size=args.batch_size,
-                        hash_size=args.num_embeddings,
-                        hash_sizes=args.num_embeddings_per_feature if hasattr(args, "num_embeddings_per_feature") else None,
-                        manual_seed=args.seed if hasattr(args, "seed") else None,
-                        ids_per_feature=1,
-                        num_dense=len(DEFAULT_INT_NAMES),
-                        num_batches=getattr(args, f"limit_{stage}_batches"),))
+            setattr(self, f'{mode}_dataset', RandomCriteoDataset(
+                    keys=DEFAULT_CAT_NAMES,
+                    batch_size=args.batch_size,
+                    hash_size=args.num_embeddings,
+                    hash_sizes=args.num_embeddings_per_feature if hasattr(args, "num_embeddings_per_feature") else None,
+                    manual_seed=args.seed if hasattr(args, "seed") else None,
+                    ids_per_feature=1,
+                    num_dense=len(DEFAULT_INT_NAMES),
+                    num_batches=getattr(args, f"limit_{mode}_batches"),))
         else:
             self.env = lmdb.open(args.cache_path, create=False, lock=False, readonly=True)
             with self.env.begin(write=False) as txn:
-                self.length = txn.stat()['entries'] - 1
+                self.total_len = txn.stat()['entries'] - 1
                 self.field_dims = np.frombuffer(txn.get(b'field_dims'), dtype=np.uint32)
+                self.length = getattr(args, f"limit_{mode}_batches") * self.batch_size
+                if mode == 'train':
+                    self.curr_index = 0
+                elif mode == 'val':
+                    self.curr_index = getattr(args, f"limit_train_batches") * self.batch_size
+                else:
+                    self.curr_index = (getattr(args, f"limit_val_batches") + \
+                        getattr(args, f"limit_train_batches")) * self.batch_size
         
-    def train_val_splits(self):
+    def __next__(self):
+        dense_features = []
+        sparse_features = []
+        labels = []
+        for index in range(self.curr_index, self.curr_index+self.batch_size):
+            dense_feature, sparse_feature, label = self.__getitem__(index)
+            dense_features.append(dense_feature)
+            sparse_features.append(sparse_feature)
+            labels.append(label)
+
+        self.curr_index = self.curr_index + self.batch_size
+        
+        if self.curr_index > self.length:
+            raise StopIteration
+            
+        return Batch(dense_features=torch.cat([x.unsqueeze(0) for x in dense_features],dim=0),
+                    sparse_features=torch.cat([x.unsqueeze(0) for x in sparse_features],dim=0), 
+                    labels=torch.tensor(labels))
+        
+    def __iter__(self):
         if self.env is not None:
-            train_length = int(self.__len__() * 0.8)
-            valid_length = int(self.__len__() * 0.1)
-            test_length = self.__len__() - train_length - valid_length
-            train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(
-                self, (train_length, valid_length, test_length))
-            return (train_dataset, valid_dataset, test_dataset)
+            self.curr_index = 0
+            return self
         else:
-            return (self.train_dataset, self.val_dataset, self.test_dataset)
+            return iter(getattr(self, f'{self.mode}_dataset'))
 
     def __getitem__(self, index):
         if self.env is not None:
             with self.env.begin(write=False) as txn:
                 np_array = np.frombuffer(
                     txn.get(struct.pack('>I', index)), dtype=np.uint32).astype(dtype=np.long)
-            return np_array[1:], np_array[0]
+            return (torch.from_numpy(np_array[1:self.NUM_INT_FEATS+1]).to(dtype=torch.float),\
+                        torch.from_numpy(np_array[self.NUM_INT_FEATS+1:]),\
+                        torch.tensor(np_array[0]))
         else:
             raise NotImplementedError()
 
@@ -252,6 +278,7 @@ class CriteoDataset(torch.utils.data.Dataset):
         else:
             raise NotImplementedError()
 
+    ## Deprecated ##
     def _build_cache(self, path, cache_path):
         feat_mapper, defaults = self._get_feat_mapper(path)
         with lmdb.open(cache_path, map_size=int(1e11)) as env:
