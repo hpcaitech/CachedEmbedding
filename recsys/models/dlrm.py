@@ -16,10 +16,8 @@ import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import record_function
 
-from torchrec.modules.mlp import MLP
-
 from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
-from ..modules.embeddings import ColumnParallelEmbeddingBag, FusedHybridParallelEmbeddingBag
+from ..modules.embeddings import ColumnParallelEmbeddingBag, FusedHybridParallelEmbeddingBag, ParallelCachedEmbeddingBag
 from .. import ParallelMode, DISTLogger, DISTMGR as dist_manager
 from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
@@ -122,36 +120,49 @@ def sparse_embedding_shape_hook(embeddings, feature_size, batch_size):
 
 class FusedSparseModules(nn.Module):
 
-    def __init__(self,
-                 num_embeddings_per_feature,
-                 embedding_dim,
-                 fused_op='all_to_all',
-                 reduction_mode='sum',
-                 parallel_mode=ParallelMode.DEFAULT,
-                 sparse=False,
-                 output_device_type=None):
+    def __init__(
+        self,
+        num_embeddings_per_feature,
+        embedding_dim,
+        fused_op='all_to_all',
+        reduction_mode='sum',
+        parallel_mode=ParallelMode.DEFAULT,
+        sparse=False,
+        output_device_type=None,
+        use_cache=False,
+        cache_sets=500_000,
+        cache_lines=1,
+    ):
         super(FusedSparseModules, self).__init__()
-        self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
-                                                     embedding_dim,
-                                                     fused_op=fused_op,
-                                                     mode=reduction_mode,
-                                                     parallel_mode=parallel_mode,
-                                                     sparse=sparse,
-                                                     include_last_offset=True,
-                                                     output_device_type=output_device_type)
+        if use_cache:
+            self.embed = ParallelCachedEmbeddingBag(sum(num_embeddings_per_feature),
+                                                    embedding_dim,
+                                                    cache_sets=cache_sets,
+                                                    cache_lines=cache_lines,
+                                                    sparse=sparse,
+                                                    mode=reduction_mode,
+                                                    include_last_offset=True,
+                                                    parallel_mode=parallel_mode)
+        else:
+            self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
+                                                         embedding_dim,
+                                                         fused_op=fused_op,
+                                                         mode=reduction_mode,
+                                                         parallel_mode=parallel_mode,
+                                                         sparse=sparse,
+                                                         include_last_offset=True,
+                                                         output_device_type=output_device_type)
         self.world_size = dist_manager.get_world_size(parallel_mode)
         self.kjt_collector = KJTAllToAll(dist_manager.get_group(parallel_mode))
 
     def forward(self, sparse_features):
         sparse_features = self.kjt_collector.all_to_all(sparse_features)
+
         keys, batch_size = sparse_features.keys(), sparse_features.stride()
 
-        flattened_sparse_features = sparse_features.values()
-        batch_offsets = sparse_features.offsets()
-
         flattened_sparse_embeddings = self.embed(
-            flattened_sparse_features,
-            batch_offsets,
+            sparse_features.values(),
+            sparse_features.offsets(),
             shape_hook=lambda x: sparse_embedding_shape_hook(x, len(keys), batch_size))
         return flattened_sparse_embeddings
 
@@ -193,18 +204,28 @@ class HybridParallelDLRM(nn.Module):
                  sparse_device,
                  parallel_mode=ParallelMode.DEFAULT,
                  sparse=False,
-                 fused_op='all_to_all'):
+                 fused_op='all_to_all',
+                 use_cache=False,
+                 cache_sets=500_000,
+                 cache_lines=1):
 
         super(HybridParallelDLRM, self).__init__()
+        if use_cache and sparse_device.type != dense_device.type:
+            raise ValueError(f"Sparse device must be the same as dense device, "
+                             f"however we got {sparse_device.type} for sparse, {dense_device.type} for dense")
+
         self.dense_device = dense_device
         self.sparse_device = sparse_device
 
         self.sparse_modules = FusedSparseModules(num_embeddings_per_feature,
                                                  embedding_dim,
-                                                 fused_op,
+                                                 fused_op=fused_op,
                                                  parallel_mode=parallel_mode,
                                                  sparse=sparse,
-                                                 output_device_type=dense_device.type).to(sparse_device)
+                                                 output_device_type=dense_device.type,
+                                                 use_cache=use_cache,
+                                                 cache_sets=cache_sets,
+                                                 cache_lines=cache_lines).to(sparse_device)
         self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                           dense_arch_layer_sizes,
                                                           over_arch_layer_sizes).to(dense_device),

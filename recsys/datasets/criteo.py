@@ -88,7 +88,8 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         self.path_manager_key = path_manager_key
         self.path_manager: PathManager = PathManagerFactory().get(path_manager_key)
         # customization
-        self.sparse_offsets = np.array([0, *np.cumsum(hashes)[:-1]]).reshape(1, -1) if hashes is not None else None
+        self.sparse_offsets = np.array([0, *np.cumsum(hashes)[:-1]], dtype=np.int64).reshape(
+            1, -1) if hashes is not None else None
 
         self._load_data_for_rank()
         self.num_rows_per_file: List[int] = [a.shape[0] for a in self.dense_arrs]
@@ -117,7 +118,8 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         )
 
         self.dense_arrs, self.sparse_arrs, self.labels_arrs = [], [], []
-        for arrs, paths in zip(
+        for _dtype, arrs, paths in zip(
+            [np.float32, np.int64, np.int32],    # TODO: data type interface
             [self.dense_arrs, self.sparse_arrs, self.labels_arrs],
             [self.dense_paths, self.sparse_paths, self.labels_paths],
         ):
@@ -129,7 +131,7 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
                         range_right - range_left + 1,
                         path_manager_key=self.path_manager_key,
                         mmap_mode=self.mmap_mode,
-                    ))
+                    ).astype(_dtype))
 
         # When mmap_mode is enabled, the hash is applied in def __iter__, which is
         # where samples are batched during training.

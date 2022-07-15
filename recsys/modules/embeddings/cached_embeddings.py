@@ -334,14 +334,14 @@ class ParallelCachedEmbeddingBag(nn.Module):
         if self.padding_idx is not None:
             self.weight[self.padding_idx].fill_(0)
 
-    def forward(self, indices, offsets=None, per_sample_weights=None, send_shape=None, scatter_dim=0, gather_dim=-1):
+    def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
         indices = self.reorder_input_indices(indices)
 
         output_shard = F.embedding_bag(indices, self.cache_weight, offsets, self.max_norm, self.norm_type,
                                        self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
                                        self.include_last_offset, self.padding_idx)
-        if send_shape is not None:
-            output_shard = output_shard.view(*send_shape)
+        if shape_hook is not None:
+            output_shard = shape_hook(output_shard)
 
         # TODO: async communication
         return dual_all_to_all(output_shard, self.parallel_mode, scatter_dim=scatter_dim, gather_dim=gather_dim)
