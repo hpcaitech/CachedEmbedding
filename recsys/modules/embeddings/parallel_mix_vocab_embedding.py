@@ -75,7 +75,7 @@ class LoadBalanceManager(object):
 class QREmbeddingBag(nn.Module):
     def __init__(self,
                  num_embeddings: int,
-                 num_buckets: int,
+                 qr_bucket_size: int,
                  embedding_dim: int = 128,
                  padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None,
@@ -91,10 +91,10 @@ class QREmbeddingBag(nn.Module):
                  init_method = nn.init.xavier_normal_):
         super().__init__()
         self.num_embeddings = num_embeddings
-        self.num_buckets = num_buckets
+        self.qr_bucket_size = qr_bucket_size
         self.embedding_dim = embedding_dim
         
-        print('Params savings {:.3f}B'.format((num_embeddings*embedding_dim - 2*num_buckets*embedding_dim)/1_000_000_000))
+        print('Params savings {:.3f}B'.format((num_embeddings*embedding_dim - 2*qr_bucket_size*embedding_dim)/1_000_000_000))
 
         if padding_idx is not None:
             if padding_idx > 0:
@@ -102,8 +102,8 @@ class QREmbeddingBag(nn.Module):
             elif padding_idx < 0:
                 assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
                 padding_idx = self.num_embeddings + padding_idx
-            self.q_padding_idx = torch.div(padding_idx, self.num_buckets, rounding_mode='floor')
-            self.r_padding_idx = torch.remainder(padding_idx, self.num_buckets)
+            self.q_padding_idx = torch.div(padding_idx, self.qr_bucket_size, rounding_mode='floor')
+            self.r_padding_idx = torch.remainder(padding_idx, self.qr_bucket_size)
         else:
             self.q_padding_idx = self.r_padding_idx = None
         
@@ -118,9 +118,9 @@ class QREmbeddingBag(nn.Module):
         
         if embed_ws is None:
             self.quotient_embed_weight = nn.Parameter(
-                torch.empty(self.num_buckets, embedding_dim, device=device, dtype=dtype))
+                torch.empty(self.qr_bucket_size, embedding_dim, device=device, dtype=dtype))
             self.remainder_embed_weight = nn.Parameter(
-                torch.empty(self.num_buckets, embedding_dim, device=device, dtype=dtype))
+                torch.empty(self.qr_bucket_size, embedding_dim, device=device, dtype=dtype))
             if padding_idx is not None:
                 with torch.no_grad():
                     self.quotient_embed_weight[self.q_padding_idx].fill_(0)
@@ -128,16 +128,16 @@ class QREmbeddingBag(nn.Module):
             init_method(self.quotient_embed_weight)
             init_method(self.remainder_embed_weight)
         else:
-            assert list(embed_ws[0].shape) == [self.num_buckets, embedding_dim]
-            assert list(embed_ws[1].shape) == [self.num_buckets, embedding_dim]
+            assert list(embed_ws[0].shape) == [self.qr_bucket_size, embedding_dim]
+            assert list(embed_ws[1].shape) == [self.qr_bucket_size, embedding_dim]
             self.quotient_embed_weight = nn.Parameter(embed_ws[0], requires_grad=(not freeze_w))
             self.remainder_embed_weight = nn.Parameter(embed_ws[1], requires_grad=(not freeze_w))
             
     def forward(self, input_, offsets=None, per_sample_weights=None):
         # Get the quotient index.
-        quotient_ids = torch.div(input_, self.num_buckets, rounding_mode='floor')
+        quotient_ids = torch.div(input_, self.qr_bucket_size, rounding_mode='floor')
         # Get the reminder index.
-        remainder_ids = torch.remainder(input_, self.num_buckets)
+        remainder_ids = torch.remainder(input_, self.qr_bucket_size)
         # Lookup the quotient_embedding using the quotient_index.
         quotient_embed = F.embedding_bag(quotient_ids, self.quotient_embed_weight, offsets, self.max_norm, 
                                              self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse, 
@@ -167,9 +167,9 @@ class QREmbeddingBag(nn.Module):
                         init_method = nn.init.xavier_normal_) -> 'BlockEmbeddingBag':
         assert len(weights) == 2 and weights[0].dim() == 2 and weights[1].dim() == 2, \
             'Both embedding weights are expected to be 2-dimensional'
-        num_buckets, embedding_dim = weights[0].shape
+        qr_bucket_size, embedding_dim = weights[0].shape
         embeddingbag = cls(num_embeddings=num_embeddings,
-                           num_buckets=num_buckets,
+                           qr_bucket_size=qr_bucket_size,
                            embedding_dim=embedding_dim,
                            embed_ws=weights,
                            freeze_w=freeze,
@@ -402,7 +402,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                                 **kwargs)
             else:
                 self.embed = cls(sum([self.field_dims[i] for i in self.group]), 
-                                num_buckets=self.qr_bucket_size,
+                                qr_bucket_size=self.qr_bucket_size,
                                 embedding_dim=self.embedding_dim,
                                 mode=mode,
                                 *args,
