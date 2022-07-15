@@ -71,19 +71,19 @@ def parse_dfm_args():
     parser.add_argument(
         "--limit_train_batches",
         type=int,
-        default=500,
+        default=100,
         help="number of train batches",
     )
     parser.add_argument(
         "--limit_val_batches",
         type=int,
-        default=100,
+        default=20,
         help="number of validation batches",
     )
     parser.add_argument(
         "--limit_test_batches",
         type=int,
-        default=100,
+        default=20,
         help="number of test batches",
     )
     parser.add_argument("--num_embeddings", type=int, default=10000)
@@ -96,12 +96,12 @@ def parse_dfm_args():
         help="Comma separated max_ind_size per sparse feature. The number of embeddings"
         " in each embedding table. 26 values are expected for the Criteo dataset.",
     )
-    parser.add_argument('--embed_dim', type=int, default=128,
+    parser.add_argument('--embed_dim', type=int, default=256,
                         help='User / entity Embedding size.')
     parser.add_argument(
         "--mlp",
         type=str,
-        default="[128]",
+        default="[128,64]",
         help="Comma separated layer sizes for dense arch.",
     )
     parser.add_argument('--dropout', nargs='?', default=0.2,
@@ -120,7 +120,7 @@ def parse_dfm_args():
     parser.add_argument('--group', type=str, default='')
 
     # Embed
-    parser.add_argument('--enable_qr', action='store_false')
+    parser.add_argument('--enable_qr', action='store_true')
     
     # Tensorboard
     parser.add_argument('--tboard_name', type=str, default='mvembed-4tp')

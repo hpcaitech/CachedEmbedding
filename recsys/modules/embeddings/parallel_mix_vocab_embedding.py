@@ -72,6 +72,10 @@ class LoadBalanceManager(object):
         return qr_bucket_size
 
 
+class PEPEmbeddingBag(nn.Module):
+    pass
+
+
 class QREmbeddingBag(nn.Module):
     def __init__(self,
                  num_embeddings: int,
@@ -148,7 +152,7 @@ class QREmbeddingBag(nn.Module):
                                              per_sample_weights, self.include_last_offset, self.r_padding_idx) # R-embedding
 
         # Use multiplication as a combiner operation
-        output_parallel = quotient_embed * remainder_embed
+        output_parallel = quotient_embed + remainder_embed
         assert output_parallel.size() == (input_.size(0), self.embedding_dim)
         return output_parallel
 
@@ -217,7 +221,8 @@ class BlockEmbeddingBag(nn.Module):
         self.block_embedding_dim = block_embedding_dim
         self.base_embedding_dim = base_embedding_dim
         
-        print(self.block_embedding_dim,self.base_embedding_dim)
+        print('Saved params (M)',(self.num_embeddings*(self.base_embedding_dim-self.block_embedding_dim)\
+                                - self.block_embedding_dim*self.base_embedding_dim)/1_000_000)
         
         if padding_idx is not None:
             if padding_idx > 0:
@@ -436,6 +441,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                         parallel_mode: Optional[ParallelMode] = None,
                         *args,
                         **kwargs) -> 'ParallelMixVocabEmbeddingBag':
+        assert pretrain_embed is not None, 'pretrained embedding weights are required'
         assert not (field_dims is None and lbmgr is None), \
             'field_dims and load balance manager cannot both be None'
         embeddingbag = cls(
@@ -455,3 +461,4 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
     def get_weights(self, detach: bool = False) -> List[Tensor]:
         assert hasattr(self, 'embed') and isinstance(self.embed, (BlockEmbeddingBag, QREmbeddingBag))
         return self.embed.get_weights(detach)
+    

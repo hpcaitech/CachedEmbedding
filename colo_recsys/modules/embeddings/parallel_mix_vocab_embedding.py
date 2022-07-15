@@ -153,7 +153,7 @@ class QREmbeddingBag(nn.Module):
                                              per_sample_weights, self.include_last_offset, self.r_padding_idx) # R-embedding
 
         # Use multiplication as a combiner operation
-        output_parallel = quotient_embed * remainder_embed
+        output_parallel = quotient_embed + remainder_embed
         assert output_parallel.size() == (input_.size(0), self.embedding_dim)
         return output_parallel
 
