@@ -5,6 +5,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.profiler import record_function
 
 from recsys import DISTMGR, ParallelMode, DISTLogger as logger
 from recsys.utils import get_partition
@@ -334,44 +335,50 @@ class ParallelCachedEmbeddingBag(nn.Module):
         if self.padding_idx is not None:
             self.weight[self.padding_idx].fill_(0)
 
-    def forward(self, indices, offsets=None, per_sample_weights=None, send_shape=None, scatter_dim=0, gather_dim=-1):
+    def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
         indices = self.reorder_input_indices(indices)
 
         output_shard = F.embedding_bag(indices, self.cache_weight, offsets, self.max_norm, self.norm_type,
                                        self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
                                        self.include_last_offset, self.padding_idx)
-        if send_shape is not None:
-            output_shard = output_shard.view(*send_shape)
+        if shape_hook is not None:
+            output_shard = shape_hook(output_shard)
 
         # TODO: async communication
         return dual_all_to_all(output_shard, self.parallel_mode, scatter_dim=scatter_dim, gather_dim=gather_dim)
 
     @torch.no_grad()
     def reorder_input_indices(self, raw_indices):
-        unique_indices, inverse_indices, counts = torch.unique(raw_indices, return_inverse=True, return_counts=True)
-        assert unique_indices.shape[0] <= self.cache_weight.shape[0], \
-            f"the num of input ids {unique_indices.shape[0]} is larger than " \
-            f"the cache size {self.cache_weight.shape[0]}, please increase the cache size or shrink the batch size"
+        with record_function("(zhg) categorize indices"):
+            unique_indices, inverse_indices, counts = torch.unique(raw_indices, return_inverse=True, return_counts=True)
+            assert unique_indices.shape[0] <= self.cache_weight.shape[0], \
+                f"the num of input ids {unique_indices.shape[0]} is larger than " \
+                f"the cache size {self.cache_weight.shape[0]}, please increase the cache size or shrink the batch size"
 
-        unique_miss = unique_indices[torch.isin(unique_indices, self.cache_indices, invert=True)]
-        unique_hit = unique_indices[torch.isin(unique_indices, unique_miss, assume_unique=True, invert=True)]
+            unique_miss = unique_indices[torch.isin(unique_indices, self.cache_indices, invert=True)]
+            unique_hit = unique_indices[torch.isin(unique_indices, unique_miss, assume_unique=True, invert=True)]
 
         rehash_count, write_back_count = 0, 0
         if unique_miss.shape[0] > 0:
-            positions_miss, write_back_positions, rehash_count = self._find_eligible_positions(
-                unique_miss, unique_hit, self.cache_indices, self.cache_states)
+            with record_function("(zhg) find eligible cache idx"):
+                positions_miss, write_back_positions, rehash_count = self._find_eligible_positions(
+                    unique_miss, unique_hit, self.cache_indices, self.cache_states)
 
             assert positions_miss.shape[0] == unique_miss.shape[0], \
                 f"pos: {positions_miss.shape[0]}, unique: {unique_miss.shape[0]}"
             write_back_count = write_back_positions.shape[0]
-            self._update_cache_(positions_miss, write_back_positions, unique_miss)
+            with record_function("(zhg) cache update"):
+                self._update_cache_(positions_miss, write_back_positions, unique_miss)
 
         if self.debug:
             logger.info(
-                f"miss count: #{unique_miss.shape[0]}, rehash count: #{rehash_count}, "
+                f"miss count: {unique_miss.shape[0]} / {unique_indices.shape[0]}, "
+                f"rehash count: #{rehash_count}, "
                 f"write back count: #{write_back_count}",
                 ranks=[0])
-        return self._map_indices(unique_indices, inverse_indices, counts)
+        with record_function("(zhg) embed idx -> cache idx"):
+            indices = self._map_indices(unique_indices, inverse_indices, counts)
+        return indices
 
     def _update_cache_(self, positions_miss, write_back_positions, unique_miss):
         # update cpu embedding: write cached gpu embeddings back to cpu

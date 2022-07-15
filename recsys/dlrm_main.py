@@ -113,6 +113,18 @@ def parse_args():
     )
     parser.add_argument("--use_cpu", action='store_true')
     parser.add_argument("--use_sparse_embed_grad", action='store_true')
+    parser.add_argument("--use_cache", action='store_true')
+    parser.add_argument("--cache_sets",
+                        type=int,
+                        default=500_000,
+                        help="Number of cache sets in the cache. "
+                        "*** Please make sure it can hold AT LEAST ONE BATCH OF SPARSE FEATURE IDS ***")
+    parser.add_argument(
+        "--cache_lines",
+        type=int,
+        default=1,
+        help="Number of cache lines in each cache set. Similar to the N-way set associate mechanism in cache."
+        "Not implemented yet. Increasing this would scale up the cache capacity")
 
     # Training
     parser.add_argument(
@@ -178,11 +190,8 @@ def parse_args():
     return args
 
 
-def put_data_in_device(batch, dense_device, sparse_device, rank, world_size):
-    # TODO: consider reading in different data in different rank
-    dense = torch.tensor_split(batch.dense_features.to(dense_device), world_size, dim=0)[rank]
-    labels = torch.tensor_split(batch.labels.to(dense_device), world_size, 0)[rank]
-    return dense, batch.sparse_features.to(sparse_device), labels
+def put_data_in_device(batch, dense_device, sparse_device):
+    return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(dense_device)
 
 
 @dataclass
@@ -206,12 +215,9 @@ def _train(model,
     model.train()
     data_iter = iter(data_loader)
     samples_per_trainer = criteo.KAGGLE_TOTAL_TRAINING_SAMPLES / dist_manager.get_world_size() * epochs
-    rank = dist_manager.get_rank()
-    world_size = dist_manager.get_world_size()
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
-            dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device, rank,
-                                                       world_size)
+            dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device)
             with record_function("(zhg)forward pass"):
                 logits = model(dense, sparse).squeeze()
 
@@ -243,15 +249,13 @@ def _evaluate(model, data_loader, stage):
     model.eval()
     auroc = metrics.AUROC(compute_on_step=False).cuda()
     accuracy = metrics.Accuracy(compute_on_step=False).cuda()
-    rank, world_size = dist_manager.get_rank(), dist_manager.get_world_size()
 
     data_iter = iter(data_loader)
 
     with torch.no_grad():
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
             try:
-                dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
-                                                           rank, world_size)
+                dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device)
                 logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
                 auroc(preds, labels)
@@ -305,15 +309,13 @@ def main():
     launch_from_torch(backend='nccl', seed=args.seed)
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
-    # TODO: remove this group when using hybrid parallelism
-    dist_manager.new_process_group(1, ParallelMode.DATA)
 
     dist_logger.info(f"launch rank: {dist_manager.get_rank()}, {dist_manager.get_distributed_info()}")
     dist_logger.info(f"config: {args}", ranks=[0])
 
-    train_dataloader = criteo.get_dataloader(args, 'train', ParallelMode.DATA)
-    val_dataloader = criteo.get_dataloader(args, "val", ParallelMode.DATA)
-    test_dataloader = criteo.get_dataloader(args, "test", ParallelMode.DATA)
+    train_dataloader = criteo.get_dataloader(args, 'train')
+    val_dataloader = criteo.get_dataloader(args, "val")
+    test_dataloader = criteo.get_dataloader(args, "test")
     if args.in_memory_binary_criteo_path is not None:
         dist_logger.info(
             f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
@@ -334,6 +336,9 @@ def main():
         sparse_device,
         sparse=args.use_sparse_embed_grad,
         fused_op=args.fused_op,
+        use_cache=args.use_cache,
+        cache_sets=args.cache_sets,
+        cache_lines=args.cache_lines,
     )
     dist_logger.info(f"{model.model_stats('DLRM')}", ranks=[0])
     dist_logger.info(f"{get_mem_info('After model init:  ')}", ranks=[0])
@@ -363,8 +368,7 @@ def main():
             optimizer.zero_grad()
 
             with get_time_elapsed(dist_logger, f"{i}-th data movement"):
-                dense_features, sparse_features, labels = put_data_in_device(batch, device, sparse_device, rank,
-                                                                             world_size)
+                dense_features, sparse_features, labels = put_data_in_device(batch, device, sparse_device)
             # dist_logger.info(f"{i}-th sparse_features: {sparse_features.values()[:10]}")
 
             with get_time_elapsed(dist_logger, f"{i}-th forward pass"):
