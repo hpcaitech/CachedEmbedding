@@ -143,7 +143,7 @@ class CachedEmbeddingBag(nn.Module):
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
         # NOTE: we only support 1-dim indices with offsets for storage & communication efficiency
-        indices = self.update_cached_embeding(indices)
+        indices = self.update_cached_embedding(indices)
 
         embeddings = F.embedding_bag(indices, self.cache_weight, offsets, self.max_norm, self.norm_type,
                                      self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
@@ -152,8 +152,8 @@ class CachedEmbeddingBag(nn.Module):
         return embeddings
 
     @torch.no_grad()
-    def update_cached_embeding(self, raw_indices : torch.Tensor)-> torch.Tensor :
-        """update_cached_embeding
+    def update_cached_embedding(self, raw_indices : torch.Tensor)-> torch.Tensor :
+        """update_cached_embedding
         update the cached embedding weight and returns the indices of raw_indices in the updated cached weight.
 
         Args:
@@ -345,7 +345,7 @@ class ParallelCachedEmbeddingBag(nn.Module):
             self.weight[self.padding_idx].fill_(0)
 
     def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
-        indices = self.update_cached_embeding(indices)
+        indices = self.update_cached_embedding(indices)
 
         output_shard = F.embedding_bag(indices, self.cache_weight, offsets, self.max_norm, self.norm_type,
                                        self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
@@ -357,7 +357,7 @@ class ParallelCachedEmbeddingBag(nn.Module):
         return dual_all_to_all(output_shard, self.parallel_mode, scatter_dim=scatter_dim, gather_dim=gather_dim)
 
     @torch.no_grad()
-    def update_cached_embeding(self, raw_indices):
+    def update_cached_embedding(self, raw_indices):
         with record_function("(zhg) categorize indices"):
             unique_indices, inverse_indices, counts = torch.unique(raw_indices, return_inverse=True, return_counts=True)
             assert unique_indices.shape[0] <= self.cache_weight.shape[0], \
