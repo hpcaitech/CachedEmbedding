@@ -77,7 +77,6 @@ def gather_tensor(tensor):
     torch.distributed.gather(tensor, gather_list, dst=0, group=group)
     return gather_list
 
-
 def parallel_cached_embedding_bag(cache_replace_policy):
     device = torch.device("cuda", torch.cuda.current_device())
     rank = DISTMGR.get_rank()
@@ -97,7 +96,9 @@ def parallel_cached_embedding_bag(cache_replace_policy):
 
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
-    if rank == 0:
+    if r
+    ank == 0:
+
         ref_model = torch.nn.EmbeddingBag.from_pretrained(weight.cuda(),
                                                           mode='mean',
                                                           include_last_offset=True,
