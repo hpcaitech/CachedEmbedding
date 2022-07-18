@@ -217,23 +217,13 @@ def main(args):
         
         for epoch_i in range(args.epoch):
             train_loss = train(model, criterion, optimizer, train_data_loader, curr_device, prof, epoch_i)
-            # auc = test(model, criterion, valid_data_loader, curr_device, epoch_i)
 
             dist_logger.info(
             f"Epoch {epoch_i} - train loss: {train_loss:.5}",ranks=[0])
 
-            # if args.use_wandb:
-            #     wandb.log({'AUC score': auc})
-
-            # early_stopper(auc)
-
-            # if early_stopper.early_stop:
-            #     dist_logger.info("Early stopping", ranks=[0])
-            #     break
-
         t3 = time.time()
         dist_logger.info(f'overall training time:{t3-t0}s',ranks=[0])
-        auc = test(model, criterion, train_data_loader, curr_device)
+        auc = test(model, criterion, test_data_loader, curr_device)
         dist_logger.info(f'test auc: {auc:.5}\n',ranks=[0])
 
 
