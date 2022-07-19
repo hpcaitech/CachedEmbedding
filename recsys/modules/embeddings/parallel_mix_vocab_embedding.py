@@ -14,11 +14,10 @@ np.random.seed(111)
 
 
 class LoadBalanceManager(object):
-    
-    def __init__(self, field_dims: List[int], num_groups=4, base_emb_dim=128, be_fair=True, device=None):
-        assert len(field_dims) >= num_groups, \
-                f"number of input fields {len(field_dims)} must be larger than the world size {num_groups}"
-        self.field_dims = field_dims
+    def __init__(self, embeddings_per_feat: List[int], num_groups=4, base_emb_dim=128, be_fair=True, device=None):
+        assert len(embeddings_per_feat) >= num_groups, \
+                f"number of input fields {len(embeddings_per_feat)} must be larger than the world size {num_groups}"
+        self.embeddings_per_feat = embeddings_per_feat
         self.num_groups = num_groups
         self.base_emb_dim = base_emb_dim
         self.be_fair = be_fair
@@ -29,8 +28,8 @@ class LoadBalanceManager(object):
             self._fair_initialize()
         
     def _fair_initialize(self) -> None:
-        dim_per_rank = sum(self.field_dims) // self.num_groups
-        dim_indices = np.array(range(len(self.field_dims)))
+        self.num_embeddings_per_rank = sum(self.embeddings_per_feat) // self.num_groups
+        dim_indices = np.array(range(len(self.embeddings_per_feat)))
         self.groups = []
         self.offsets = []
         _curr_grp = []
@@ -38,17 +37,17 @@ class LoadBalanceManager(object):
     
         self.cuts = dict()
         _num_cuts = 0
-        _agg = dim_per_rank
+        _agg = self.num_embeddings_per_rank
         # Find cut positions and shard groups
         for ind in dim_indices:
-            while self.field_dims[ind] > _agg:
+            while self.embeddings_per_feat[ind] > _agg:
                 if _num_cuts >= self.num_groups - 1: # never cut when enough groups
                     break
                 if ind in self.cuts.keys():
                     self.cuts[ind].append(_agg)
                 else:
                     self.cuts[ind] = [_agg]
-                _agg += dim_per_rank
+                _agg += self.num_embeddings_per_rank
                 _num_cuts += 1
                 
                 self.offsets.append(_curr_offs)
@@ -57,17 +56,18 @@ class LoadBalanceManager(object):
                 self.groups.append(_curr_grp)
                 _curr_grp = []
             
-            _agg -= self.field_dims[ind]
-            _curr_offs.append(self.field_dims[ind])
-            
-        self.emb_dim = dim_per_rank
-        self.qr_bucket_size = math.ceil(math.sqrt(dim_per_rank))
+            _agg -= self.embeddings_per_feat[ind]
+            _curr_offs.append(self.embeddings_per_feat[ind])
+        
+        self.emb_dim = max(2, int(self.base_emb_dim / 
+                                  2**(int(math.log2(self.num_groups)))))
+        self.qr_bucket_size = math.ceil(math.sqrt(self.num_embeddings_per_rank))
         
     def _shuffle_initialize(self) -> None:
-        dim_indices = np.array(range(len(self.field_dims)))
+        dim_indices = np.array(range(len(self.embeddings_per_feat)))
         np.random.shuffle(dim_indices)
-        # dim_indices = np.argsort(self.field_dims)
-        chunk_size = len(self.field_dims) // self.num_groups
+        # dim_indices = np.argsort(self.embeddings_per_feat)
+        chunk_size = len(self.embeddings_per_feat) // self.num_groups
         self.groups = []
 
         for i in range(self.num_groups):
@@ -77,20 +77,34 @@ class LoadBalanceManager(object):
             self.groups.append(dim_indices[i*chunk_size:(i+1)*chunk_size])
 
         self.emb_dims = []
-        total_sum = sum(self.field_dims)
+        total_sum = sum(self.embeddings_per_feat)
         for group in self.groups:
             # scale base embedding dim by total_sum/sum
-            div = total_sum / sum([self.field_dims[x] for x in group])
+            div = total_sum / sum([self.embeddings_per_feat[x] for x in group])
             # divide base dim by a 2^n nearest to div
             emb_dim = max(2, int(self.base_emb_dim / 2**(int(math.log2(div)))))
             self.emb_dims.append(emb_dim)
             
-        self.qr_bucket_sizes = [math.ceil(math.sqrt(sum([self.field_dims[x] for x in group]))) 
+        self.qr_bucket_sizes = [math.ceil(math.sqrt(sum([self.embeddings_per_feat[x] for x in group]))) 
                                for group in self.groups]
         
         self.offsets = [torch.tensor((0,*np.cumsum(np.array( \
-                            self.field_dims, dtype=np.long)[group])[:-1]), device=self.device)
+                            self.embeddings_per_feat, dtype=np.long)[group])[:-1]), device=self.device)
                         for group in self.groups]
+
+    def get_group(self, rank: int) -> List[int]:
+        assert rank in range(0, self.num_groups)
+        return self.groups[rank]
+    
+    def get_offsets(self, rank: int) -> List[int]:
+        return self.offsets[rank]
+        
+    def get_num_embeddings_on_rank(self, rank: int) -> int:
+        if not self.be_fair:
+            group = self.get_group(rank)
+            return sum([self.embeddings_per_feat[i] for i in group])
+        else:
+            return self.num_embeddings_per_rank
     
     def get_block_dim(self, rank: int) -> int:
         assert rank in range(0, self.num_groups)
@@ -106,13 +120,6 @@ class LoadBalanceManager(object):
         else:
             return self.qr_bucket_size
         
-    def get_group(self, rank: int) -> List[int]:
-        assert rank in range(0, self.num_groups)
-        return self.groups[rank]
-    
-    def get_offsets(self, rank: int) -> List[int]:
-        return self.offsets[rank]
-        
     def shard_tensor(self, _input: Tensor, rank: int) -> Tensor:
         offsets = self.get_offsets(rank)
         if not self.be_fair:
@@ -121,36 +128,54 @@ class LoadBalanceManager(object):
             return _input[:, group] + offsets
         else:
             _cinput = _input.copy()
+            feats = list(self.cuts.keys())
             assert hasattr(self, 'cuts')
             if rank == 0:
-                feat_id = list(self.cuts.keys())[0]
-                k = self.cuts[feat_id][0]
-                _cinput[:,feat_id] = torch.min(k*torch.ones(_cinput.shape), _cinput[:,feat_id])
+                feat_id = feats[0]
+                cut_pos = self.cuts[feat_id][0]
+                _cinput[:,feat_id] = torch.min(cut_pos*torch.ones(_cinput.shape), _cinput[:,feat_id])
                 return _cinput[:,:feat_id+1] + offsets
             else:
-                for (k,v) in cuts.items():
+                for (k,v) in self.cuts.items():
                     if rank - len(v) <= 0:
                         cut_pos = v[-(len(v)-rank):][:2] # this and next shard position
+                        if len(cut_pos) < 2 and k != feats[-1]:
+                            next_feat_id = feats[feats.index(k) + 1]
+                        else:
+                            next_feat_id = None
                         feat_id = k
                         break
                     rank -= len(v)
                 if len(cut_pos) == 1:
-                    if feat_id == list(cuts.keys())[-1]: # last rank
-                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.shape), _cinput[:,feat_id]-k)
+                    if feat_id == feats[-1]: # last rank
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.shape), _cinput[:,feat_id]-cut_pos)
                         return _cinput[:,feat_id:] + offsets
                     else:
-                        # TODO
-                        return _cinput[:,feat_id:] + offsets
+                        assert next_feat_id is not None
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),1), 
+                                                       _cinput[:,feat_id]-cut_pos)
+                        _cinput[:,next_feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0),1), 
+                                                            _cinput[:,next_feat_id])
+                        return _cinput[:,:next_feat_id+1] + offsets
+                elif len(cut_pos) == 2:
+                    pos1, pos2 = cut_pos
+                    _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),1), 
+                                                    _cinput[:,feat_id]-pos2)
+                    _cinput[:,feat_id] = torch.min(pos1*torch.ones(_cinput.size(0),1), 
+                                                        _cinput[:,feat_id])
+                    return _cinput[:,:next_feat_id+1] + offsets
+                else:
+                    raise ValueError('input tensor and embeddings_per_feat do not match. Double check inputs.')
             
-    def get_field_dims(self) -> List[int]:
-        return self.field_dims
+    def get_embeddings_per_feat(self) -> List[int]:
+        return self.embeddings_per_feat
 
     def get_base_dim(self) -> int:
         return self.base_emb_dim
 
 
 class AdaEmbeddingBag(nn.Module):
-    """In-Progress"""
+    """Adaptive Embedding Bag [Work In-Progress]"""
     pass
 
 
@@ -265,7 +290,7 @@ class QREmbeddingBag(nn.Module):
                            init_method=init_method)
         return embeddingbag
 
-    def get_num_embeddings(self) -> int:
+    def get_num_embeddings_on_rank(self) -> int:
         return self.num_embeddings
 
     def get_weights(self, detach: bool = False) -> List[Optional[Tensor]]:
@@ -301,7 +326,7 @@ class BlockEmbeddingBag(nn.Module):
         
         print('Saved params (M)',(self.num_embeddings*(self.base_embedding_dim-self.block_embedding_dim)\
                                 - self.block_embedding_dim*self.base_embedding_dim)/1_000_000)
-        
+
         if padding_idx is not None:
             if padding_idx > 0:
                 assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings'
@@ -404,7 +429,7 @@ class BlockEmbeddingBag(nn.Module):
 class ParallelMixVocabEmbeddingBag(nn.Module):
 
     def __init__(self,
-                field_dims: List[int],
+                embeddings_per_feat: List[int],
                 embedding_dim: int = 128,
                 parallel_mode: Optional[ParallelMode] = None,
                 mode: str = 'sum',
@@ -417,7 +442,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                 *args,
                 **kwargs):
         super().__init__()
-        self.field_dims = field_dims
+        self.embeddings_per_feat = embeddings_per_feat
         self.embedding_dim = embedding_dim
         self.mode = mode
         self.device = device if device is not None else torch.device('cuda', torch.cuda.current_device())
@@ -432,12 +457,12 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         if lbmgr is not None:
             self._lbmgr = lbmgr
             self._be_fair = be_fair
-            self.field_dims = lbmgr.get_field_dims()
+            self.embeddings_per_feat = lbmgr.get_embeddings_per_feat()
             self.embedding_dim = lbmgr.get_base_dim()
         else:
-            self._lbmgr = LoadBalanceManager(field_dims, self.num_groups, embedding_dim, be_fair=self._be_fair)
+            self._lbmgr = LoadBalanceManager(embeddings_per_feat, self.num_groups, embedding_dim, be_fair=self._be_fair)
 
-        self.group = self._lbmgr.get_group(self.rank)
+        self.num_embeddings_on_rank = self._lbmgr.get_num_embeddings_on_rank(self.rank)
         self.block_dim = self._lbmgr.get_block_dim(self.rank)
         self.qr_bucket_size = self._lbmgr.get_qr_bucket_size(self.rank)
 
@@ -449,9 +474,9 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
             if not enable_qr:
                 weights = pretrain_embed.get_weights(detach=True)
                 base_embedding_dim = pretrain_embed.get_base_embedding_dim()
-                assert weights[0].size() == (sum([self.field_dims[i] for i in self.group]), self.block_dim), \
+                assert weights[0].size() == (self.num_embeddings_on_rank, self.block_dim), \
                     'passed embedding layer dimensions are wrong: {x1} vs {x2} \
-                        '.format(x1=weights[0].size(), x2=(sum([self.field_dims[i] for i in self.group]), self.block_dim))
+                        '.format(x1=weights[0].size(), x2=(self.num_embeddings_on_rank, self.block_dim))
                 if self.block_dim != self.embedding_dim:
                     assert weights[1].size() == (self.embedding_dim, self.block_dim), \
                         'passed linear layer dimensions are wrong: {x1} vs {x2} \
@@ -465,10 +490,10 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                                             freeze=freeze)
             else:
                 weights = pretrain_embed.get_weights(detach=True)
-                num_embeddings = pretrain_embed.get_num_embeddings()
-                assert num_embeddings == sum([self.field_dims[i] for i in self.group]), \
+                num_embeddings = pretrain_embed.get_num_embeddings_on_rank()
+                assert num_embeddings == self.num_embeddings_on_rank, \
                     f'passed embedding layer have wrong number of embeddings: {num_embeddings} vs \
-                        {sum([self.field_dims[i] for i in self.group])}'
+                        {self.num_embeddings_on_rank}'
                 assert weights[0].size() == weights[1].size() == (self.qr_bucket_size, self.embedding_dim), \
                     'either q- or r-embedding layer has wrong input dimensions: {x1} vs {x2} vs {x3} \
                         '.format(x1=weights[0].size(), x2=weights[0].size(), 
@@ -478,14 +503,14 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                                             freeze=freeze)
         else:
             if not enable_qr:
-                self.embed = cls(sum([self.field_dims[i] for i in self.group])*2, 
+                self.embed = cls(self.num_embeddings_on_rank, 
                                 block_embedding_dim=self.block_dim,
                                 base_embedding_dim=self.embedding_dim,
                                 mode=mode,
                                 *args,
                                 **kwargs)
             else:
-                self.embed = cls(sum([self.field_dims[i] for i in self.group]), 
+                self.embed = cls(self.num_embeddings_on_rank, 
                                 qr_bucket_size=self.qr_bucket_size,
                                 embedding_dim=self.embedding_dim,
                                 mode=mode,
@@ -494,9 +519,9 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
     
     def forward(self, x, offsets=None):
         assert offsets is None, "offsets have been handled internally.\n Users shouldn't manually input offsets"
-        x_parallel = self.lbmgr.shard_tensor(x)
+        x_parallel = self._lbmgr.shard_tensor(x)
         # x_parallel = x_parallel // 16
-        # print('field_dims',self.field_dims)
+        # print('embeddings_per_feat',self.embeddings_per_feat)
         # print(torch.max(x_parallel))
         # print(self.embed.num_embeddings)
         # exit()
@@ -521,16 +546,16 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                         enable_qr: bool = False,
                         mode: str = 'sum',
                         freeze: bool = False,
-                        field_dims: Optional[List[int]] = None,
+                        embeddings_per_feat: Optional[List[int]] = None,
                         embedding_dim: Optional[int] = 128,
                         parallel_mode: Optional[ParallelMode] = None,
                         *args,
                         **kwargs) -> 'ParallelMixVocabEmbeddingBag':
         assert pretrain_embed is not None, 'pretrained embedding weights are required'
-        assert not (field_dims is None and lbmgr is None), \
-            'field_dims and load balance manager cannot both be None'
+        assert not (embeddings_per_feat is None and lbmgr is None), \
+            'embeddings_per_feat and load balance manager cannot both be None'
         embeddingbag = cls(
-                    field_dims=field_dims,
+                    embeddings_per_feat=embeddings_per_feat,
                     embedding_dim=embedding_dim,
                     parallel_mode=parallel_mode,
                     mode=mode,

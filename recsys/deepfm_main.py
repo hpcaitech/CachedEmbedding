@@ -13,12 +13,9 @@ from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, D
                     dist_logger)
 from colo_recsys.datasets import CriteoDataset
 from recsys.datasets import criteo
-from recsys.modules.dataloader import get_dataloader
 from recsys.models import DeepFactorizationMachine
 from colo_recsys.utils import (
     count_parameters,
-    EarlyStopper,
-    get_model_mem,
 )
 from recsys.modules.engine import TrainPipelineBase
 
@@ -189,11 +186,9 @@ def main(args):
 
     if args.use_torchrec_dl:
         train_data_loader = criteo.get_dataloader(args, 'train')
-        valid_data_loader = criteo.get_dataloader(args, "val")
         test_data_loader = criteo.get_dataloader(args, "test")
     else:
         train_data_loader = CriteoDataset(args,mode='train')
-        valid_data_loader = CriteoDataset(args,mode='val')
         test_data_loader = CriteoDataset(args,mode='test')
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
@@ -212,9 +207,6 @@ def main(args):
             on_trace_ready=tensorboard_trace_handler(f'log/{args.tboard_name}'),
     ) as prof:
         t0 = time.time()
-    
-        early_stopper = EarlyStopper(verbose=True)
-        
         for epoch_i in range(args.epoch):
             train_loss = train(model, criterion, optimizer, train_data_loader, curr_device, prof, epoch_i)
 
@@ -236,7 +228,6 @@ if __name__ == '__main__':
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
     dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
-    # dist_manager.new_process_group(1, ParallelMode.DATA)
     print(dist_manager.get_distributed_info())
     
     dist_logger.info(f'Number of embeddings per feature: {args.num_embeddings_per_feature}',ranks=[0])
@@ -250,7 +241,6 @@ if __name__ == '__main__':
         }
 
     main(args)
-
     if args.use_wandb:
         wandb.finish()
         
