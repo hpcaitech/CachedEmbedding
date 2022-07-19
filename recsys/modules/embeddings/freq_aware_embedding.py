@@ -18,6 +18,8 @@ class ChunkCUDAWeightMgr(object):
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_chunk_num = cuda_chunk_num
 
+        self.elem_size_in_byte = weight.element_size() 
+
         self.cuda_partial_weight = torch.nn.Parameter(torch.empty(cuda_chunk_num * chunk_size * self.embedding_dim, device=torch.cuda.current_device()))
 
         self.chunk_num = (self.num_embeddings + chunk_size - 1) // chunk_size
@@ -154,9 +156,9 @@ class ChunkCUDAWeightMgr(object):
 
     def print_comm_stats(self):
         if self._cuda_to_cpu_numel > 0:
-            print(f"CUDA->CPU BWD {self._cuda_to_cpu_numel * 4 / 1e6 / self._cuda_to_cpu_elapse} {self._cuda_to_cpu_numel / 1e6} M elem")
+            print(f"CUDA->CPU BWD {self._cuda_to_cpu_numel * self.elem_size_in_byte / 1e6 / self._cuda_to_cpu_elapse} {self._cuda_to_cpu_numel / 1e6} M elem")
         if self._cpu_to_cuda_numel > 0:
-            print(f"CPU->CUDA BWD {self._cpu_to_cuda_numel * 4 / 1e6 / self._cpu_to_cuda_elpase} {self._cpu_to_cuda_numel / 1e6} M elem")
+            print(f"CPU->CUDA BWD {self._cpu_to_cuda_numel * self.elem_size_in_byte / 1e6 / self._cpu_to_cuda_elpase} {self._cpu_to_cuda_numel / 1e6} M elem")
 
 class FreqAwareEmbeddingBag(nn.EmbeddingBag):
     def preprocess(self, chunk_size: int, cuda_chunk_num: int, ids_freq_mapping: List[int]):
