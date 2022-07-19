@@ -26,8 +26,14 @@ class ChunkCUDAWeightMgr(object):
         # TODO() handle cases where `num_embeddings` is not divisible by chunk_size
         if weight.device.type == 'cuda':
             weight = weight.cpu()
-        self.cpu_weight = torch.chunk(weight.detach().pin_memory(), self.chunk_num, dim = 0)
 
+        mod = weight.shape[0] % chunk_size
+        if mod > 0:
+            with torch.no_grad():
+                padding = torch.zeros(chunk_size - mod, weight.shape[1], device=weight.device, dtype=weight.dtype)
+                weight = torch.cat([weight, padding], dim=0)
+        self.cpu_weight = torch.chunk(weight.detach(), self.chunk_num, dim=0)
+        
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
         self.index_mapping_table = []
