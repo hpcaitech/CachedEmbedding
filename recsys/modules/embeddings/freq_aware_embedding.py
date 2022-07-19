@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from typing import List, Optional
 import sys
 
+
 class ChunkCUDAWeightMgr(object):
     """
     Manage Chunk Weights on CPU and CUDA memory.
@@ -17,14 +18,21 @@ class ChunkCUDAWeightMgr(object):
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_chunk_num = cuda_chunk_num
 
-        self.cuda_partial_weight = torch.nn.Parameter(torch.empty(cuda_chunk_num * chunk_size * self.embedding_dim, device=torch.cuda.current_device()))
+        self.cuda_partial_weight = torch.nn.Parameter(
+            torch.empty(cuda_chunk_num * chunk_size * self.embedding_dim, device=torch.cuda.current_device()))
 
         self.chunk_num = (self.num_embeddings + chunk_size - 1) // chunk_size
 
         # TODO() handle cases where `num_embeddings` is not divisible by chunk_size
         if weight.device.type == 'cuda':
             weight = weight.cpu()
-        self.cpu_weight = torch.chunk(weight.detach(), self.chunk_num, dim = 0)
+
+        mod = weight.shape[0] % chunk_size
+        if mod > 0:
+            with torch.no_grad():
+                padding = torch.zeros(chunk_size - mod, weight.shape[1], device=weight.device, dtype=weight.dtype)
+                weight = torch.cat([weight, padding], dim=0)
+        self.cpu_weight = torch.chunk(weight.detach(), self.chunk_num, dim=0)
 
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
@@ -88,12 +96,13 @@ class ChunkCUDAWeightMgr(object):
                 min_chunk_id = chunk_id
                 min_slot_id = slot_id
                 min_offset = offset
-        
-        cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, min_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+
+        cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, min_offset,
+                                   self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
         self.cpu_weight[min_chunk_id].data.copy_(cuda_tensor)
 
         # update CCT
-        self.cached_chunk_table.pop(min_slot_id) 
+        self.cached_chunk_table.pop(min_slot_id)
 
     def _find_free_cuda_chunk(self):
         for slot_idx in range(self.cuda_chunk_num):
@@ -118,7 +127,8 @@ class ChunkCUDAWeightMgr(object):
         slot_offset = slot_id * self.chunk_size
 
         # copy payload from cpu to cuda
-        cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+        cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset,
+                                   self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
         cuda_tensor.data.copy_(self.cpu_weight[chunk_id])
 
         # update the CCT
