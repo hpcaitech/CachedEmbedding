@@ -14,7 +14,7 @@ from recsys import disable_existing_loggers
 from recsys.modules.embeddings import (LoadBalanceManager, BlockEmbeddingBag, ParallelMixVocabEmbeddingBag,
                                        QREmbeddingBag)
 
-from common import EMBEDDING_DIM, FIELD_DIMS, BATCH_SIZE, REDUCE_OPS, check_equal
+from common import EMBEDDING_DIM, NUM_EMBEDDINGS_PER_FEATURE, BATCH_SIZE, REDUCE_OPS, check_equal
 from recsys.modules.functional import reduce_forward
 
 
@@ -23,18 +23,18 @@ def _print_rank_0(msg):
     if i == 0:
         print(msg)
 
-def check_block_embeddingbag():
+def check_block_embeddingbag(mode):
     dtype = torch.float32
     
     example_field_idx = [0,2]
-    example_fields = [FIELD_DIMS[i] for i in example_field_idx]
+    example_fields = [NUM_EMBEDDINGS_PER_FEATURE[i] for i in example_field_idx]
     example_block_dim = EMBEDDING_DIM // 2
 
     # torch modules
     embed = nn.EmbeddingBag(
                 sum(example_fields), 
                 example_block_dim,
-                mode=REDUCE_OPS)
+                mode=mode)
     embed = embed.to(dtype)
 
     linear = nn.Linear(
@@ -48,7 +48,7 @@ def check_block_embeddingbag():
                     weights=[embed.weight.clone().detach(),linear.weight.clone().detach()],
                     base_embedding_dim=EMBEDDING_DIM,
                     freeze=False,
-                    mode=REDUCE_OPS)
+                    mode=mode)
     blk_embed = blk_embed.to(dtype)
 
     # initiate input tensor
@@ -81,29 +81,28 @@ def check_block_embeddingbag():
     check_equal(blk_embed_ws[1].grad, linear.weight.grad)
     _print_rank_0('embed backward: pass')
 
-def check_mv_embeddingbag(enable_qr):
+def check_mv_embeddingbag(be_fair, enable_qr, mode):
     device = get_current_device()
     dtype = torch.float32
     world_size = DISTMGR.get_world_size()
 
-    lbmgr = LoadBalanceManager(FIELD_DIMS, world_size, EMBEDDING_DIM)
+    lbmgr = LoadBalanceManager(NUM_EMBEDDINGS_PER_FEATURE, world_size, \
+                            EMBEDDING_DIM, device=device, be_fair=be_fair)
 
     rank = DISTMGR.get_rank()
 
-    group = lbmgr.get_group(rank)
+    num_embeddings_on_rank = lbmgr.get_num_embeddings_on_rank(rank)
     block_dim = lbmgr.get_block_dim(rank)
     qr_bucket_size = lbmgr.get_qr_bucket_size(rank)
-    offsets = torch.tensor((0,*np.cumsum(np.array( \
-            FIELD_DIMS, dtype=np.long)[group])[:-1]), device=device)
     comm_func = reduce_forward # need all_reduce
     
     if enable_qr:
-        pretrain_embed = QREmbeddingBag(sum([FIELD_DIMS[i] for i in group]),
+        pretrain_embed = QREmbeddingBag(num_embeddings_on_rank,
                                   qr_bucket_size,
                                   EMBEDDING_DIM)
     else:
         pretrain_embed = BlockEmbeddingBag(
-                        sum([FIELD_DIMS[i] for i in group]),
+                        num_embeddings_on_rank,
                         block_dim,
                         EMBEDDING_DIM)
             
@@ -112,26 +111,30 @@ def check_mv_embeddingbag(enable_qr):
     test_embed = ParallelMixVocabEmbeddingBag.from_pretrained(
                     pretrain_embed=pretrain_embed, 
                     lbmgr=lbmgr,
-                    mode=REDUCE_OPS,
+                    mode=mode,
                     enable_qr=enable_qr)
 
     test_embed = test_embed.to(dtype).to(device)
-
-    A_shape = (BATCH_SIZE, len(FIELD_DIMS))
-    A_master = torch.randint(min(FIELD_DIMS), A_shape, device=device)
+    
+    rand_input = []
+    
+    for i in range(len(NUM_EMBEDDINGS_PER_FEATURE)):
+        rand_input.append(torch.randint(0,NUM_EMBEDDINGS_PER_FEATURE[i],
+                                               size=(BATCH_SIZE,)).unsqueeze(1))
+        
+    A_master = torch.cat(rand_input,dim=1)
 
     torch.distributed.broadcast(A_master, src=0)
 
     A_parallel = lbmgr.shard_tensor(A_master, rank)
-    A_parallel = A_parallel + offsets
     A_output_parallel = pretrain_embed(A_parallel)
 
     A_output_gather = comm_func(
                     A_output_parallel, 
                     ParallelMode.DEFAULT,
-                    reduce_op=REDUCE_OPS)
+                    reduce_op=mode)
 
-    if REDUCE_OPS == 'mean':
+    if mode == 'mean':
         A_output_gather = A_output_gather / world_size
 
     A = A_master.clone()
@@ -161,22 +164,25 @@ def check_mv_embeddingbag(enable_qr):
 
     _print_rank_0('embed backward: pass')
 
-def check_layer(rank, world_size, port, enable_qr):
+def check_layer(rank, world_size, port, be_fair, enable_qr, mode):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
-    check_block_embeddingbag()
-    check_mv_embeddingbag(enable_qr)
+    check_block_embeddingbag(mode)
+    check_mv_embeddingbag(be_fair, enable_qr, mode)
     
     DISTMGR.destroy()
     torch.cuda.empty_cache()
 
+@pytest.mark.parametrize('be_fair', [True,False])
 @pytest.mark.parametrize('enable_qr', [True,False])
 @pytest.mark.parametrize('world_size', [1,4])
+@pytest.mark.parametrize('mode', ['sum','mean','max'])
 @rerun_if_address_is_in_use()
-def test_layer(world_size, enable_qr):
-    run_func = partial(check_layer, world_size=world_size, port=free_port(), enable_qr=enable_qr)
+def test_layer(world_size, be_fair, enable_qr, mode):
+    run_func = partial(check_layer, world_size=world_size, port=free_port(), be_fair=be_fair, \
+        enable_qr=enable_qr, mode=mode)
     mp.spawn(run_func, nprocs=world_size)
 
 if __name__ == '__main__':
-    test_layer(4)
+    test_layer(4, True, True, 'mean')

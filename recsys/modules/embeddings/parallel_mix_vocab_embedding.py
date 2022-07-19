@@ -33,8 +33,8 @@ class LoadBalanceManager(object):
         self.groups = []
         self.offsets = []
         _curr_grp = []
-        _curr_offs = []
-    
+        _curr_offs = [0]
+
         self.cuts = dict()
         _num_cuts = 0
         _agg = self.num_embeddings_per_rank
@@ -47,17 +47,26 @@ class LoadBalanceManager(object):
                     self.cuts[ind].append(_agg)
                 else:
                     self.cuts[ind] = [_agg]
-                _agg += self.num_embeddings_per_rank
                 _num_cuts += 1
                 
-                self.offsets.append(_curr_offs)
-                _curr_offs = []
+                self.offsets.append(torch.tensor(_curr_offs,device=self.device))
+                _curr_offs = [0]
                 _curr_grp.append(ind)
                 self.groups.append(_curr_grp)
                 _curr_grp = []
+                
+                _agg += self.num_embeddings_per_rank
+            
+            if _agg >= self.embeddings_per_feat[ind] and len(_curr_offs) == 1:
+                _curr_offs.append(self.embeddings_per_feat[ind]-(_agg-self.num_embeddings_per_rank))
+            else:
+                _curr_offs.append(self.embeddings_per_feat[ind])
             
             _agg -= self.embeddings_per_feat[ind]
-            _curr_offs.append(self.embeddings_per_feat[ind])
+            _curr_grp.append(ind)
+        
+        self.offsets.append(torch.tensor(_curr_offs[:-1],device=self.device))
+        self.groups.append(_curr_grp)
         
         self.emb_dim = max(2, int(self.base_emb_dim / 
                                   2**(int(math.log2(self.num_groups)))))
@@ -79,9 +88,7 @@ class LoadBalanceManager(object):
         self.emb_dims = []
         total_sum = sum(self.embeddings_per_feat)
         for group in self.groups:
-            # scale base embedding dim by total_sum/sum
             div = total_sum / sum([self.embeddings_per_feat[x] for x in group])
-            # divide base dim by a 2^n nearest to div
             emb_dim = max(2, int(self.base_emb_dim / 2**(int(math.log2(div)))))
             self.emb_dims.append(emb_dim)
             
@@ -94,9 +101,10 @@ class LoadBalanceManager(object):
 
     def get_group(self, rank: int) -> List[int]:
         assert rank in range(0, self.num_groups)
-        return self.groups[rank]
+        return list(self.groups[rank])
     
     def get_offsets(self, rank: int) -> List[int]:
+        assert rank in range(0, self.num_groups)
         return self.offsets[rank]
         
     def get_num_embeddings_on_rank(self, rank: int) -> int:
@@ -121,24 +129,29 @@ class LoadBalanceManager(object):
             return self.qr_bucket_size
         
     def shard_tensor(self, _input: Tensor, rank: int) -> Tensor:
+        assert _input.dim() == 2 \
+            and _input.size(1) == len(self.embeddings_per_feat)
+        if _input.device != self.device:
+            _input = _input.to(self.device)
         offsets = self.get_offsets(rank)
         if not self.be_fair:
             group = self.get_group(rank)
             assert min(group) >= 0 and max(group) < _input.size(1)
             return _input[:, group] + offsets
         else:
-            _cinput = _input.copy()
+            _cinput = _input.clone()
             feats = list(self.cuts.keys())
             assert hasattr(self, 'cuts')
             if rank == 0:
                 feat_id = feats[0]
                 cut_pos = self.cuts[feat_id][0]
-                _cinput[:,feat_id] = torch.min(cut_pos*torch.ones(_cinput.shape), _cinput[:,feat_id])
+                _cinput[:,feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0)), _cinput[:,feat_id])
                 return _cinput[:,:feat_id+1] + offsets
             else:
+                rank -= 1
                 for (k,v) in self.cuts.items():
-                    if rank - len(v) <= 0:
-                        cut_pos = v[-(len(v)-rank):][:2] # this and next shard position
+                    if rank - len(v) < 0:
+                        cut_pos = v[rank:][:2] # this and next shard position
                         if len(cut_pos) < 2 and k != feats[-1]:
                             next_feat_id = feats[feats.index(k) + 1]
                         else:
@@ -147,23 +160,24 @@ class LoadBalanceManager(object):
                         break
                     rank -= len(v)
                 if len(cut_pos) == 1:
+                    cut_pos = cut_pos[0]
                     if feat_id == feats[-1]: # last rank
-                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.shape), _cinput[:,feat_id]-cut_pos)
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), _cinput[:,feat_id]-cut_pos)
                         return _cinput[:,feat_id:] + offsets
                     else:
                         assert next_feat_id is not None
-                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),1), 
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), 
                                                        _cinput[:,feat_id]-cut_pos)
-                        _cinput[:,next_feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0),1), 
+                        _cinput[:,next_feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0)), 
                                                             _cinput[:,next_feat_id])
                         return _cinput[:,:next_feat_id+1] + offsets
                 elif len(cut_pos) == 2:
                     pos1, pos2 = cut_pos
-                    _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),1), 
-                                                    _cinput[:,feat_id]-pos2)
-                    _cinput[:,feat_id] = torch.min(pos1*torch.ones(_cinput.size(0),1), 
+                    _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), 
+                                                    _cinput[:,feat_id]-pos1)
+                    _cinput[:,feat_id] = torch.min(pos2*torch.ones(_cinput.size(0)), 
                                                         _cinput[:,feat_id])
-                    return _cinput[:,:next_feat_id+1] + offsets
+                    return _cinput[:,feat_id] + offsets
                 else:
                     raise ValueError('input tensor and embeddings_per_feat do not match. Double check inputs.')
             
@@ -201,7 +215,7 @@ class QREmbeddingBag(nn.Module):
         self.qr_bucket_size = qr_bucket_size
         self.embedding_dim = embedding_dim
         
-        print('Params savings {:.3f}B'.format((num_embeddings*embedding_dim - 2*qr_bucket_size*embedding_dim)/1_000_000_000))
+        # print('Params savings {:.3f}B'.format((num_embeddings*embedding_dim - 2*qr_bucket_size*embedding_dim)/1_000_000_000))
 
         if padding_idx is not None:
             if padding_idx > 0:
@@ -324,8 +338,8 @@ class BlockEmbeddingBag(nn.Module):
         self.block_embedding_dim = block_embedding_dim
         self.base_embedding_dim = base_embedding_dim
         
-        print('Saved params (M)',(self.num_embeddings*(self.base_embedding_dim-self.block_embedding_dim)\
-                                - self.block_embedding_dim*self.base_embedding_dim)/1_000_000)
+        # print('Saved params (M)',(self.num_embeddings*(self.base_embedding_dim-self.block_embedding_dim)\
+                                # - self.block_embedding_dim*self.base_embedding_dim)/1_000_000)
 
         if padding_idx is not None:
             if padding_idx > 0:
@@ -520,17 +534,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
     def forward(self, x, offsets=None):
         assert offsets is None, "offsets have been handled internally.\n Users shouldn't manually input offsets"
         x_parallel = self._lbmgr.shard_tensor(x)
-        # x_parallel = x_parallel // 16
-        # print('embeddings_per_feat',self.embeddings_per_feat)
-        # print(torch.max(x_parallel))
-        # print(self.embed.num_embeddings)
-        # exit()
         output_parallel = self.embed(x_parallel)
-        # print(output_parallel.device)
-        # print(output_parallel.dtype)
-        # print(output_parallel.shape)
-        # print(output_parallel.requires_grad)
-        # exit()
         output_gather = self.comm_func(output_parallel, self.parallel_mode, reduce_op=self.mode)
 
         if self.mode == 'mean':
