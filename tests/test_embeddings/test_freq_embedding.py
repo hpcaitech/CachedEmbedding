@@ -18,5 +18,9 @@ def test_chunkmgr_admit():
     mgr._evict()
     assert mgr.cuda_available_chunk_num() == 4
 
+    mgr._prepare_cuda_chunks([9, 6, 5])
+    mgr._prepare_cuda_chunks([3, 4, 5])
+    print(mgr.cached_chunk_table)
+
 if __name__ == '__main__':
     test_chunkmgr_admit()

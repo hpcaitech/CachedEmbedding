@@ -28,16 +28,22 @@ class ChunkCUDAWeightMgr(object):
 
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
-        self.id_to_chunk_ids_mapping = []
+        self.index_mapping_table = []
         # CachedChunkTable: dict(slot_idx, (chunk_id, offset)) in self.cuda_partial_weight
         self.cached_chunk_table = {}
+
+    def _chunk_in_cuda(self, chunk_id) -> bool:
+        for slot_idx, (chunk_id, offset) in self.cached_chunk_table.items():
+            if slot_idx == chunk_id:
+                return True
+        return False
 
     def cuda_available_chunk_num(self):
         return self.cuda_chunk_num - len(self.cached_chunk_table)
 
     def reorder(self, ids_freq_mapping: Optional[List[int]] = None):
         """reorder the cpu_weight according to ids' frequency in dataset before training.
-        Also Build the IndexMappingTable, aka id_to_chunk_ids_mapping.
+        Also Build the IndexMappingTable, aka index_mapping_table.
         Args:
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq. if None no reorder
         """
@@ -45,7 +51,7 @@ class ChunkCUDAWeightMgr(object):
             sorted_idx = np.flipud(np.argsort(ids_freq_mapping))
 
         for _id in range(self.num_embeddings):
-            self.id_to_chunk_ids_mapping.append(divmod((sorted_idx[_id] if ids_freq_mapping else _id), self.chunk_size))
+            self.index_mapping_table.append(divmod((sorted_idx[_id] if ids_freq_mapping else _id), self.chunk_size))
 
     def prepare_ids(self, ids: List[int]) -> List[int]:
         """
@@ -58,13 +64,13 @@ class ChunkCUDAWeightMgr(object):
         """
         chunk_id_set = set()
         for id in ids:
-            chunk_id, offset = self.id_to_chunk_ids_mapping[id]
+            chunk_id, offset_in_chunk = self.index_mapping_table[id]
             chunk_id_set.add(chunk_id)
 
         # move chunk_id_set to CUDA
         cpu_chunk_id_list = []
         for chunk_id in chunk_id:
-            if chunk_id not in self.cached_chunk_table:
+            if chunk_id not in self.cached_chunk_table.items():
                 cpu_chunk_id_list.append(chunk_id)
 
         self._prepare_cuda_chunks(self, cpu_chunk_id_list)
@@ -74,7 +80,13 @@ class ChunkCUDAWeightMgr(object):
         Args:
             chunk_ids (List[int]): the chunks to be placed on CUDA
         """
-        pass
+        for chunk_id in chunk_ids:
+            if self._chunk_in_cuda(chunk_id):
+                continue
+
+            if self._find_free_cuda_slot() == -1:
+                self._evict()
+            self._admit(chunk_id)
 
     def _evict(self):
         """
@@ -95,7 +107,7 @@ class ChunkCUDAWeightMgr(object):
         # update CCT
         self.cached_chunk_table.pop(min_slot_id) 
 
-    def _find_free_cuda_chunk(self):
+    def _find_free_cuda_slot(self) -> int:
         for slot_idx in range(self.cuda_chunk_num):
             if slot_idx not in self.cached_chunk_table:
                 return slot_idx
@@ -109,7 +121,7 @@ class ChunkCUDAWeightMgr(object):
             chunk_id (int): the id of chunk to be moved in
         """
         # find a free slot
-        slot_id = self._find_free_cuda_chunk()
+        slot_id = self._find_free_cuda_slot()
 
         if slot_id == -1:
             # evict one chunk
