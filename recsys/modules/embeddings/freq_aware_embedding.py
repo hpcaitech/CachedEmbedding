@@ -5,6 +5,9 @@ import torch.nn.functional as F
 from typing import List, Optional
 from contexttimer import Timer
 
+from .base_embeddings import BaseEmbeddingBag
+
+
 class ChunkCUDAWeightMgr(object):
     """
     Manage Chunk Weights on CPU and CUDA memory.
@@ -12,14 +15,19 @@ class ChunkCUDAWeightMgr(object):
     During training, we need to swapin/out chunks.
     """
 
-    def __init__(self, weight: torch.Tensor, chunk_size: int = 16 * 1024 * 1024, cuda_chunk_num: int = 0) -> None:
+    def __init__(self,
+                 weight: torch.Tensor,
+                 chunk_size: int = 16 * 1024 * 1024,
+                 cuda_chunk_num: int = 0,
+                 ids_freq_mapping: [List[int]] = None) -> None:
         self.chunk_size = chunk_size
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_chunk_num = cuda_chunk_num
 
-        self.elem_size_in_byte = weight.element_size() 
+        self.elem_size_in_byte = weight.element_size()
 
-        self.cuda_partial_weight = torch.nn.Parameter(torch.empty(cuda_chunk_num * chunk_size * self.embedding_dim, device=torch.cuda.current_device()))
+        self.cuda_partial_weight = torch.nn.Parameter(
+            torch.empty(cuda_chunk_num * chunk_size * self.embedding_dim, device=torch.cuda.current_device()))
 
         self.chunk_num = (self.num_embeddings + chunk_size - 1) // chunk_size
 
@@ -48,10 +56,10 @@ class ChunkCUDAWeightMgr(object):
     def _reset_comm_stats(self):
         self._cpu_to_cuda_numel = 0
         self._cuda_to_cpu_numel = 0
-    
+
     def _chunk_in_cuda(self, chunk_id) -> bool:
-        for slot_idx, (chunk_id, offset) in self.cached_chunk_table.items():
-            if slot_idx == chunk_id:
+        for slot_idx, (_chunk_id, offset) in self.cached_chunk_table.items():
+            if _chunk_id == chunk_id:
                 return True
         return False
 
@@ -70,7 +78,7 @@ class ChunkCUDAWeightMgr(object):
         for _id in range(self.num_embeddings):
             self.index_mapping_table.append(divmod((sorted_idx[_id] if ids_freq_mapping else _id), self.chunk_size))
 
-    def prepare_ids(self, ids: List[int]) -> List[int]:
+    def prepare_ids(self, ids: List[int]):
         """
         move the chunks w.r.t. ids into CUDA memory
 
@@ -86,7 +94,7 @@ class ChunkCUDAWeightMgr(object):
 
         # move chunk_id_set to CUDA
         cpu_chunk_id_list = []
-        for chunk_id in chunk_id:
+        for chunk_id in chunk_id_set:
             if chunk_id not in self.cached_chunk_table.items():
                 cpu_chunk_id_list.append(chunk_id)
 
@@ -117,13 +125,14 @@ class ChunkCUDAWeightMgr(object):
                 min_chunk_id = chunk_id
                 min_slot_id = slot_id
                 min_offset = offset
-        
+
         with Timer() as timer:
-            cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, min_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+            cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, min_offset,
+                                       self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
             self.cpu_weight[min_chunk_id].data.copy_(cuda_tensor)
 
         # update CCT
-        self.cached_chunk_table.pop(min_slot_id) 
+        self.cached_chunk_table.pop(min_slot_id)
         self._cuda_to_cpu_numel += self.chunk_size * self.embedding_dim
         self._cuda_to_cpu_elapse += timer.elapsed
 
@@ -151,7 +160,8 @@ class ChunkCUDAWeightMgr(object):
 
         # copy payload from cpu to cuda
         with Timer() as timer:
-            cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+            cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset,
+                                       self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
             cuda_tensor.data.copy_(self.cpu_weight[chunk_id])
 
         # update the CCT
@@ -161,12 +171,33 @@ class ChunkCUDAWeightMgr(object):
 
     def print_comm_stats(self):
         if self._cuda_to_cpu_numel > 0:
-            print(f"CUDA->CPU BWD {self._cuda_to_cpu_numel * self.elem_size_in_byte / 1e6 / self._cuda_to_cpu_elapse} MB/s {self._cuda_to_cpu_numel / 1e6} M elem")
+            print(
+                f"CUDA->CPU BWD {self._cuda_to_cpu_numel * self.elem_size_in_byte / 1e6 / self._cuda_to_cpu_elapse} MB/s {self._cuda_to_cpu_numel / 1e6} M elem"
+            )
         if self._cpu_to_cuda_numel > 0:
-            print(f"CPU->CUDA BWD {self._cpu_to_cuda_numel * self.elem_size_in_byte / 1e6 / self._cpu_to_cuda_elpase} MB/s {self._cpu_to_cuda_numel / 1e6} M elem")
+            print(
+                f"CPU->CUDA BWD {self._cpu_to_cuda_numel * self.elem_size_in_byte / 1e6 / self._cpu_to_cuda_elpase} MB/s {self._cpu_to_cuda_numel / 1e6} M elem"
+            )
 
-class FreqAwareEmbeddingBag(nn.EmbeddingBag):
-    def preprocess(self, chunk_size: int, cuda_chunk_num: int, ids_freq_mapping: List[int]):
+
+class FreqAwareEmbeddingBag(BaseEmbeddingBag):
+
+    def __init__(self,
+                 num_embeddings,
+                 embedding_dim,
+                 chunk_size,
+                 cuda_chunk_num,
+                 ids_freq_mapping=None,
+                 device=None,
+                 dtype=None,
+                 *args,
+                 **kwargs):
+        super(FreqAwareEmbeddingBag, self).__init__(num_embeddings, embedding_dim, *args, **kwargs)
+
+        self.weight = torch.randn(self.num_embeddings, self.embedding_dim, device='cpu', dtype=dtype)
+        self._preprocess(chunk_size, cuda_chunk_num, ids_freq_mapping)
+
+    def _preprocess(self, chunk_size: int, cuda_chunk_num: int, ids_freq_mapping: List[int]):
         """
         Called after initialized. 
         Reorder the weight rows according to the ids_freq_mapping.
@@ -176,7 +207,7 @@ class FreqAwareEmbeddingBag(nn.EmbeddingBag):
             cuda_chunk_num (int): number of chunk can be hosted in CUDA memory
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq
         """
-        self.chunkweightmgr = ChunkCUDAWeightMgr(self.weight, chunk_size, cuda_chunk_num, ids_freq_mapping)
+        self.chunk_weight_mgr = ChunkCUDAWeightMgr(self.weight, chunk_size, cuda_chunk_num, ids_freq_mapping)
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
         reorder_ids = self.chunkweightmgr.prepare_ids(indices)
@@ -186,3 +217,7 @@ class FreqAwareEmbeddingBag(nn.EmbeddingBag):
                                      per_sample_weights, self.include_last_offset, self.padding_idx)
 
         return embeddings
+
+    @property
+    def weight(self):
+        return self.chunk_weight_mgr.cpu_weight
