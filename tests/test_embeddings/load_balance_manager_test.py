@@ -11,6 +11,7 @@ from common import  NUM_EMBEDDINGS_PER_FEATURE, BATCH_SIZE, check_equal
 
 
 def check_loadbalancemanager(be_fair, world_size, device):
+    print(f'setting: be_fair:{be_fair}, world_size:{world_size}, device:{device}')
     lbmgr = LoadBalanceManager(embeddings_per_feat=NUM_EMBEDDINGS_PER_FEATURE,
                                num_groups=world_size,
                                be_fair=be_fair,
@@ -22,7 +23,7 @@ def check_loadbalancemanager(be_fair, world_size, device):
         rand_input.append(torch.randint(0,NUM_EMBEDDINGS_PER_FEATURE[i],
                                                size=(BATCH_SIZE,)).unsqueeze(1))
         
-    rand_input_tensor = torch.cat(rand_input,dim=1)
+    rand_input_tensor = torch.cat(rand_input,dim=1).to(device)
     
     assert rand_input_tensor.shape == (BATCH_SIZE, len(NUM_EMBEDDINGS_PER_FEATURE))
     
@@ -59,17 +60,21 @@ def check_loadbalancemanager(be_fair, world_size, device):
         
         offsets.append(torch.tensor(_curr_offs[:-1],device=device))
         
+        assert cuts == lbmgr.cuts
+        
+        for (a,b) in zip(offsets, lbmgr.offsets):
+            assert torch.allclose(a,b)
+        
         # Perform tensor sharding
         for rank in range(world_size):
-            offsets = offsets[rank]
-            shard_output = torch.empty(size=(BATCH_SIZE,len(offsets)))
+            offset = offsets[rank]
             _cinput = rand_input_tensor.clone()
             feats = list(cuts.keys())
             if rank == 0:
                 feat_id = feats[0]
                 cut_pos = cuts[feat_id][0]
-                _cinput[:,feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0)), _cinput[:,feat_id])
-                shard_output = _cinput[:,:feat_id+1] + offsets
+                _cinput[:,feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0),device=device), _cinput[:,feat_id])
+                shard_output = _cinput[:,:feat_id+1] + offset
             else:
                 rank -= 1
                 for (k,v) in cuts.items():
@@ -85,26 +90,29 @@ def check_loadbalancemanager(be_fair, world_size, device):
                 if len(cut_pos) == 1:
                     cut_pos = cut_pos[0]
                     if feat_id == feats[-1]: # last rank
-                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), _cinput[:,feat_id]-cut_pos)
-                        shard_output = _cinput[:,feat_id:] + offsets
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=device), _cinput[:,feat_id]-cut_pos)
+                        shard_output = _cinput[:,feat_id:] + offset
                     else:
                         assert next_feat_id is not None
-                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), 
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=device), 
                                                     _cinput[:,feat_id]-cut_pos)
-                        _cinput[:,next_feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0)), 
+                        _cinput[:,next_feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0),device=device), 
                                                             _cinput[:,next_feat_id])
-                        shard_output = _cinput[:,:next_feat_id+1] + offsets
+                        shard_output = _cinput[:,feat_id:next_feat_id+1] + offset
                 elif len(cut_pos) == 2:
                     pos1, pos2 = cut_pos
-                    _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), 
+                    _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=device), 
                                                     _cinput[:,feat_id]-pos1)
-                    _cinput[:,feat_id] = torch.min(pos2*torch.ones(_cinput.size(0)), 
+                    _cinput[:,feat_id] = torch.min(pos2*torch.ones(_cinput.size(0),device=device), 
                                                         _cinput[:,feat_id])
-                    shard_output = _cinput[:,feat_id] + offsets
+                    print(_cinput[:,feat_id].shape)
+                    shard_output = _cinput[:,feat_id] + offset
                 else:
                     raise ValueError('input tensor and embeddings_per_feat do not match. Double check inputs.')
-                
-            assert check_equal(lbmgr.shard_tensor(rand_input_tensor,rank).detach(), shard_output.detach())
+            
+            test_shard_output = lbmgr.shard_tensor(rand_input_tensor.clone(),rank)
+            assert torch.allclose(test_shard_output, shard_output)
+            print('passed')
     else:
         dim_indices = np.array(range(len(NUM_EMBEDDINGS_PER_FEATURE)))
         np.random.shuffle(dim_indices)
@@ -133,4 +141,4 @@ def test_layer(be_fair, world_size, device):
     run_func()
 
 if __name__ == '__main__':
-    test_layer(True,4,'cpu')
+    test_layer(True,4,'cuda:0')

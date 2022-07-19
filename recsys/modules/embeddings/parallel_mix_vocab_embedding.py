@@ -131,8 +131,6 @@ class LoadBalanceManager(object):
     def shard_tensor(self, _input: Tensor, rank: int) -> Tensor:
         assert _input.dim() == 2 \
             and _input.size(1) == len(self.embeddings_per_feat)
-        if _input.device != self.device:
-            _input = _input.to(self.device)
         offsets = self.get_offsets(rank)
         if not self.be_fair:
             group = self.get_group(rank)
@@ -145,7 +143,9 @@ class LoadBalanceManager(object):
             if rank == 0:
                 feat_id = feats[0]
                 cut_pos = self.cuts[feat_id][0]
-                _cinput[:,feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0)), _cinput[:,feat_id])
+                _cinput[:,feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0),device=self.device),\
+                                                _cinput[:,feat_id])
+                print()
                 return _cinput[:,:feat_id+1] + offsets
             else:
                 rank -= 1
@@ -162,20 +162,21 @@ class LoadBalanceManager(object):
                 if len(cut_pos) == 1:
                     cut_pos = cut_pos[0]
                     if feat_id == feats[-1]: # last rank
-                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), _cinput[:,feat_id]-cut_pos)
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device),
+                                                       _cinput[:,feat_id]-cut_pos)
                         return _cinput[:,feat_id:] + offsets
                     else:
                         assert next_feat_id is not None
-                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), 
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device), \
                                                        _cinput[:,feat_id]-cut_pos)
-                        _cinput[:,next_feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0)), 
+                        _cinput[:,next_feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0),device=self.device), \
                                                             _cinput[:,next_feat_id])
-                        return _cinput[:,:next_feat_id+1] + offsets
+                        return _cinput[:,feat_id:next_feat_id+1] + offsets
                 elif len(cut_pos) == 2:
                     pos1, pos2 = cut_pos
-                    _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0)), 
+                    _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device), 
                                                     _cinput[:,feat_id]-pos1)
-                    _cinput[:,feat_id] = torch.min(pos2*torch.ones(_cinput.size(0)), 
+                    _cinput[:,feat_id] = torch.min(pos2*torch.ones(_cinput.size(0),device=self.device), 
                                                         _cinput[:,feat_id])
                     return _cinput[:,feat_id] + offsets
                 else:
@@ -215,7 +216,7 @@ class QREmbeddingBag(nn.Module):
         self.qr_bucket_size = qr_bucket_size
         self.embedding_dim = embedding_dim
         
-        # print('Params savings {:.3f}B'.format((num_embeddings*embedding_dim - 2*qr_bucket_size*embedding_dim)/1_000_000_000))
+        print('Params savings {:.3f}B'.format((num_embeddings*embedding_dim - 2*qr_bucket_size*embedding_dim)/1_000_000_000))
 
         if padding_idx is not None:
             if padding_idx > 0:
@@ -338,8 +339,8 @@ class BlockEmbeddingBag(nn.Module):
         self.block_embedding_dim = block_embedding_dim
         self.base_embedding_dim = base_embedding_dim
         
-        # print('Saved params (M)',(self.num_embeddings*(self.base_embedding_dim-self.block_embedding_dim)\
-                                # - self.block_embedding_dim*self.base_embedding_dim)/1_000_000)
+        print('Saved params (M)',(self.num_embeddings*(self.base_embedding_dim-self.block_embedding_dim)\
+                                - self.block_embedding_dim*self.base_embedding_dim)/1_000_000)
 
         if padding_idx is not None:
             if padding_idx > 0:
