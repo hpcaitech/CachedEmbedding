@@ -34,5 +34,9 @@ def test_chunkmgr_admit():
     print(mgr.cached_chunk_table)
     mgr.print_comm_stats()
     
+    mgr.flush()
+    assert mgr.cuda_available_chunk_num() == 5
+    # print(mgr.cached_chunk_table)
+    
 if __name__ == '__main__':
     test_chunkmgr_admit()
