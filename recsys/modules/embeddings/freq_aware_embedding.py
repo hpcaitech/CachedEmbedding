@@ -194,6 +194,13 @@ class ChunkCUDAWeightMgr(object):
         self._cpu_to_cuda_numel += self.chunk_size * self.embedding_dim
         self._cpu_to_cuda_elpase += timer.elapsed
 
+    def flush(self):
+        """flush all CUDA chunks to CPU.
+        The function is usually called after training finished.
+        """
+        while len(self.cached_chunk_table) != 0:
+            self._evict()
+
     def print_comm_stats(self):
         if self._cuda_to_cpu_numel > 0:
             print(
