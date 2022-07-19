@@ -4,6 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 from typing import List, Optional
 import sys
+from contexttimer import Timer
 
 class ChunkCUDAWeightMgr(object):
     """
@@ -32,6 +33,15 @@ class ChunkCUDAWeightMgr(object):
         # CachedChunkTable: dict(slot_idx, (chunk_id, offset)) in self.cuda_partial_weight
         self.cached_chunk_table = {}
 
+        self._cpu_to_cuda_numel = 0
+        self._cpu_to_cuda_elpase = 0
+        self._cuda_to_cpu_numel = 0
+        self._cuda_to_cpu_elapse = 0
+
+    def _reset_comm_stats(self):
+        self._cpu_to_cuda_numel = 0
+        self._cuda_to_cpu_numel = 0
+    
     def _chunk_in_cuda(self, chunk_id) -> bool:
         for slot_idx, (chunk_id, offset) in self.cached_chunk_table.items():
             if slot_idx == chunk_id:
@@ -101,11 +111,14 @@ class ChunkCUDAWeightMgr(object):
                 min_slot_id = slot_id
                 min_offset = offset
         
-        cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, min_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
-        self.cpu_weight[min_chunk_id].data.copy_(cuda_tensor)
+        with Timer() as timer:
+            cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, min_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+            self.cpu_weight[min_chunk_id].data.copy_(cuda_tensor)
 
         # update CCT
         self.cached_chunk_table.pop(min_slot_id) 
+        self._cuda_to_cpu_numel += self.chunk_size * self.embedding_dim
+        self._cuda_to_cpu_elapse += timer.elapsed
 
     def _find_free_cuda_slot(self) -> int:
         for slot_idx in range(self.cuda_chunk_num):
@@ -130,15 +143,22 @@ class ChunkCUDAWeightMgr(object):
         slot_offset = slot_id * self.chunk_size
 
         # copy payload from cpu to cuda
-        cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
-        cuda_tensor.data.copy_(self.cpu_weight[chunk_id])
+        with Timer() as timer:
+            cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+            cuda_tensor.data.copy_(self.cpu_weight[chunk_id])
 
         # update the CCT
         self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)
+        self._cpu_to_cuda_numel += self.chunk_size * self.embedding_dim
+        self._cpu_to_cuda_elpase += timer.elapsed
 
+    def print_comm_stats(self):
+        if self._cuda_to_cpu_numel > 0:
+            print(f"CUDA->CPU BWD {self._cuda_to_cpu_numel * 4 / 1e6 / self._cuda_to_cpu_elapse} {self._cuda_to_cpu_numel / 1e6} M elem")
+        if self._cpu_to_cuda_numel > 0:
+            print(f"CPU->CUDA BWD {self._cpu_to_cuda_numel * 4 / 1e6 / self._cpu_to_cuda_elpase} {self._cpu_to_cuda_numel / 1e6} M elem")
 
 class FreqAwareEmbeddingBag(nn.EmbeddingBag):
-
     def preprocess(self, chunk_size: int, cuda_chunk_num: int, ids_freq_mapping: List[int]):
         """
         Called after initialized. 
@@ -157,4 +177,5 @@ class FreqAwareEmbeddingBag(nn.EmbeddingBag):
         embeddings = F.embedding_bag(reorder_ids, self.chunkweightmgr.cuda_partial_weight, offsets, self.max_norm,
                                      self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
                                      per_sample_weights, self.include_last_offset, self.padding_idx)
+
         return embeddings
