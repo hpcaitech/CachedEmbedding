@@ -6,7 +6,8 @@ import torch.multiprocessing as mp
 
 from recsys import launch, disable_existing_loggers
 from recsys import DISTMGR
-from recsys.testing import rerun_if_address_is_in_use, free_port
+from colossalai.utils import free_port
+from colossalai.testing import rerun_if_address_is_in_use
 from recsys.modules.embeddings import CachedEmbeddingBag, ParallelCachedEmbeddingBag, CacheReplacePolicy
 
 NUM_EMBEDDINGS, EMBEDDING_DIM = 100, 8
