@@ -28,7 +28,7 @@ class ChunkCUDAWeightMgr(object):
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
         self.id_to_chunk_ids_mapping = []
-        # CachedChunkTable: dict(chunk_id, offset) in self.cuda_partial_weight
+        # CachedChunkTable: dict(slot_idx, (chunk_id, offset)) in self.cuda_partial_weight
         self.cached_chunk_table = {}
 
     def cuda_available_chunk_num(self):
@@ -79,7 +79,13 @@ class ChunkCUDAWeightMgr(object):
         Args:
             evit_chunk_num (int): the number of chunks to be evicted
         """
-        pass
+        raise NotImplementedError
+
+    def _find_free_cuda_chunk(self):
+        for slot_idx in range(self.cuda_chunk_num):
+            if slot_idx not in self.cached_chunk_table:
+                return slot_idx
+        return -1
 
     def _admit(self, chunk_id : int):
         """
@@ -89,8 +95,20 @@ class ChunkCUDAWeightMgr(object):
             chunk_id (int): the id of chunk to be moved in
         """
         # find a free slot
+        slot_id = self._find_free_cuda_chunk()
 
+        if slot_id == -1:
+            # evict one chunk
+            self._evict(1)
 
+        slot_offset = slot_id * self.chunk_size
+
+        # copy payload from cpu to cuda
+        cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+        cuda_tensor.copy_(self.cpu_weight[chunk_id])
+
+        # update the CCT
+        self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)
 
 
 class FreqAwareEmbeddingBag(nn.EmbeddingBag):
