@@ -1,5 +1,16 @@
+import pytest
 from recsys.modules.embeddings import ChunkCUDAWeightMgr
 import torch
+
+
+@pytest.mark.parametrize('chunk_size', [1, 3, 4, 11])
+def test_uneven_weight(chunk_size):
+    weight = torch.randn(11, 5)
+    mgr = ChunkCUDAWeightMgr(weight, chunk_size, 10)
+
+    for each in mgr.cpu_weight:
+        assert each.shape[0] == chunk_size
+
 
 def test_chunkmgr_admit():
     model = torch.nn.EmbeddingBag(10000, 128)
