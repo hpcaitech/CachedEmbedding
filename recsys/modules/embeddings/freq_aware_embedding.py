@@ -34,11 +34,15 @@ class ChunkCUDAWeightMgr(object):
                 weight = torch.cat([weight, padding], dim=0)
         self.cpu_weight = torch.chunk(weight.detach(), self.chunk_num, dim=0)
 
+        self.cpu_weight = [t.pin_memory() for t in self.cpu_weight]
+
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
         self.index_mapping_table = []
         # CachedChunkTable: dict(slot_idx, (chunk_id, offset)) in self.cuda_partial_weight
         self.cached_chunk_table = {}
+        # chunk_id, offset in cuda_partial_weight
+        self.chunk_id_cuda_offset = {}
 
         self._cpu_to_cuda_numel = 0
         self._cpu_to_cuda_elpase = 0
@@ -70,6 +74,19 @@ class ChunkCUDAWeightMgr(object):
         for _id in range(self.num_embeddings):
             self.index_mapping_table.append(divmod((sorted_idx[_id] if ids_freq_mapping else _id), self.chunk_size))
 
+    def _id_to_cached_cuda_id(self, id : int) -> int:
+        """
+        convert an id from the dataset to index in self.partial_cuda_weight
+
+        Args:
+            id (int): an id from the dataset
+
+        Returns:
+            int: the index in self.partial_cuda_weight
+        """
+        chunk_id, offset_in_chunk = self.index_mapping_table[id]
+        return self.chunk_id_cuda_offset[chunk_id] + offset_in_chunk
+
     def prepare_ids(self, ids: List[int]) -> List[int]:
         """
         move the chunks w.r.t. ids into CUDA memory
@@ -91,6 +108,10 @@ class ChunkCUDAWeightMgr(object):
                 cpu_chunk_id_list.append(chunk_id)
 
         self._prepare_cuda_chunks(self, cpu_chunk_id_list)
+
+        # new ids chunk_offset + offset_in_chunk
+        mapped_ids = [self._id_to_cached_cuda_id(id) for id in ids]
+        return mapped_ids
 
     def _prepare_cuda_chunks(self, chunk_ids: List[int]) -> None:
         """prepare chunks in chunk_ids on CUDA memory
@@ -124,6 +145,8 @@ class ChunkCUDAWeightMgr(object):
 
         # update CCT
         self.cached_chunk_table.pop(min_slot_id) 
+        self.chunk_id_cuda_offset.pop(min_chunk_id)
+
         self._cuda_to_cpu_numel += self.chunk_size * self.embedding_dim
         self._cuda_to_cpu_elapse += timer.elapsed
 
@@ -156,6 +179,8 @@ class ChunkCUDAWeightMgr(object):
 
         # update the CCT
         self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)
+        self.chunk_id_cuda_offset[chunk_id] = slot_offset
+
         self._cpu_to_cuda_numel += self.chunk_size * self.embedding_dim
         self._cpu_to_cuda_elpase += timer.elapsed
 
