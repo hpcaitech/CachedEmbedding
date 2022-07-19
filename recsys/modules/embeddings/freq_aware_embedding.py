@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from typing import List, Optional
-
+import sys
 
 class ChunkCUDAWeightMgr(object):
     """
@@ -16,14 +16,14 @@ class ChunkCUDAWeightMgr(object):
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_chunk_num = cuda_chunk_num
 
-        self.cuda_partial_weight = torch.empty(cuda_chunk_num * chunk_size * self.embedding_dim, device=torch.cuda.current_device())
+        self.cuda_partial_weight = torch.nn.Parameter(torch.empty(cuda_chunk_num * chunk_size * self.embedding_dim, device=torch.cuda.current_device()))
 
         self.chunk_num = (self.num_embeddings + chunk_size - 1) // chunk_size
 
         # TODO() handle cases where `num_embeddings` is not divisible by chunk_size
         if weight.device.type == 'cuda':
             weight = weight.cpu()
-        self.cpu_weight = torch.chunk(weight, self.chunk_num, dim = 0)
+        self.cpu_weight = torch.chunk(weight.detach(), self.chunk_num, dim = 0)
 
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
@@ -72,14 +72,24 @@ class ChunkCUDAWeightMgr(object):
         """
         pass
 
-    def _evict(self, evit_chunk_num : int):
+    def _evict(self):
         """
-        evict evit_chunk_num chunks from cuda to cpu.
+        evict one chunk from cuda to cpu.
+        """
+        min_chunk_id = 2 * self.chunk_num
+        min_slot_id = None
+        min_offset = None
+        for slot_id, (chunk_id, offset) in self.cached_chunk_table.items():
+            if chunk_id < min_chunk_id:
+                min_chunk_id = chunk_id
+                min_slot_id = slot_id
+                min_offset = offset
+        
+        cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, min_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+        self.cpu_weight[min_chunk_id].data.copy_(cuda_tensor)
 
-        Args:
-            evit_chunk_num (int): the number of chunks to be evicted
-        """
-        raise NotImplementedError
+        # update CCT
+        self.cached_chunk_table.pop(min_slot_id) 
 
     def _find_free_cuda_chunk(self):
         for slot_idx in range(self.cuda_chunk_num):
@@ -105,7 +115,7 @@ class ChunkCUDAWeightMgr(object):
 
         # copy payload from cpu to cuda
         cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
-        cuda_tensor.copy_(self.cpu_weight[chunk_id])
+        cuda_tensor.data.copy_(self.cpu_weight[chunk_id])
 
         # update the CCT
         self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)
