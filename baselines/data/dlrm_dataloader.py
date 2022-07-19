@@ -117,7 +117,10 @@ def get_dataloader(args: argparse.Namespace, backend: str, stage: str) -> DataLo
 
 # ============== Customize for Persia ===================
 import numpy as np
-from persia.embedding.data import IDTypeFeatureWithSingleID, NonIDTypeFeature, Label
+try:
+    from persia.embedding.data import IDTypeFeatureWithSingleID, NonIDTypeFeature, Label
+except ImportError:
+    pass
 
 
 class PersiaDataLoader:
@@ -198,7 +201,7 @@ class RandomDataLoader:
         self.batch_index = 0
         return self
 
-    def __next__(self) -> Tuple[NonIDTypeFeature, IDTypeFeatureWithSingleID, Label]:
+    def __next__(self):
         if self.batch_index == self.num_batches:
             raise StopIteration
         if self.num_generated_batches >= 0:
@@ -208,7 +211,7 @@ class RandomDataLoader:
         self.batch_index += 1
         return batch
 
-    def _generate_batch(self) -> Tuple[NonIDTypeFeature, IDTypeFeatureWithSingleID, Label]:
+    def _generate_batch(self):
 
         sparse_features = []
         for key_idx, key_name in enumerate(self.keys):
