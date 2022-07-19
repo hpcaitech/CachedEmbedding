@@ -3,7 +3,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from typing import List, Optional
-import sys
 from contexttimer import Timer
 
 class ChunkCUDAWeightMgr(object):
