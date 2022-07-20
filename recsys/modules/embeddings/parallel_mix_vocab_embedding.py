@@ -469,6 +469,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         self.embeddings_per_feat = embeddings_per_feat
         self.embedding_dim = embedding_dim
         self.mode = mode
+        
         self.device = device if device is not None else torch.device('cuda', torch.cuda.current_device())
         self._do_fair = do_fair
 
