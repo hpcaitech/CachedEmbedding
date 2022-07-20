@@ -32,7 +32,7 @@ def parse_dfm_args():
     parser.add_argument('-t','--use_torchrec_dl', action='store_true')
     parser.add_argument("--kaggle", action='store_false')
     parser.add_argument('--dataset_path', nargs='?', default='/criteo/train/')
-    parser.add_argument('--cache_path', nargs='?', default='.criteo') #'../../deepfm-colossal/.criteo'
+    parser.add_argument('--cache_path', nargs='?', default='/.criteo') #'../../deepfm-colossal/.criteo'
     parser.add_argument(
         "--pin_memory",
         dest="pin_memory",
