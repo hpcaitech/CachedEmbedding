@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from recsys.modules.embeddings import ChunkCUDAWeightMgr, FreqAwareEmbeddingBag
+from recsys.modules.embeddings import ChunkParamMgr, FreqAwareEmbeddingBag
 from recsys.testing.utils import synthesize_1d_sparse_feature
 
 NUM_EMBEDDINGS, EMBEDDING_DIM = 50, 8
@@ -12,7 +12,7 @@ BATCH_SIZE = 8
 @pytest.mark.parametrize('chunk_size', [1, 3, 4, 11])
 def test_uneven_weight(chunk_size):
     weight = torch.randn(11, 5)
-    mgr = ChunkCUDAWeightMgr(weight, chunk_size, 10)
+    mgr = ChunkParamMgr(weight, chunk_size, 10)
 
     for each in mgr.cpu_weight:
         assert each.shape[0] == chunk_size
@@ -21,7 +21,7 @@ def test_uneven_weight(chunk_size):
 def test_chunkmgr_admit():
     model = torch.nn.EmbeddingBag(10000, 128)
     # 10 chunks, 5 in cuda
-    mgr = ChunkCUDAWeightMgr(model.weight, 1000, 5)
+    mgr = ChunkParamMgr(model.weight, 1000, 5)
     assert mgr.cuda_chunk_num == 5
 
     mgr._admit(1)
@@ -35,8 +35,8 @@ def test_chunkmgr_admit():
     mgr._evict()
     assert mgr.cuda_available_chunk_num() == 4
 
-    mgr._prepare_cuda_chunks([9, 6, 5])
-    mgr._prepare_cuda_chunks([3, 4, 5])
+    mgr._prepare_chunks_on_cuda([9, 6, 5])
+    mgr._prepare_chunks_on_cuda([3, 4, 5])
     print(mgr.cached_chunk_table)
     mgr.print_comm_stats()
 
@@ -89,4 +89,4 @@ def test_freq_aware_embed():
 
 if __name__ == '__main__':
     # test_freq_aware_embed()
-    test_chunkmgr_admit()
+    test_freq_aware_embed()
