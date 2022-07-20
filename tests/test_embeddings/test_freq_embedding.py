@@ -13,11 +13,8 @@ BATCH_SIZE = 8
 def test_uneven_weight(chunk_size):
     weight = torch.randn(11, 5)
     mgr = ChunkParamMgr(weight, chunk_size, 10)
-
     assert mgr.cpu_weight.shape[0] % chunk_size == 0
-    # for each in mgr.cpu_weight:
-    #     assert each.shape[0] == chunk_size
-
+    
 
 def test_chunkmgr_admit():
     model = torch.nn.EmbeddingBag(10000, 128)
@@ -43,7 +40,6 @@ def test_chunkmgr_admit():
 
     mgr.flush()
     assert mgr.cuda_available_chunk_num() == 5
-    # print(mgr.cached_chunk_table)
 
 
 def test_freq_aware_embed():
