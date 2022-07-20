@@ -1,7 +1,4 @@
 import abc
-from typing import Optional
-
-import torch
 import torch.nn as nn
 
 # TODO: BaseEmbedding

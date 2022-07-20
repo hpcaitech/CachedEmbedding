@@ -79,11 +79,12 @@ def test_freq_aware_embed():
         ref_optimizer.step()
         ref_optimizer.zero_grad()
 
-    model.flush_cache_()
-    model_weight = model.weight().detach().to(device)
+    model.chunk_weight_mgr.flush()
+    model_weight = model.weight.detach().to(device)
     ref_weight = ref_model.weight.detach()
     assert torch.allclose(model_weight, ref_weight)
 
 
 if __name__ == '__main__':
-    test_chunkmgr_admit()
+    # test_chunkmgr_admit()
+    test_freq_aware_embed()

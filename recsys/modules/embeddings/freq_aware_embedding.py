@@ -8,7 +8,7 @@ from contexttimer import Timer
 from .base_embeddings import BaseEmbeddingBag
 
 
-class ChunkCUDAWeightMgr(object):
+class ChunkCUDAWeightMgr(nn.Module):
     """
     Manage Chunk Weights on CPU and CUDA memory.
     CPU maintains a replica of the original weight. CUDA maintains a subset of weight chunks.
@@ -20,6 +20,7 @@ class ChunkCUDAWeightMgr(object):
                  chunk_size: int = 16 * 1024 * 1024,
                  cuda_chunk_num: int = 0,
                  ids_freq_mapping: [List[int]] = None) -> None:
+        super(ChunkCUDAWeightMgr, self).__init__()
         self.chunk_size = chunk_size
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_chunk_num = cuda_chunk_num
@@ -56,6 +57,8 @@ class ChunkCUDAWeightMgr(object):
         self._cpu_to_cuda_elpase = 0
         self._cuda_to_cpu_numel = 0
         self._cuda_to_cpu_elapse = 0
+
+        self.reorder(ids_freq_mapping)
 
     def _reset_comm_stats(self):
         self._cpu_to_cuda_numel = 0
@@ -115,7 +118,7 @@ class ChunkCUDAWeightMgr(object):
             if chunk_id not in self.cached_chunk_table.items():
                 cpu_chunk_id_list.append(chunk_id)
 
-        self._prepare_cuda_chunks(self, cpu_chunk_id_list)
+        self._prepare_cuda_chunks(cpu_chunk_id_list)
 
         # new ids chunk_offset + offset_in_chunk
         mapped_ids = [self._id_to_cached_cuda_id(id) for id in ids]
@@ -225,8 +228,7 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
                  *args,
                  **kwargs):
         super(FreqAwareEmbeddingBag, self).__init__(num_embeddings, embedding_dim, *args, **kwargs)
-
-        self._weight = torch.randn(self.num_embeddings, self.embedding_dim, device='cpu', dtype=dtype)
+        self._weight = torch.randn(num_embeddings, embedding_dim, dtype=dtype)
         self._preprocess(chunk_size, cuda_chunk_num, ids_freq_mapping)
 
     def _preprocess(self, chunk_size: int, cuda_chunk_num: int, ids_freq_mapping: List[int]):
@@ -242,7 +244,7 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
         self.chunk_weight_mgr = ChunkCUDAWeightMgr(self._weight, chunk_size, cuda_chunk_num, ids_freq_mapping)
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
-        reorder_ids = self.chunkweightmgr.prepare_ids(indices)
+        reorder_ids = self.chunk_weight_mgr.prepare_ids(indices)
 
         embeddings = F.embedding_bag(reorder_ids, self.chunkweightmgr.cuda_partial_weight, offsets, self.max_norm,
                                      self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
@@ -252,4 +254,4 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
 
     @property
     def weight(self):
-        return self.chunk_weight_mgr.cpu_weight
+        return torch.cat(self.chunk_weight_mgr.cpu_weight, dim=0)
