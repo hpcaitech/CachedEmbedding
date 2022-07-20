@@ -79,12 +79,7 @@ class DeepFactorizationMachine(nn.Module):
         self.fm = FactorizationMachine(reduce_sum=True)
         self.embedding = FeatureEmbedding(num_embed_per_feature, embed_dim, enable_qr)
         self.mlp = MultiLayerPerceptron([embed_dim*2]+mlp_dims, dropout)
-        
-        # DISTLogger.info(count_parameters(self.linear,f'[rank{rank}]linear'), ranks=list(range(world_size)))
-        # DISTLogger.info(count_parameters(self.fm,f'[rank{rank}]fm'), ranks=list(range(world_size)))
-        # DISTLogger.info(count_parameters(self.embedding,f'[rank{rank}]embed'), ranks=list(range(world_size)))
-        # DISTLogger.info(count_parameters(self.mlp,f'[rank{rank}]mlp'), ranks=list(range(world_size)))
-
+    
     def forward(self, sparse_feats, dense_feats):
         """
         :param x: Long tensor of size ``(batch_size, num_fields)``
