@@ -87,13 +87,6 @@ class CachedEmbeddingBag(nn.Module):
         super(CachedEmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
-        # real embedding weight
-        if _weight is None:
-            self.weight = torch.empty(num_embeddings, embedding_dim, device='cpu', dtype=dtype)
-            self.init_parameters()
-        else:
-            assert list(_weight.shape) == [num_embeddings, embedding_dim]
-            self.weight = _weight
 
         if padding_idx is not None:
             if padding_idx > 0:
@@ -116,6 +109,18 @@ class CachedEmbeddingBag(nn.Module):
         self.cache_lines = cache_lines    # TODO: n-way set associative
         self.cache_replace_policy = cache_replace_policy
         self.debug = debug
+
+        self.num_hits_history = [] if debug else None
+        self.num_miss_history = [] if debug else None
+        self.num_write_back_history = [] if debug else None
+
+        # real embedding weight
+        if _weight is None:
+            self.weight = torch.empty(num_embeddings, embedding_dim, device='cpu', dtype=dtype)
+            self.init_parameters()
+        else:
+            assert list(_weight.shape) == [num_embeddings, embedding_dim]
+            self.weight = _weight
 
         # embedding cached in GPU for training
         self.cache_weight = nn.Parameter(
@@ -143,7 +148,7 @@ class CachedEmbeddingBag(nn.Module):
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
         # NOTE: we only support 1-dim indices with offsets for storage & communication efficiency
-        indices = self.reorder_input_indices(indices)
+        indices = self.update_cached_embedding(indices)
 
         embeddings = F.embedding_bag(indices, self.cache_weight, offsets, self.max_norm, self.norm_type,
                                      self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
@@ -152,7 +157,16 @@ class CachedEmbeddingBag(nn.Module):
         return embeddings
 
     @torch.no_grad()
-    def reorder_input_indices(self, raw_indices):
+    def update_cached_embedding(self, raw_indices : torch.Tensor)-> torch.Tensor :
+        """update_cached_embedding
+        update the cached embedding weight and returns the indices of raw_indices in the updated cached weight.
+
+        Args:
+            raw_indices (torch.Tensor): input ids, represented by their indices in global embedding weight.
+
+        Returns:
+            torch.Tensor: Indices of input ids in cached weight, which is a small set of the global embedding weight.
+        """
         unique_indices, inverse_indices, counts = torch.unique(raw_indices, return_inverse=True, return_counts=True)
         assert unique_indices.shape[0] <= self.cache_weight.shape[0], \
             f"the num of input ids {unique_indices.shape[0]} is larger than " \
@@ -161,16 +175,20 @@ class CachedEmbeddingBag(nn.Module):
         unique_miss = unique_indices[torch.isin(unique_indices, self.cache_indices, invert=True)]
         unique_hit = unique_indices[torch.isin(unique_indices, unique_miss, assume_unique=True, invert=True)]
 
-        rehash_count = 0
+        rehash_count, write_back_count = 0, 0
         if unique_miss.shape[0] > 0:
             positions_miss, write_back_positions, rehash_count = self._find_eligible_positions(
                 unique_miss, unique_hit, self.cache_indices, self.cache_states)
 
             assert positions_miss.shape[0] == unique_miss.shape[0], \
                 f"pos: {positions_miss.shape[0]}, unique: {unique_miss.shape[0]}"
+            write_back_count = write_back_positions.shape[0]
             self._update_cache_(positions_miss, write_back_positions, unique_miss)
         if self.debug:
-            print(f"miss count: #{unique_miss.shape[0]}, rehash count: #{rehash_count}")
+            # print(f"miss count: #{unique_miss.shape[0]}, rehash count: #{rehash_count}")
+            self.num_miss_history.append(unique_miss.shape[0])
+            self.num_hits_history.append(unique_hit.shape[0])
+            self.num_write_back_history.append(write_back_count)
         return self._map_indices(unique_indices, inverse_indices, counts)
 
     def _update_cache_(self, positions_miss, write_back_positions, unique_miss):
@@ -291,6 +309,10 @@ class ParallelCachedEmbeddingBag(nn.Module):
         self.cache_replace_policy = cache_replace_policy
         self.debug = debug
 
+        self.num_hits_history = [] if debug else None
+        self.num_miss_history = [] if debug else None
+        self.num_write_back_history = [] if debug else None
+
         # Comm settings
         self.parallel_mode = parallel_mode
         self.rank = DISTMGR.get_rank(self.parallel_mode)
@@ -336,7 +358,7 @@ class ParallelCachedEmbeddingBag(nn.Module):
             self.weight[self.padding_idx].fill_(0)
 
     def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
-        indices = self.reorder_input_indices(indices)
+        indices = self.update_cached_embedding(indices)
 
         output_shard = F.embedding_bag(indices, self.cache_weight, offsets, self.max_norm, self.norm_type,
                                        self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
@@ -348,7 +370,7 @@ class ParallelCachedEmbeddingBag(nn.Module):
         return dual_all_to_all(output_shard, self.parallel_mode, scatter_dim=scatter_dim, gather_dim=gather_dim)
 
     @torch.no_grad()
-    def reorder_input_indices(self, raw_indices):
+    def update_cached_embedding(self, raw_indices):
         with record_function("(zhg) categorize indices"):
             unique_indices, inverse_indices, counts = torch.unique(raw_indices, return_inverse=True, return_counts=True)
             assert unique_indices.shape[0] <= self.cache_weight.shape[0], \
@@ -376,6 +398,9 @@ class ParallelCachedEmbeddingBag(nn.Module):
                 f"rehash count: #{rehash_count}, "
                 f"write back count: #{write_back_count}",
                 ranks=[0])
+            self.num_hits_history.append(unique_hit.shape[0])
+            self.num_miss_history.append(unique_miss.shape[0])
+            self.num_write_back_history.append(write_back_count)
         with record_function("(zhg) embed idx -> cache idx"):
             indices = self._map_indices(unique_indices, inverse_indices, counts)
         return indices
