@@ -30,16 +30,16 @@ class ChunkParamMgr(object):
         if weight.device.type == 'cuda':
             weight = weight.cpu()
 
-        # handle cases where `num_embeddings` is not divisible by chunk_size
+        # Padding the weight to handle cases where `num_embeddings` is not divisible by chunk_size
         mod = weight.shape[0] % chunk_size
         if mod > 0:
             with torch.no_grad():
                 padding = torch.zeros(chunk_size - mod, weight.shape[1], device=weight.device, dtype=weight.dtype)
                 weight = torch.cat([weight, padding], dim=0)
-        self.cpu_weight = torch.chunk(weight.detach(), self.chunk_num, dim=0)
 
-        self.cpu_weight = [t.pin_memory() for t in self.cpu_weight]
-
+        # pin memory cpu for higher CPU-GPU copy bandwidth
+        self.cpu_weight = weight.pin_memory()
+        
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
         self.index_mapping_table = []
@@ -51,6 +51,18 @@ class ChunkParamMgr(object):
         self.evict_backlist = set()
 
         self._reset_comm_stats()
+
+    def cpu_weight_chunk(self, chunk_id : int) -> torch.Tensor:
+        """
+        access a chunk of CPU weight.
+
+        Args:
+            chunk_id (int): chunk id
+
+        Returns:
+            torch.Tensor: a piece of memory in CPU weight corresponding to chunk id's payload. The tensor is 1-D.
+        """
+        return self.cpu_weight.data.view(-1).narrow(0, chunk_id * self.chunk_size * self.embedding_dim, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
 
     def _reset_comm_stats(self):
         self._cpu_to_cuda_numel = 0
@@ -160,7 +172,7 @@ class ChunkParamMgr(object):
         with Timer() as timer:
             cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, min_offset * self.embedding_dim,
                                        self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
-            self.cpu_weight[min_chunk_id].data.copy_(cuda_tensor)
+            self.cpu_weight_chunk(min_chunk_id).data.copy_(cuda_tensor)
 
         # update CCT
         self.cached_chunk_table.pop(min_slot_id)
@@ -196,7 +208,7 @@ class ChunkParamMgr(object):
         with Timer() as timer:
             cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, slot_offset * self.embedding_dim,
                                        self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
-            cuda_tensor.data.copy_(self.cpu_weight[chunk_id])
+            cuda_tensor.data.copy_(self.cpu_weight_chunk(chunk_id))
 
         # update the CCT
         self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)

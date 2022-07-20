@@ -4,8 +4,7 @@ import torch
 from recsys.modules.embeddings import ChunkParamMgr, FreqAwareEmbeddingBag
 from recsys.testing.utils import synthesize_1d_sparse_feature
 
-NUM_EMBEDDINGS, EMBEDDING_DIM = 50, 8
-BATCH_SIZE = 8
+
 # torch.set_printoptions(profile="full")
 
 
@@ -13,10 +12,8 @@ BATCH_SIZE = 8
 def test_uneven_weight(chunk_size):
     weight = torch.randn(11, 5)
     mgr = ChunkParamMgr(weight, chunk_size, 10)
-
-    for each in mgr.cpu_weight:
-        assert each.shape[0] == chunk_size
-
+    assert mgr.cpu_weight.shape[0] % chunk_size == 0
+    
 
 def test_chunkmgr_admit():
     model = torch.nn.EmbeddingBag(10000, 128)
@@ -42,10 +39,12 @@ def test_chunkmgr_admit():
 
     mgr.flush()
     assert mgr.cuda_available_chunk_num() == 5
-    # print(mgr.cached_chunk_table)
 
 
 def test_freq_aware_embed():
+    NUM_EMBEDDINGS, EMBEDDING_DIM = 48, 8
+    BATCH_SIZE = 8
+
     device = torch.device('cuda', 0)
     model = FreqAwareEmbeddingBag(
         NUM_EMBEDDINGS,
@@ -54,6 +53,8 @@ def test_freq_aware_embed():
         include_last_offset=True,
     ).to(device)
     model._preprocess(chunk_size=10, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
+
+    assert model.weight.shape[0] == NUM_EMBEDDINGS
     ref_model = torch.nn.EmbeddingBag.from_pretrained(model.weight.detach().to(device),
                                                       mode='mean',
                                                       include_last_offset=True,
