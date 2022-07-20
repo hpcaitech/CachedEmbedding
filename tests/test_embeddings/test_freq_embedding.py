@@ -4,8 +4,9 @@ import torch
 from recsys.modules.embeddings import ChunkCUDAWeightMgr, FreqAwareEmbeddingBag
 from recsys.testing.utils import synthesize_1d_sparse_feature
 
-NUM_EMBEDDINGS, EMBEDDING_DIM = 100, 8
+NUM_EMBEDDINGS, EMBEDDING_DIM = 50, 8
 BATCH_SIZE = 8
+# torch.set_printoptions(profile="full")
 
 
 @pytest.mark.parametrize('chunk_size', [1, 3, 4, 11])
@@ -52,18 +53,18 @@ def test_freq_aware_embed():
         mode='mean',
         include_last_offset=True,
     ).to(device)
-
-    ref_model = torch.nn.EmbeddingBag.from_pretrained(model._weight.detach().to(device),
+    model._preprocess(chunk_size=10, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
+    ref_model = torch.nn.EmbeddingBag.from_pretrained(model.weight.detach().to(device),
                                                       mode='mean',
                                                       include_last_offset=True,
                                                       freeze=False)
 
+    assert torch.allclose(ref_model.weight.detach(), model.weight.detach().to(device))
 
-    model._preprocess(chunk_size=10, cuda_chunk_num=8, ids_freq_mapping = None)
     # optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
     # ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
 
-    for _ in range(3):
+    for i in range(3):
         indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
         res = model(indices, offsets)
         ref_res = ref_model(indices, offsets)
@@ -79,11 +80,13 @@ def test_freq_aware_embed():
         # ref_optimizer.step()
         # ref_optimizer.zero_grad()
 
-    model.flush_cache_()
-    model_weight = model.weight().detach().to(device)
+    model.chunk_weight_mgr.flush()
+    model_weight = model.weight.detach().to(device)
     ref_weight = ref_model.weight.detach()
-    assert torch.allclose(model_weight, ref_weight)
+    assert torch.allclose(model_weight, ref_weight), \
+        f"model weight: {model_weight[10:18, :8]}, reference: {ref_weight[10:18, :8]}"
 
 
 if __name__ == '__main__':
-    test_freq_aware_embed()
+    # test_freq_aware_embed()
+    test_chunkmgr_admit()
