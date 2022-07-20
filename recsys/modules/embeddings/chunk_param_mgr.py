@@ -79,8 +79,6 @@ class ChunkParamMgr(object):
         for _id in range(self.num_embeddings):
             self.index_mapping_table.append(divmod((sorted_idx[_id] if ids_freq_mapping else _id), self.chunk_size))
 
-        print(self.index_mapping_table)
-
     def _id_to_cached_cuda_id(self, id: int) -> int:
         """
         convert an id to index in self.partial_cuda_weight
@@ -121,15 +119,14 @@ class ChunkParamMgr(object):
                 cpu_chunk_id_list.append(chunk_id)
 
         # move sure the cuda chunk will not be evicted!
-
-        self._prepare_cuda_chunks(cpu_chunk_id_list)
+        self._prepare_chunks_on_cuda(cpu_chunk_id_list)
 
         self.evict_backlist.clear()
         # new ids chunk_offset + offset_in_chunk
         mapped_ids = [self._id_to_cached_cuda_id(id) for id in ids.view(-1)]
         return torch.tensor(mapped_ids, device=ids.device, dtype=ids.dtype).view(ids.shape)
 
-    def _prepare_cuda_chunks(self, chunk_ids: List[int]) -> None:
+    def _prepare_chunks_on_cuda(self, chunk_ids: List[int]) -> None:
         """prepare chunks in chunk_ids on CUDA memory
         Args:
             chunk_ids (List[int]): the chunks to be placed on CUDA
