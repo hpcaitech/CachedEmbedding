@@ -59,7 +59,7 @@ def test_freq_aware_embed():
                                                       freeze=False)
 
 
-    model._preprocess(chunk_size=10, cuda_chunk_num=10, ids_freq_mapping = None)
+    model._preprocess(chunk_size=10, cuda_chunk_num=8, ids_freq_mapping = None)
     # optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
     # ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
 
