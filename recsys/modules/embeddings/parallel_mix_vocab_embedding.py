@@ -14,16 +14,17 @@ np.random.seed(111)
 
 
 class LoadBalanceManager(object):
-    def __init__(self, embeddings_per_feat: List[int], num_groups=4, base_emb_dim=128, be_fair=True, device=None):
+    def __init__(self, embeddings_per_feat: List[int], num_groups=4, base_emb_dim=128, \
+        do_fair=True, device=None, disable_random_behavior=False):
         assert len(embeddings_per_feat) >= num_groups, \
                 f"number of input fields {len(embeddings_per_feat)} must be larger than the world size {num_groups}"
         self.embeddings_per_feat = embeddings_per_feat
         self.num_groups = num_groups
         self.base_emb_dim = base_emb_dim
-        self.be_fair = be_fair
+        self.do_fair = do_fair
         self.device = device
-        if not self.be_fair:
-            self._shuffle_initialize()
+        if not self.do_fair:
+            self._shuffle_initialize(disable_random_behavior)
         else:
             self._fair_initialize()
         
@@ -75,10 +76,12 @@ class LoadBalanceManager(object):
                                   2**(int(math.log2(self.num_groups)))))
         self.qr_bucket_size = math.ceil(math.sqrt(self.num_embeddings_per_rank))
         
-    def _shuffle_initialize(self) -> None:
-        dim_indices = np.array(range(len(self.embeddings_per_feat)))
-        np.random.shuffle(dim_indices)
-        # dim_indices = np.argsort(self.embeddings_per_feat)
+    def _shuffle_initialize(self, disable_random_behavior=False) -> None:
+        if disable_random_behavior:
+            dim_indices = np.argsort(self.embeddings_per_feat)
+        else:
+            dim_indices = np.array(range(len(self.embeddings_per_feat)))
+            np.random.shuffle(dim_indices)
         chunk_size = len(self.embeddings_per_feat) // self.num_groups
         self.groups = []
 
@@ -99,7 +102,7 @@ class LoadBalanceManager(object):
                                for group in self.groups]
         
         self.offsets = [torch.tensor((0,*np.cumsum(np.array( \
-                            self.embeddings_per_feat, dtype=np.long)[group])[:-1]), device=self.device)
+                            self.embeddings_per_feat, dtype=np.int64)[group])[:-1]), device=self.device)
                         for group in self.groups]
 
     def get_group(self, rank: int) -> List[int]:
@@ -111,7 +114,7 @@ class LoadBalanceManager(object):
         return self.offsets[rank]
         
     def get_num_embeddings_on_rank(self, rank: int) -> int:
-        if not self.be_fair:
+        if not self.do_fair:
             group = self.get_group(rank)
             return sum([self.embeddings_per_feat[i] for i in group])
         else:
@@ -119,13 +122,13 @@ class LoadBalanceManager(object):
     
     def get_block_dim(self, rank: int) -> int:
         assert rank in range(0, self.num_groups)
-        if not self.be_fair:
+        if not self.do_fair:
             return self.emb_dims[rank]
         else:
             return self.emb_dim
     
     def get_qr_bucket_size(self, rank: int) -> int:
-        if not self.be_fair:
+        if not self.do_fair:
             assert rank in range(len(self.qr_bucket_sizes))
             return self.qr_bucket_sizes[rank]
         else:
@@ -135,7 +138,7 @@ class LoadBalanceManager(object):
         assert _input.dim() == 2 \
             and _input.size(1) == len(self.embeddings_per_feat)
         offsets = self.get_offsets(rank)
-        if not self.be_fair:
+        if not self.do_fair:
             group = self.get_group(rank)
             assert min(group) >= 0 and max(group) < _input.size(1)
             return _input[:, group] + offsets
@@ -459,7 +462,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
                 lbmgr: Optional[LoadBalanceManager] = None,
                 freeze: bool = False,
                 device = None,
-                be_fair: bool = True,
+                do_fair: bool = True,
                 *args,
                 **kwargs):
         super().__init__()
@@ -467,7 +470,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         self.embedding_dim = embedding_dim
         self.mode = mode
         self.device = device if device is not None else torch.device('cuda', torch.cuda.current_device())
-        self._be_fair = be_fair
+        self._do_fair = do_fair
 
         # Decide number of nodes
         self.parallel_mode = ParallelMode.DEFAULT if parallel_mode is None else parallel_mode
@@ -477,11 +480,11 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
 
         if lbmgr is not None:
             self._lbmgr = lbmgr
-            self._be_fair = be_fair
+            self._do_fair = do_fair
             self.embeddings_per_feat = lbmgr.get_embeddings_per_feat()
             self.embedding_dim = lbmgr.get_base_dim()
         else:
-            self._lbmgr = LoadBalanceManager(embeddings_per_feat, self.num_groups, embedding_dim, be_fair=self._be_fair)
+            self._lbmgr = LoadBalanceManager(embeddings_per_feat, self.num_groups, embedding_dim, do_fair=self._do_fair)
 
         self.num_embeddings_on_rank = self._lbmgr.get_num_embeddings_on_rank(self.rank)
         self.block_dim = self._lbmgr.get_block_dim(self.rank)
@@ -540,7 +543,7 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
     
     def forward(self, x, offsets=None):
         assert offsets is None, "offsets have been handled internally.\n Users shouldn't manually input offsets"
-        x_parallel = self._lbmgr.shard_tensor(x)
+        x_parallel = self._lbmgr.shard_tensor(x, self.rank)
         output_parallel = self.embed(x_parallel)
         output_gather = self.comm_func(output_parallel, self.parallel_mode, reduce_op=self.mode)
 
