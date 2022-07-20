@@ -35,4 +35,4 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
 
     @property
     def weight(self):
-        return torch.cat(self.chunk_weight_mgr.cpu_weight, dim=0)
+        return self.chunk_weight_mgr.cpu_weight

@@ -14,8 +14,9 @@ def test_uneven_weight(chunk_size):
     weight = torch.randn(11, 5)
     mgr = ChunkParamMgr(weight, chunk_size, 10)
 
-    for each in mgr.cpu_weight:
-        assert each.shape[0] == chunk_size
+    assert mgr.cpu_weight.shape[0] % chunk_size == 0
+    # for each in mgr.cpu_weight:
+    #     assert each.shape[0] == chunk_size
 
 
 def test_chunkmgr_admit():
