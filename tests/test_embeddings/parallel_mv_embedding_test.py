@@ -122,7 +122,7 @@ def check_mv_embeddingbag(be_fair, enable_qr, mode):
         rand_input.append(torch.randint(0,NUM_EMBEDDINGS_PER_FEATURE[i],
                                                size=(BATCH_SIZE,)).unsqueeze(1))
         
-    A_master = torch.cat(rand_input,dim=1)
+    A_master = torch.cat(rand_input,dim=1).to(device)
 
     torch.distributed.broadcast(A_master, src=0)
 
@@ -168,7 +168,7 @@ def check_layer(rank, world_size, port, be_fair, enable_qr, mode):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
-    check_block_embeddingbag(mode)
+    # check_block_embeddingbag(mode)
     check_mv_embeddingbag(be_fair, enable_qr, mode)
     
     DISTMGR.destroy()

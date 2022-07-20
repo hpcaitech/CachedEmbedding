@@ -66,6 +66,9 @@ class LoadBalanceManager(object):
             _curr_grp.append(ind)
         
         self.offsets.append(torch.tensor(_curr_offs[:-1],device=self.device))
+        for i in range(len(self.offsets)):
+            self.offsets[i] = torch.cumsum(self.offsets[i], dim=0)
+            
         self.groups.append(_curr_grp)
         
         self.emb_dim = max(2, int(self.base_emb_dim / 
@@ -137,16 +140,19 @@ class LoadBalanceManager(object):
             assert min(group) >= 0 and max(group) < _input.size(1)
             return _input[:, group] + offsets
         else:
+            if self.num_groups == 1: # no cut
+                assert rank == 0, 'Maximum rank exceeded, no cut is performed'
+                return _input + offsets
             _cinput = _input.clone()
             feats = list(self.cuts.keys())
-            assert hasattr(self, 'cuts')
+            assert hasattr(self, 'cuts'), 'lbmgr object has no cuts attribute'
+            assert rank in range(self.num_groups), 'invalid rank'
             if rank == 0:
                 feat_id = feats[0]
                 cut_pos = self.cuts[feat_id][0]
-                _cinput[:,feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0),device=self.device),\
+                _cinput[:,feat_id] = torch.min((cut_pos-offsets[-1]-1)*torch.ones(_cinput.size(0),device=self.device),\
                                                 _cinput[:,feat_id])
-                print()
-                return _cinput[:,:feat_id+1] + offsets
+                return _cinput[:,:feat_id+1] + offsets 
             else:
                 rank -= 1
                 for (k,v) in self.cuts.items():
@@ -169,16 +175,16 @@ class LoadBalanceManager(object):
                         assert next_feat_id is not None
                         _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device), \
                                                        _cinput[:,feat_id]-cut_pos)
-                        _cinput[:,next_feat_id] = torch.min(cut_pos*torch.ones(_cinput.size(0),device=self.device), \
-                                                            _cinput[:,next_feat_id])
+                        _cinput[:,next_feat_id] = torch.min((cut_pos-offsets[-1]-1)*torch.ones(_cinput.size(0), \
+                                                                    device=self.device),_cinput[:,next_feat_id])
                         return _cinput[:,feat_id:next_feat_id+1] + offsets
                 elif len(cut_pos) == 2:
                     pos1, pos2 = cut_pos
                     _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device), 
                                                     _cinput[:,feat_id]-pos1)
-                    _cinput[:,feat_id] = torch.min(pos2*torch.ones(_cinput.size(0),device=self.device), 
+                    _cinput[:,feat_id] = torch.min((pos2-pos1-offsets[-1]-1)*torch.ones(_cinput.size(0),device=self.device), 
                                                         _cinput[:,feat_id])
-                    return _cinput[:,feat_id] + offsets
+                    return _cinput[:,feat_id:feat_id+1] + offsets
                 else:
                     raise ValueError('input tensor and embeddings_per_feat do not match. Double check inputs.')
             
