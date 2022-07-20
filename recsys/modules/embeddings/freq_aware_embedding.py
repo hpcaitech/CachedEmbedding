@@ -37,4 +37,5 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
 
     @property
     def weight(self):
+        assert self.chunk_weight_mgr is not None
         return self.chunk_weight_mgr.cpu_weight.narrow(0, 0, self.num_embeddings)
