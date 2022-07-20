@@ -15,7 +15,7 @@ class FeatureEmbedding(nn.Module):
         super().__init__()
         self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='mean',
                                                           parallel_mode=ParallelMode.TENSOR_PARALLEL,
-                                                          enable_qr=enable_qr)
+                                                          enable_qr=enable_qr, do_fair=True)
             
         # print('Saved params (M)',emb_dim*(sum(field_dims) - math.ceil(math.sqrt(sum(field_dims))))//1_000_000)
 

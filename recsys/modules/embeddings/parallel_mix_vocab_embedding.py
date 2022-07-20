@@ -1,5 +1,6 @@
 import math
 from typing import List, Optional, Union
+from regex import D
 
 import torch
 import torch.nn as nn
@@ -469,7 +470,6 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
         self.embeddings_per_feat = embeddings_per_feat
         self.embedding_dim = embedding_dim
         self.mode = mode
-        
         self.device = device if device is not None else torch.device('cuda', torch.cuda.current_device())
         self._do_fair = do_fair
 
@@ -485,7 +485,8 @@ class ParallelMixVocabEmbeddingBag(nn.Module):
             self.embeddings_per_feat = lbmgr.get_embeddings_per_feat()
             self.embedding_dim = lbmgr.get_base_dim()
         else:
-            self._lbmgr = LoadBalanceManager(embeddings_per_feat, self.num_groups, embedding_dim, do_fair=self._do_fair)
+            self._lbmgr = LoadBalanceManager(embeddings_per_feat, self.num_groups,\
+                embedding_dim, do_fair=self._do_fair, device=self.device)
 
         self.num_embeddings_on_rank = self._lbmgr.get_num_embeddings_on_rank(self.rank)
         self.block_dim = self._lbmgr.get_block_dim(self.rank)
