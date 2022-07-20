@@ -51,17 +51,17 @@ def test_freq_aware_embed():
         EMBEDDING_DIM,
         mode='mean',
         include_last_offset=True,
-        chunk_size=10,
-        cuda_chunk_num=5,
     ).to(device)
-    assert model.weight.device.type == 'cpu'
 
-    ref_model = torch.nn.EmbeddingBag.from_pretrained(model.weight.detach().to(device),
+    ref_model = torch.nn.EmbeddingBag.from_pretrained(model._weight.detach().to(device),
                                                       mode='mean',
                                                       include_last_offset=True,
                                                       freeze=False)
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
-    ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
+
+
+    model._preprocess(chunk_size=10, cuda_chunk_num=8, ids_freq_mapping = None)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+    # ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
 
     for _ in range(3):
         indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
@@ -73,11 +73,11 @@ def test_freq_aware_embed():
         # comparing gradient here is nontrivial
         res.backward(grad)
         ref_res.backward(grad)
-        optimizer.step()
-        optimizer.zero_grad()
+        # optimizer.step()
+        # optimizer.zero_grad()
 
-        ref_optimizer.step()
-        ref_optimizer.zero_grad()
+        # ref_optimizer.step()
+        # ref_optimizer.zero_grad()
 
     model.flush_cache_()
     model_weight = model.weight().detach().to(device)
@@ -86,4 +86,4 @@ def test_freq_aware_embed():
 
 
 if __name__ == '__main__':
-    test_chunkmgr_admit()
+    test_freq_aware_embed()
