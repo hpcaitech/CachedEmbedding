@@ -97,8 +97,7 @@ def parallel_cached_embedding_bag(cache_replace_policy):
 
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
-    if r
-    ank == 0:
+    if rank == 0:
 
         ref_model = torch.nn.EmbeddingBag.from_pretrained(weight.cuda(),
                                                           mode='mean',
