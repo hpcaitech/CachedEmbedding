@@ -13,12 +13,9 @@ from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, D
                     dist_logger)
 from colo_recsys.datasets import CriteoDataset
 from recsys.datasets import criteo
-from recsys.modules.dataloader import get_dataloader
 from recsys.models import DeepFactorizationMachine
 from colo_recsys.utils import (
     count_parameters,
-    EarlyStopper,
-    get_model_mem,
 )
 from recsys.modules.engine import TrainPipelineBase
 
@@ -32,10 +29,10 @@ def parse_dfm_args():
                         help='Random seed.')
 
     # Dataset
-    parser.add_argument('--use_torchrec_dl', action='store_true')
+    parser.add_argument('-t','--use_torchrec_dl', action='store_true')
     parser.add_argument("--kaggle", action='store_false')
     parser.add_argument('--dataset_path', nargs='?', default='/criteo/train/')
-    parser.add_argument('--cache_path', nargs='?', default='.criteo') #'../../deepfm-colossal/.criteo'
+    parser.add_argument('--cache_path', nargs='?', default='/.criteo') #'../../deepfm-colossal/.criteo'
     parser.add_argument(
         "--pin_memory",
         dest="pin_memory",
@@ -68,22 +65,23 @@ def parse_dfm_args():
 
     # Scale
     parser.add_argument("--memory_fraction", type=float, default=None)
+    parser.add_argument("--multiples", type=int, default=1)
     parser.add_argument(
         "--limit_train_batches",
         type=int,
-        default=100,
+        default=10,
         help="number of train batches",
     )
     parser.add_argument(
         "--limit_val_batches",
         type=int,
-        default=20,
+        default=10,
         help="number of validation batches",
     )
     parser.add_argument(
         "--limit_test_batches",
         type=int,
-        default=20,
+        default=10,
         help="number of test batches",
     )
     parser.add_argument("--num_embeddings", type=int, default=10000)
@@ -96,7 +94,7 @@ def parse_dfm_args():
         help="Comma separated max_ind_size per sparse feature. The number of embeddings"
         " in each embedding table. 26 values are expected for the Criteo dataset.",
     )
-    parser.add_argument('--embed_dim', type=int, default=256,
+    parser.add_argument('--embed_dim', type=int, default=128,
                         help='User / entity Embedding size.')
     parser.add_argument(
         "--mlp",
@@ -120,7 +118,7 @@ def parse_dfm_args():
     parser.add_argument('--group', type=str, default='')
 
     # Embed
-    parser.add_argument('--enable_qr', action='store_true')
+    parser.add_argument('-q','--enable_qr', action='store_true')
     
     # Tensorboard
     parser.add_argument('--tboard_name', type=str, default='mvembed-4tp')
@@ -130,12 +128,12 @@ def parse_dfm_args():
     if args.kaggle:
         setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
     if args.num_embeddings_per_feature is not None:
-        args.num_embeddings_per_feature = list(map(lambda x:int(x), args.num_embeddings_per_feature.split(",")))
+        args.num_embeddings_per_feature = list(map(lambda x:int(x)*args.multiples, args.num_embeddings_per_feature.split(",")))
 
     for stage in criteo.STAGES:
         attr = f"limit_{stage}_batches"
         if getattr(args, attr) is None:
-            setattr(args, attr, 100)
+            setattr(args, attr, 10)
 
     return args
 
@@ -178,6 +176,7 @@ def test(model, criterion, data_loader, device, epoch=0):
                 predicts.extend(output.tolist())
 
         except StopIteration:
+            print('iteration stopped')
             break
 
     return roc_auc_score(targets, predicts)
@@ -187,11 +186,9 @@ def main(args):
 
     if args.use_torchrec_dl:
         train_data_loader = criteo.get_dataloader(args, 'train')
-        valid_data_loader = criteo.get_dataloader(args, "val")
         test_data_loader = criteo.get_dataloader(args, "test")
     else:
         train_data_loader = CriteoDataset(args,mode='train')
-        valid_data_loader = CriteoDataset(args,mode='val')
         test_data_loader = CriteoDataset(args,mode='test')
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
@@ -210,24 +207,11 @@ def main(args):
             on_trace_ready=tensorboard_trace_handler(f'log/{args.tboard_name}'),
     ) as prof:
         t0 = time.time()
-    
-        early_stopper = EarlyStopper(verbose=True)
-        
         for epoch_i in range(args.epoch):
             train_loss = train(model, criterion, optimizer, train_data_loader, curr_device, prof, epoch_i)
-            auc = test(model, criterion, valid_data_loader, curr_device, epoch_i)
 
             dist_logger.info(
-            f"Epoch {epoch_i} - train loss: {train_loss:.5}, auc: {auc:.5}",ranks=[0])
-
-            if args.use_wandb:
-                wandb.log({'AUC score': auc})
-
-            early_stopper(auc)
-
-            if early_stopper.early_stop:
-                dist_logger.info("Early stopping", ranks=[0])
-                break
+            f"Epoch {epoch_i} - train loss: {train_loss:.5}",ranks=[0])
 
         t3 = time.time()
         dist_logger.info(f'overall training time:{t3-t0}s',ranks=[0])
@@ -244,8 +228,9 @@ if __name__ == '__main__':
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
     dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
-    # dist_manager.new_process_group(1, ParallelMode.DATA)
     print(dist_manager.get_distributed_info())
+    
+    dist_logger.info(f'Number of embeddings per feature: {args.num_embeddings_per_feature}',ranks=[0])
 
     if args.use_wandb:
         run = wandb.init(project="deepfm-colossal", entity="jiatongg", group=args.group, name=f'run{args.repeated_runs}-{dist_manager.get_world_size(ParallelMode.DATA)}GPUs-{datetime.datetime.now().strftime("%x")}')
@@ -256,7 +241,6 @@ if __name__ == '__main__':
         }
 
     main(args)
-
     if args.use_wandb:
         wandb.finish()
         

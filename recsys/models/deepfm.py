@@ -15,7 +15,7 @@ class FeatureEmbedding(nn.Module):
         super().__init__()
         self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='mean',
                                                           parallel_mode=ParallelMode.TENSOR_PARALLEL,
-                                                          enable_qr=enable_qr)
+                                                          enable_qr=enable_qr, do_fair=True)
             
         # print('Saved params (M)',emb_dim*(sum(field_dims) - math.ceil(math.sqrt(sum(field_dims))))//1_000_000)
 
@@ -92,9 +92,5 @@ class DeepFactorizationMachine(nn.Module):
         embed_x = self.embedding(sparse_feats)
         linear_x = self.linear(dense_feats)
         combined_x = torch.cat([embed_x, linear_x], dim=1)
-        # print('[DEBUG] embed x',embed_x.size()) # [16384, 128]
-        # print('[DEBUG] linear',self.linear(x).squeeze(1).size())
-        # print('[DEBUG] fm',self.fm(embed_x).size())
-        # print('[DEBUG] mlp',self.mlp(embed_x).squeeze(-1).size())
         x = self.fm(embed_x) + self.mlp(combined_x).squeeze(-1)
         return torch.sigmoid(x)
