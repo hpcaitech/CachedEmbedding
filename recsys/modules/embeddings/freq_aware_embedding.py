@@ -28,7 +28,7 @@ class ChunkCUDAWeightMgr(object):
         self.elem_size_in_byte = weight.element_size()
 
         self.cuda_partial_weight = torch.nn.Parameter(
-            torch.empty(cuda_chunk_num * chunk_size * self.embedding_dim, device=torch.cuda.current_device()))
+            torch.empty(cuda_chunk_num * chunk_size, self.embedding_dim, device=torch.cuda.current_device()))
 
         self.chunk_num = (self.num_embeddings + chunk_size - 1) // chunk_size
 
@@ -89,7 +89,7 @@ class ChunkCUDAWeightMgr(object):
     
     def _id_to_cached_cuda_id(self, id: int) -> int:
         """
-        convert an id from the dataset to index in self.partial_cuda_weight
+        convert an id to index in self.partial_cuda_weight
 
         Args:
             id (int): an id from the dataset
@@ -126,7 +126,7 @@ class ChunkCUDAWeightMgr(object):
 
         self._prepare_cuda_chunks(cpu_chunk_id_list)
 
-        self.evict_backlist
+        self.evict_backlist = set()
         # new ids chunk_offset + offset_in_chunk
         mapped_ids = [self._id_to_cached_cuda_id(id) for id in ids.view(-1)]
         return torch.IntTensor(mapped_ids).to(ids.device).view(ids.shape)
@@ -161,7 +161,7 @@ class ChunkCUDAWeightMgr(object):
             raise RuntimeError("Can not evict a chunk")
         
         with Timer() as timer:
-            cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, min_offset,
+            cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, min_offset,
                                        self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
             self.cpu_weight[min_chunk_id].data.copy_(cuda_tensor)
 
@@ -196,7 +196,7 @@ class ChunkCUDAWeightMgr(object):
 
         # copy payload from cpu to cuda
         with Timer() as timer:
-            cuda_tensor = torch.narrow(self.cuda_partial_weight, 0, slot_offset,
+            cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, slot_offset,
                                        self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
             cuda_tensor.data.copy_(self.cpu_weight[chunk_id])
 
@@ -250,9 +250,8 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
         self.chunk_weight_mgr.reorder(ids_freq_mapping)
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
-        print(indices, indices.shape)
         reorder_ids = self.chunk_weight_mgr.prepare_ids(indices)
-        print(reorder_ids)
+
         embeddings = F.embedding_bag(reorder_ids, self.chunk_weight_mgr.cuda_partial_weight, offsets, self.max_norm,
                                      self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
                                      per_sample_weights, self.include_last_offset, self.padding_idx)
