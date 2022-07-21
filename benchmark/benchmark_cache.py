@@ -38,33 +38,29 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
             batch = next(data_iter)
             sparse_feature = batch.sparse_features.to(device)
 
-            with Timer() as timer:
-                res = model(sparse_feature.values(), sparse_feature.offsets())
+            res = model(sparse_feature.values(), sparse_feature.offsets())
 
-            grad = torch.randn_like(res) if grad is None else grad
-            res.backward(grad)
-
-            model.zero_grad()
+            # grad = torch.randn_like(res) if grad is None else grad
+            # res.backward(grad)
+            #
+            # model.zero_grad()
             hit_rate = model.num_hits_history[it] / (model.num_hits_history[it] + model.num_miss_history[it])
-            swapin_bandwidth = model.num_miss_history[it] * chunk_size_in_bytes / 1e6
-            swapout_bandwidth = model.num_write_back_history[it] * chunk_size_in_bytes / 1e6
             t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
-                              f"swap in bandwidth={swapin_bandwidth/timer.elapsed:.2f} MB/s, "
-                              f"swap out bandwidth={swapout_bandwidth/timer.elapsed:.2f} MB/s")
+                              f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
+                              f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
             t.update()
-            if it == 50:
+            if it == 15:
                 break
 
 
 if __name__ == "__main__":
     with Timer() as timer:
         id_freq_map = get_id_freq_map()
-    print(f"Counting sparse features in dataset costs: {timer.elapsed/1000:.2f} s")
-    print(id_freq_map.shape)
+    print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
     batch_size = [2048, 4096, 8192, 16384]
     embed_dim = 128
-    cache_sets = [5_000, 50_000]
+    cache_sets = [50_000, 500_000]
     cache_lines = [64, 128, 256, 512]
 
     # # row-wise cache

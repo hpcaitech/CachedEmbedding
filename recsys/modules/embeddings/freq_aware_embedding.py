@@ -59,3 +59,18 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
     @property
     def num_write_back_history(self):
         return self.chunk_weight_mgr.num_write_back_history
+
+    @property
+    def swap_in_bandwidth(self):
+        if self.chunk_weight_mgr._cpu_to_cuda_numel > 0:
+            return self.chunk_weight_mgr._cpu_to_cuda_numel * self.chunk_weight_mgr.elem_size_in_byte / 1e6 / \
+                   self.chunk_weight_mgr._cpu_to_cuda_elpase
+        else:
+            return 0
+
+    @property
+    def swap_out_bandwidth(self):
+        if self.chunk_weight_mgr._cuda_to_cpu_numel > 0:
+            return self.chunk_weight_mgr._cuda_to_cpu_numel * self.chunk_weight_mgr.elem_size_in_byte / 1e6 / \
+                   self.chunk_weight_mgr._cuda_to_cpu_elapse
+        return 0
