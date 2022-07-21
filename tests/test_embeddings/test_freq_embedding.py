@@ -4,7 +4,6 @@ import torch
 from recsys.modules.embeddings import ChunkParamMgr, FreqAwareEmbeddingBag
 from recsys.testing.utils import synthesize_1d_sparse_feature
 
-
 # torch.set_printoptions(profile="full")
 
 
@@ -13,7 +12,7 @@ def test_uneven_weight(chunk_size):
     weight = torch.randn(11, 5)
     mgr = ChunkParamMgr(weight, chunk_size, 10)
     assert mgr.cpu_weight.shape[0] % chunk_size == 0
-    
+
 
 def test_chunkmgr_admit():
     model = torch.nn.EmbeddingBag(10000, 128)
@@ -41,8 +40,9 @@ def test_chunkmgr_admit():
     assert mgr.cuda_available_chunk_num() == 5
 
 
-def test_freq_aware_embed():
-    NUM_EMBEDDINGS, EMBEDDING_DIM = 48, 8
+@pytest.mark.parametrize('chunk_size', [1, 2, 4])
+def test_freq_aware_embed(chunk_size):
+    NUM_EMBEDDINGS, EMBEDDING_DIM = 128, 8
     BATCH_SIZE = 8
 
     device = torch.device('cuda', 0)
@@ -52,7 +52,7 @@ def test_freq_aware_embed():
         mode='mean',
         include_last_offset=True,
     ).to(device)
-    model._preprocess(chunk_size=10, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
+    model._preprocess(chunk_size=chunk_size, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
 
     assert model.weight.shape[0] == NUM_EMBEDDINGS
     ref_model = torch.nn.EmbeddingBag.from_pretrained(model.weight.detach().to(device),
@@ -61,11 +61,11 @@ def test_freq_aware_embed():
                                                       freeze=False)
 
     assert torch.allclose(ref_model.weight.detach(), model.weight.detach().to(device))
-    
+
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
     ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
 
-    for i in range(3):
+    for i in range(50):
         indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
         res = model(indices, offsets)
         ref_res = ref_model(indices, offsets)
