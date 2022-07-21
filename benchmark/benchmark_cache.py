@@ -14,7 +14,8 @@ from data_utils import get_dataloader, get_id_freq_map, NUM_EMBED
 
 def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq_map=None):
     dataloader = get_dataloader('train', batch_size)
-    print(f"batch size: {batch_size}, num of batches: {len(dataloader)}")
+    print(f"batch size: {batch_size}, num of batches: {len(dataloader)}, "
+          f"cached chunks: {cache_sets}, chunk size: {cache_lines}")
     data_iter = iter(dataloader)
 
     device = torch.device('cuda:0')
