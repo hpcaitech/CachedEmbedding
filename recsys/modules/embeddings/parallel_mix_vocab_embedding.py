@@ -1,6 +1,5 @@
 import math
 from typing import List, Optional, Union
-from regex import D
 
 import torch
 import torch.nn as nn
@@ -11,7 +10,7 @@ import numpy as np
 from recsys import DISTMGR, ParallelMode, DISTLogger
 from ..functional import reduce_forward
 
-np.random.seed(111)  
+np.random.seed(1)  
 
 
 class LoadBalanceManager(object):
@@ -51,7 +50,7 @@ class LoadBalanceManager(object):
                     self.cuts[ind] = [_agg]
                 _num_cuts += 1
                 
-                self.offsets.append(torch.tensor(_curr_offs,device=self.device))
+                self.offsets.append(torch.from_numpy(np.asarray(_curr_offs,dtype=np.int64)).to(self.device))
                 _curr_offs = [0]
                 _curr_grp.append(ind)
                 self.groups.append(_curr_grp)
@@ -67,7 +66,7 @@ class LoadBalanceManager(object):
             _agg -= self.embeddings_per_feat[ind]
             _curr_grp.append(ind)
         
-        self.offsets.append(torch.tensor(_curr_offs[:-1],device=self.device))
+        self.offsets.append(torch.from_numpy(np.asarray(_curr_offs[:-1],dtype=np.int64)).to(self.device))
         for i in range(len(self.offsets)):
             self.offsets[i] = torch.cumsum(self.offsets[i], dim=0)
             
