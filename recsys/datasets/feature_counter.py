@@ -10,8 +10,6 @@ class CriteoSparseProcessor:
 
     def __call__(self, _f):
         arr = np.load(_f)
-        print(arr.shape, arr.dtype)
-        print(self.offsets.shape, self.offsets.dtype)
         arr %= self.hash_sizes
         arr += self.offsets
         flattened = arr.reshape(-1)
@@ -51,12 +49,3 @@ class GlobalFeatureCounter(BaseFeatureCounter):
                 self._id_freq_map = self.file_processor(_f)
             else:
                 self._id_freq_map += self.file_processor(_f)
-
-
-class SubsetFeatureCounter(BaseFeatureCounter):
-    """
-    compute frequency-related statistics on the subsampled dataset
-    """
-
-    def _collect_statistics(self):
-        pass

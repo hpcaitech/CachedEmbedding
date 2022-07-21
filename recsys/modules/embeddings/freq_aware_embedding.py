@@ -27,6 +27,7 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
         """
         self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num)
         self.chunk_weight_mgr.reorder(ids_freq_mapping)
+
     def forward(self, indices, offsets=None, per_sample_weights=None):
         reorder_ids = self.chunk_weight_mgr.prepare_ids(indices)
 
@@ -43,6 +44,18 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
 
     def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
         yield 'weight', self.chunk_weight_mgr.cuda_partial_weight
-    
+
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         yield self.chunk_weight_mgr.cuda_partial_weight
+
+    @property
+    def num_hits_history(self):
+        return self.chunk_weight_mgr.num_hits_history
+
+    @property
+    def num_miss_history(self):
+        return self.chunk_weight_mgr.num_miss_history
+
+    @property
+    def num_write_back_history(self):
+        return self.chunk_weight_mgr.num_write_back_history

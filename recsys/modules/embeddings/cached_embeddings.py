@@ -9,6 +9,7 @@ from torch.profiler import record_function
 
 from recsys import DISTMGR, ParallelMode, DISTLogger as logger
 from recsys.utils import get_partition
+from .base_embeddings import BaseEmbeddingBag
 from ..functional import dual_all_to_all
 
 
@@ -62,7 +63,7 @@ def find_eligible_positions_lfu(miss_ids, forbidden_list, cache_indices, cache_s
     return positions, write_back_positions, 0
 
 
-class CachedEmbeddingBag(nn.Module):
+class CachedEmbeddingBag(BaseEmbeddingBag):
     """
     A serial module equal to the vanilla torch.nn.EmbeddingBag
     """
@@ -84,26 +85,8 @@ class CachedEmbeddingBag(nn.Module):
                  device=None,
                  dtype=None,
                  debug=True):
-        super(CachedEmbeddingBag, self).__init__()
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-
-        if padding_idx is not None:
-            if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings'
-            elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
-                padding_idx = self.num_embeddings + padding_idx
-        self.padding_idx = padding_idx
-        self.max_norm = max_norm
-        self.norm_type = norm_type
-        self.scale_grad_by_freq = scale_grad_by_freq
-        self.sparse = sparse
-
-        # Specific to embedding bag
-        self.mode = mode
-        self.include_last_offset = include_last_offset
-
+        super(CachedEmbeddingBag, self).__init__(num_embeddings, embedding_dim, padding_idx, max_norm, norm_type,
+                                                 scale_grad_by_freq, sparse, mode, include_last_offset)
         # Specific to cache
         self.cache_sets = cache_sets
         self.cache_lines = cache_lines    # TODO: n-way set associative
@@ -157,7 +140,7 @@ class CachedEmbeddingBag(nn.Module):
         return embeddings
 
     @torch.no_grad()
-    def update_cached_embedding(self, raw_indices : torch.Tensor)-> torch.Tensor :
+    def update_cached_embedding(self, raw_indices: torch.Tensor) -> torch.Tensor:
         """update_cached_embedding
         update the cached embedding weight and returns the indices of raw_indices in the updated cached weight.
 
@@ -263,7 +246,7 @@ class CachedEmbeddingBag(nn.Module):
         return embedding_bag
 
 
-class ParallelCachedEmbeddingBag(nn.Module):
+class ParallelCachedEmbeddingBag(BaseEmbeddingBag):
 
     def __init__(self,
                  num_embeddings,
@@ -283,26 +266,9 @@ class ParallelCachedEmbeddingBag(nn.Module):
                  device=None,
                  dtype=None,
                  debug=True):
-        super(ParallelCachedEmbeddingBag, self).__init__()
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-
-        if padding_idx is not None:
-            if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings'
-            elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
-                padding_idx = self.num_embeddings + padding_idx
-        self.padding_idx = padding_idx
-        self.max_norm = max_norm
-        self.norm_type = norm_type
-        self.scale_grad_by_freq = scale_grad_by_freq
-        self.sparse = sparse
-
-        # Specific to embedding bag
-        self.mode = mode
-        self.include_last_offset = include_last_offset
-
+        super(ParallelCachedEmbeddingBag,
+              self).__init__(num_embeddings, embedding_dim, padding_idx, max_norm, norm_type, scale_grad_by_freq,
+                             sparse, mode, include_last_offset)
         # Specific to cache
         self.cache_sets = cache_sets
         self.cache_lines = cache_lines    # TODO: n-way set associative
