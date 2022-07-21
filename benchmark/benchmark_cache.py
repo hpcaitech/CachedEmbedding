@@ -32,8 +32,7 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
     else:
         raise RuntimeError(f"Unknown EB type: {embed_type}")
 
-    chunk_size_in_bytes = embedding_dim * cache_lines * model.weight.element_size()
-    grad = None
+    # grad = None
     with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
         for it in itertools.count():
             batch = next(data_iter)
@@ -45,12 +44,14 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
             # res.backward(grad)
             #
             # model.zero_grad()
-            hit_rate = model.num_hits_history[it] / (model.num_hits_history[it] + model.num_miss_history[it])
+            running_hits = sum(model.num_hits_history)
+            running_miss = sum(model.num_miss_history)
+            hit_rate = running_hits / (running_hits + running_miss)
             t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
                               f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
                               f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
             t.update()
-            if it == 15:
+            if it == 25:
                 break
 
 
@@ -59,10 +60,10 @@ if __name__ == "__main__":
         id_freq_map = get_id_freq_map()
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
-    batch_size = [2048, 4096, 8192, 16384]
+    batch_size = [2048, 8192]
     embed_dim = 128
-    cache_sets = [50_000, 500_000]
-    cache_lines = [64, 128, 256, 512]
+    cache_sets = [50_000, 25_000]
+    cache_lines = [128, 256, 512]
 
     # # row-wise cache
     # for bs in batch_size:
