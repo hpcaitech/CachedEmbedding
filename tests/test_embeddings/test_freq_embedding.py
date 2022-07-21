@@ -61,9 +61,9 @@ def test_freq_aware_embed():
                                                       freeze=False)
 
     assert torch.allclose(ref_model.weight.detach(), model.weight.detach().to(device))
-
-    # optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
-    # ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
+    
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+    ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
 
     for i in range(3):
         indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
@@ -75,11 +75,11 @@ def test_freq_aware_embed():
         # comparing gradient here is nontrivial
         res.backward(grad)
         ref_res.backward(grad)
-        # optimizer.step()
-        # optimizer.zero_grad()
+        optimizer.step()
+        optimizer.zero_grad()
 
-        # ref_optimizer.step()
-        # ref_optimizer.zero_grad()
+        ref_optimizer.step()
+        ref_optimizer.zero_grad()
 
     model.chunk_weight_mgr.flush()
     model_weight = model.weight.detach().to(device)
