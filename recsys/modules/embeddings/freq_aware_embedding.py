@@ -1,9 +1,11 @@
 import torch
 import torch.nn.functional as F
-from typing import List, Optional
+from typing import List, Optional, Iterator, Tuple
 
 from .base_embeddings import BaseEmbeddingBag
 from .chunk_param_mgr import ChunkParamMgr
+from torch.nn.parameter import Parameter
+
 
 class FreqAwareEmbeddingBag(BaseEmbeddingBag):
 
@@ -25,7 +27,6 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
         """
         self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num)
         self.chunk_weight_mgr.reorder(ids_freq_mapping)
-
     def forward(self, indices, offsets=None, per_sample_weights=None):
         reorder_ids = self.chunk_weight_mgr.prepare_ids(indices)
 
@@ -39,3 +40,9 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
     def weight(self):
         assert self.chunk_weight_mgr is not None
         return self.chunk_weight_mgr.cpu_weight.narrow(0, 0, self.num_embeddings)
+
+    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
+        yield 'weight', self.chunk_weight_mgr.cuda_partial_weight
+    
+    def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
+        yield self.chunk_weight_mgr.cuda_partial_weight
