@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import Sampler, Dataset, DataLoader
 import numpy as np
 
-from recsys import ParallelMode, DISTMGR
+from ..distributed_manager import ParallelMode, DISTMGR
 from .base_dataiter import BaseStreamDataIter
 
 T_co = TypeVar('T_co', covariant=True)
@@ -25,11 +25,7 @@ class DataParallelSampler(Sampler):
             the batch size, then the last batch will be smaller, defaults to False.
     """
 
-    def __init__(self,
-                 dataset: Dataset,
-                 shuffle: bool = False,
-                 seed: int = 0,
-                 drop_last: bool = False) -> None:
+    def __init__(self, dataset: Dataset, shuffle: bool = False, seed: int = 0, drop_last: bool = False) -> None:
         self.dataset = dataset
         self.num_replicas = DISTMGR.get_world_size(ParallelMode.DATA)
         self.rank = DISTMGR.get_rank(ParallelMode.DATA)
@@ -49,8 +45,7 @@ class DataParallelSampler(Sampler):
                 self.num_replicas  # type: ignore[arg-type]
             )
         else:
-            self.num_samples = math.ceil(
-                len(self.dataset) / self.num_replicas)  # type: ignore[arg-type]
+            self.num_samples = math.ceil(len(self.dataset) / self.num_replicas)    # type: ignore[arg-type]
         self.total_size = self.num_samples * self.num_replicas
         self.shuffle = shuffle
         self.seed = seed
@@ -67,7 +62,7 @@ class DataParallelSampler(Sampler):
             # set_epoch manually
             self.epoch += 1
         else:
-            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+            indices = list(range(len(self.dataset)))    # type: ignore[arg-type]
 
         if not self.drop_last:
             # add extra samples to make it evenly divisible
@@ -75,8 +70,7 @@ class DataParallelSampler(Sampler):
             if padding_size <= len(indices):
                 indices += indices[:padding_size]
             else:
-                indices += (indices * math.ceil(padding_size /
-                            len(indices)))[:padding_size]
+                indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
         else:
             # remove tail of data to make it evenly divisible.
             indices = indices[:self.total_size]
@@ -103,8 +97,8 @@ class DataParallelSampler(Sampler):
 
 def get_dataloader(dataset,
                    shuffle=False,
-                   seed=1024, 
-                   add_sampler=True, 
+                   seed=1024,
+                   add_sampler=True,
                    drop_last=False,
                    pin_memory=False,
                    num_workers=0,
@@ -159,20 +153,21 @@ def get_dataloader(dataset,
                           num_workers=num_workers,
                           **_kwargs)
 
+
 class CudaStreamDataIter(BaseStreamDataIter):
     """
     A data iterator that supports batch prefetching with the help of cuda stream. 
     Be aware that it now only supports batch loading on GPU.
     Also, it can only support dataset in the format of (input, target/label) 
     """
-    
+
     def __init__(self, loader: DataLoader):
         super().__init__(loader)
 
     def _preload(self):
         try:
             self.batch_data = next(self.iter)
-       
+
         except StopIteration:
             self.batch_data = None
             self._reset()
@@ -189,10 +184,10 @@ class CudaStreamDataIter(BaseStreamDataIter):
     def __next__(self):
         torch.cuda.current_stream().wait_stream(self.stream)
         batch_data = self.batch_data
-        
+
         if batch_data is not None:
             self.record_stream(batch_data, torch.cuda.current_stream())
-        
+
         self._preload()
         return batch_data
 
@@ -202,8 +197,7 @@ class CudaStreamDataIter(BaseStreamDataIter):
 
 class CudaStreamDataloader(object):
 
-    def __init__(self,
-                 init_dataloader: DataLoader):
+    def __init__(self, init_dataloader: DataLoader):
         self.loader = init_dataloader
 
     def __iter__(self) -> CudaStreamDataIter:
@@ -214,18 +208,18 @@ class CudaStreamDataloader(object):
 
 
 def get_cuda_stream_dataloader(dataset,
-                            shuffle=False,
-                            seed=1024, 
-                            add_sampler=True, 
-                            drop_last=False,
-                            pin_memory=False,
-                            num_workers=0,
-                            **kwargs):
+                               shuffle=False,
+                               seed=1024,
+                               add_sampler=True,
+                               drop_last=False,
+                               pin_memory=False,
+                               num_workers=0,
+                               **kwargs):
 
     dataloader = get_dataloader(dataset,
                                 shuffle=shuffle,
-                                seed=seed, 
-                                add_sampler=add_sampler, 
+                                seed=seed,
+                                add_sampler=add_sampler,
                                 drop_last=drop_last,
                                 pin_memory=pin_memory,
                                 num_workers=num_workers,
