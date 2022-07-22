@@ -4,8 +4,6 @@ import pytest
 import torch 
 import torch.nn as nn
 import torch.multiprocessing as mp
-from torch.profiler import profile, ProfilerActivity, tensorboard_trace_handler
-import numpy as np
 
 from colossalai.testing import rerun_if_address_is_in_use
 from colossalai.utils import free_port, get_current_device
@@ -14,7 +12,7 @@ from recsys import disable_existing_loggers
 from recsys.modules.embeddings import (LoadBalanceManager, BlockEmbeddingBag, ParallelMixVocabEmbeddingBag,
                                        QREmbeddingBag)
 
-from common import EMBEDDING_DIM, NUM_EMBEDDINGS_PER_FEATURE, BATCH_SIZE, REDUCE_OPS, check_equal
+from common import EMBEDDING_DIM, NUM_EMBEDDINGS_PER_FEATURE, BATCH_SIZE, check_equal
 from recsys.modules.functional import reduce_forward
 
 
@@ -81,13 +79,13 @@ def check_block_embeddingbag(mode):
     check_equal(blk_embed_ws[1].grad, linear.weight.grad)
     _print_rank_0('embed backward: pass')
 
-def check_mv_embeddingbag(be_fair, enable_qr, mode):
+def check_mv_embeddingbag(do_fair, enable_qr, mode):
     device = get_current_device()
     dtype = torch.float32
     world_size = DISTMGR.get_world_size()
 
     lbmgr = LoadBalanceManager(NUM_EMBEDDINGS_PER_FEATURE, world_size, \
-                            EMBEDDING_DIM, device=device, be_fair=be_fair)
+                            EMBEDDING_DIM, device=device, do_fair=do_fair)
 
     rank = DISTMGR.get_rank()
 
@@ -164,23 +162,23 @@ def check_mv_embeddingbag(be_fair, enable_qr, mode):
 
     _print_rank_0('embed backward: pass')
 
-def check_layer(rank, world_size, port, be_fair, enable_qr, mode):
+def check_layer(rank, world_size, port, do_fair, enable_qr, mode):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
     # check_block_embeddingbag(mode)
-    check_mv_embeddingbag(be_fair, enable_qr, mode)
+    check_mv_embeddingbag(do_fair, enable_qr, mode)
     
     DISTMGR.destroy()
     torch.cuda.empty_cache()
 
-@pytest.mark.parametrize('be_fair', [True,False])
+@pytest.mark.parametrize('do_fair', [True,False])
 @pytest.mark.parametrize('enable_qr', [True,False])
 @pytest.mark.parametrize('world_size', [1,4])
 @pytest.mark.parametrize('mode', ['sum','mean','max'])
 @rerun_if_address_is_in_use()
-def test_layer(world_size, be_fair, enable_qr, mode):
-    run_func = partial(check_layer, world_size=world_size, port=free_port(), be_fair=be_fair, \
+def test_layer(world_size, do_fair, enable_qr, mode):
+    run_func = partial(check_layer, world_size=world_size, port=free_port(), do_fair=do_fair, \
         enable_qr=enable_qr, mode=mode)
     mp.spawn(run_func, nprocs=world_size)
 
