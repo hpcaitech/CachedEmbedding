@@ -99,7 +99,7 @@ def parse_dfm_args():
     parser.add_argument(
         "--mlp",
         type=str,
-        default="[128,64]",
+        default="[128]",
         help="Comma separated layer sizes for dense arch.",
     )
     parser.add_argument('--dropout', nargs='?', default=0.2,
@@ -186,9 +186,11 @@ def main(args):
 
     if args.use_torchrec_dl:
         train_data_loader = criteo.get_dataloader(args, 'train')
+        valid_data_loader = criteo.get_dataloader(args, 'val')
         test_data_loader = criteo.get_dataloader(args, "test")
     else:
         train_data_loader = CriteoDataset(args,mode='train')
+        valid_data_loader = CriteoDataset(args,mode='val')
         test_data_loader = CriteoDataset(args,mode='test')
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
@@ -209,6 +211,8 @@ def main(args):
         t0 = time.time()
         for epoch_i in range(args.epoch):
             train_loss = train(model, criterion, optimizer, train_data_loader, curr_device, prof, epoch_i)
+            auc = test(model, criterion, valid_data_loader, curr_device)
+            print('valid auc:',auc)
 
             dist_logger.info(
             f"Epoch {epoch_i} - train loss: {train_loss:.5}",ranks=[0])
