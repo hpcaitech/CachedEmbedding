@@ -1,12 +1,15 @@
 """
 1. hit rate
 2. bandwidth
+3. read / load
+4. elapsed time
 """
 import itertools
 from tqdm import tqdm
 from contexttimer import Timer
 
 import torch
+from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
 
 from recsys.modules.embeddings import CachedEmbeddingBag, FreqAwareEmbeddingBag
 from data_utils import get_dataloader, get_id_freq_map, NUM_EMBED
@@ -34,25 +37,32 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
 
     # grad = None
     with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
-        for it in itertools.count():
-            batch = next(data_iter)
-            sparse_feature = batch.sparse_features.to(device)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
+                     profile_memory=True,
+                     on_trace_ready=tensorboard_trace_handler(
+                         f"log/b{batch_size}-e{embedding_dim}-num_chunk{cache_sets}-chunk_size{cache_lines}")) as prof:
+            for it in itertools.count():
+                batch = next(data_iter)
+                sparse_feature = batch.sparse_features.to(device)
 
-            res = model(sparse_feature.values(), sparse_feature.offsets())
+                res = model(sparse_feature.values(), sparse_feature.offsets())
 
-            # grad = torch.randn_like(res) if grad is None else grad
-            # res.backward(grad)
-            #
-            # model.zero_grad()
-            running_hits = sum(model.num_hits_history)
-            running_miss = sum(model.num_miss_history)
-            hit_rate = running_hits / (running_hits + running_miss)
-            t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
-                              f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
-                              f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
-            t.update()
-            if it == 25:
-                break
+                # grad = torch.randn_like(res) if grad is None else grad
+                # res.backward(grad)
+                #
+                # model.zero_grad()
+                prof.step()
+                running_hits = sum(model.num_hits_history)
+                running_miss = sum(model.num_miss_history)
+                hit_rate = running_hits / (running_hits + running_miss)
+                t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
+                                  f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
+                                  f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s, "
+                                  f"input ids/load-in cache ids={model.input_id_percent_in_load_chunk:.2f}%")
+                t.update()
+                if it == 25:
+                    break
 
 
 if __name__ == "__main__":
@@ -60,10 +70,10 @@ if __name__ == "__main__":
         id_freq_map = get_id_freq_map()
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
-    batch_size = [2048, 8192]
-    embed_dim = 128
-    cache_sets = [50_000, 25_000]
-    cache_lines = [128, 256, 512]
+    batch_size = [2048]
+    embed_dim = 512
+    cache_sets = [50_000]
+    cache_lines = [256, 512]
 
     # # row-wise cache
     # for bs in batch_size:
