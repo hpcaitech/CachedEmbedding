@@ -90,4 +90,4 @@ def test_freq_aware_embed(chunk_size):
 
 if __name__ == '__main__':
     # test_freq_aware_embed()
-    test_freq_aware_embed()
+    test_freq_aware_embed(2)
