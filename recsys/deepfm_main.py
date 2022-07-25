@@ -108,7 +108,7 @@ def parse_dfm_args():
                         help='Batch size.')
     parser.add_argument('--lr', type=float, default=0.0001,
                         help='Learning rate.')
-    parser.add_argument('--epoch', type=int, default=1,
+    parser.add_argument('--epoch', type=int, default=3,
                         help='Number of epoch.')
     parser.add_argument('--weight_decay', type=float, default=1e-6)
     

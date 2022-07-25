@@ -1,5 +1,7 @@
 import math
-from typing import List, Optional, Union
+from collections import defaultdict
+from typing import Dict, List, Optional, Union
+from sympy import numbered_symbols
 
 import torch
 import torch.nn as nn
@@ -10,262 +12,192 @@ import numpy as np
 from recsys import DISTMGR, ParallelMode, DISTLogger
 from ..functional import reduce_forward
 
-np.random.seed(1)  
+np.random.seed(111)  
 
 
 class LoadBalanceManager(object):
-    def __init__(self, 
-                embeddings_per_feat: List[int], 
-                num_groups: int = 4, 
-                base_emb_dim: Optional[int] = 128, 
-                device = None, 
-                word_frequency: Optional[Union[List, np.ndarray]] = None):
+    def __init__(self, embeddings_per_feat: List[int], num_groups=4, base_emb_dim=128, \
+        do_fair=True, device=None, disable_random_behavior=False):
         assert len(embeddings_per_feat) >= num_groups, \
                 f"number of input fields {len(embeddings_per_feat)} must be larger than the world size {num_groups}"
         self.embeddings_per_feat = embeddings_per_feat
         self.num_groups = num_groups
         self.base_emb_dim = base_emb_dim
+        self.do_fair = do_fair
         self.device = device
-        self.word_frequency = word_frequency
-        self._offsets = torch.tensor((0,*np.cumsum(np.array( \
-                            self.embeddings_per_feat, dtype=np.int64))[:-1]),device=self.device)
-        self._fair_initialize()    
-    
-    def _fair_initialize(self) -> None:
-        if self.word_frequency is not None:
-            assert len(self.self.word_frequency) == sum(self.embeddings_per_feat)
-            sort_indices = np.argsort(np.asarray(list(self.word_frequency)))
-            # new_stuff_coming_in = new Stuff()
-            
-        self.num_embeddings_per_rank = sum(self.embeddings_per_feat) // self.num_groups
-        self.cuts = {0: 0}
-        for i in range(1, self.num_groups):
-            self.cuts[i] = i * self.num_embeddings_per_rank
+        if not self.do_fair:
+            self._shuffle_initialize(disable_random_behavior)
+        else:
+            self._fair_initialize()
         
-        self.blk_num_emb = max(2, int(self.base_emb_dim / 
+    def _fair_initialize(self) -> None:
+        self.num_embeddings_per_rank = sum(self.embeddings_per_feat) // self.num_groups
+        dim_indices = np.array(range(len(self.embeddings_per_feat)))
+        self.groups = []
+        self.offsets = []
+        _curr_grp = []
+        _curr_offs = [0]
+
+        self.cuts = dict()
+        _num_cuts = 0
+        _agg = self.num_embeddings_per_rank
+        # Find cut positions and shard groups
+        for ind in dim_indices:
+            while self.embeddings_per_feat[ind] > _agg:
+                if _num_cuts >= self.num_groups - 1: # never cut when enough groups
+                    break
+                if ind in self.cuts.keys():
+                    self.cuts[ind].append(_agg)
+                else:
+                    self.cuts[ind] = [_agg]
+                _num_cuts += 1
+                
+                self.offsets.append(torch.from_numpy(np.asarray(_curr_offs,dtype=np.int64)).to(self.device))
+                _curr_offs = [0]
+                _curr_grp.append(ind)
+                self.groups.append(_curr_grp)
+                _curr_grp = []
+                
+                _agg += self.num_embeddings_per_rank
+            
+            if _agg >= self.embeddings_per_feat[ind] and len(_curr_offs) == 1:
+                _curr_offs.append(self.embeddings_per_feat[ind]-(_agg-self.num_embeddings_per_rank))
+            else:
+                _curr_offs.append(self.embeddings_per_feat[ind])
+            
+            _agg -= self.embeddings_per_feat[ind]
+            _curr_grp.append(ind)
+        
+        self.offsets.append(torch.from_numpy(np.asarray(_curr_offs[:-1],dtype=np.int64)).to(self.device))
+        for i in range(len(self.offsets)):
+            self.offsets[i] = torch.cumsum(self.offsets[i], dim=0)
+            
+        self.groups.append(_curr_grp)
+        
+        self.emb_dim = max(2, int(self.base_emb_dim / 
                                   2**(int(math.log2(self.num_groups)))))
         self.qr_bucket_size = math.ceil(math.sqrt(self.num_embeddings_per_rank))
-
-    def get_num_embeddings_on_rank(self, rank: int) -> int:
-        return self.num_embeddings_per_rank
-    
-    def get_block_emb(self, rank: int) -> int:
         
-        return self.blk_num_emb
+    def _shuffle_initialize(self, disable_random_behavior=False) -> None:
+        if disable_random_behavior:
+            dim_indices = np.argsort(self.embeddings_per_feat)
+        else:
+            dim_indices = np.array(range(len(self.embeddings_per_feat)))
+            np.random.shuffle(dim_indices)
+        chunk_size = len(self.embeddings_per_feat) // self.num_groups
+        self.groups = []
+
+        for i in range(self.num_groups):
+            if i == self.num_groups-1:
+                self.groups.append(dim_indices[i*chunk_size:])
+                break
+            self.groups.append(dim_indices[i*chunk_size:(i+1)*chunk_size])
+
+        self.emb_dims = []
+        total_sum = sum(self.embeddings_per_feat)
+        for group in self.groups:
+            div = total_sum / sum([self.embeddings_per_feat[x] for x in group])
+            emb_dim = max(2, int(self.base_emb_dim / 2**(int(math.log2(div)))))
+            self.emb_dims.append(emb_dim)
+            
+        self.qr_bucket_sizes = [math.ceil(math.sqrt(sum([self.embeddings_per_feat[x] for x in group]))) 
+                               for group in self.groups]
+        
+        self.offsets = [torch.tensor((0,*np.cumsum(np.array( \
+                            self.embeddings_per_feat, dtype=np.int64)[group])[:-1]), device=self.device)
+                        for group in self.groups]
+
+    def get_group(self, rank: int) -> List[int]:
+        assert rank in range(0, self.num_groups)
+        return list(self.groups[rank])
+    
+    def get_offsets(self, rank: int) -> List[int]:
+        assert rank in range(0, self.num_groups)
+        return self.offsets[rank]
+        
+    def get_num_embeddings_on_rank(self, rank: int) -> int:
+        if not self.do_fair:
+            group = self.get_group(rank)
+            return sum([self.embeddings_per_feat[i] for i in group])
+        else:
+            return self.num_embeddings_per_rank
+    
+    def get_block_dim(self, rank: int) -> int:
+        assert rank in range(0, self.num_groups)
+        if not self.do_fair:
+            return self.emb_dims[rank]
+        else:
+            return self.emb_dim
     
     def get_qr_bucket_size(self, rank: int) -> int:
-        return self.qr_bucket_size
-        
-    def shard_tensor(self, _input: Tensor, rank: int, offsets: Union[Tensor,List] = None) -> Tensor:
-        if _input.dim() == 1: 
-            if _input.size(0) > len(self.embeddings_per_feat):
-                assert offsets is not None, 'multiple bags detected yet no offsets given'
-                bag_size = _input.size(0) // len(self.embeddings_per_feat)
-                try:
-                    _input = _input.reshape((-1,bag_size)).T
-                except Exception as e:
-                    pass
-        elif _input.dim() == 2:
-            assert _input.size(1) == len(self.embeddings_per_feat)
+        if not self.do_fair:
+            assert rank in range(len(self.qr_bucket_sizes))
+            return self.qr_bucket_sizes[rank]
         else:
-            raise ValueError("input tensor needs to be 1 or 2-dimensional.")
+            return self.qr_bucket_size
         
-        _cinput = _input.clone() + self._offsets
-
+    def shard_tensor(self, _input: Tensor, rank: int) -> Tensor:
+        assert _input.dim() == 2 \
+            and _input.size(1) == len(self.embeddings_per_feat)
+        offsets = self.get_offsets(rank)
+        if not self.do_fair:
+            group = self.get_group(rank)
+            assert min(group) >= 0 and max(group) < _input.size(1)
+            return _input[:, group] + offsets
+        else:
+            if self.num_groups == 1: # no cut
+                assert rank == 0, 'Maximum rank exceeded, no cut is performed'
+                return _input + offsets
+            _cinput = _input.clone()
+            feats = list(self.cuts.keys())
+            assert hasattr(self, 'cuts'), 'lbmgr object has no cuts attribute'
+            assert rank in range(self.num_groups), 'invalid rank'
+            if rank == 0:
+                feat_id = feats[0]
+                cut_pos = self.cuts[feat_id][0]
+                _cinput[:,feat_id] = torch.min((cut_pos-offsets[-1]-1)*torch.ones(_cinput.size(0),device=self.device),\
+                                                _cinput[:,feat_id])
+                return _cinput[:,:feat_id+1] + offsets 
+            else:
+                rank -= 1
+                for (k,v) in self.cuts.items():
+                    if rank - len(v) < 0:
+                        cut_pos = v[rank:][:2] # this and next shard position
+                        if len(cut_pos) < 2 and k != feats[-1]:
+                            next_feat_id = feats[feats.index(k) + 1]
+                        else:
+                            next_feat_id = None
+                        feat_id = k
+                        break
+                    rank -= len(v)
+                if len(cut_pos) == 1:
+                    cut_pos = cut_pos[0]
+                    if feat_id == feats[-1]: # last rank
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device),
+                                                       _cinput[:,feat_id]-cut_pos)
+                        return _cinput[:,feat_id:] + offsets
+                    else:
+                        assert next_feat_id is not None
+                        _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device), \
+                                                       _cinput[:,feat_id]-cut_pos)
+                        _cinput[:,next_feat_id] = torch.min((cut_pos-offsets[-1]-1)*torch.ones(_cinput.size(0), \
+                                                                    device=self.device),_cinput[:,next_feat_id])
+                        return _cinput[:,feat_id:next_feat_id+1] + offsets
+                elif len(cut_pos) == 2:
+                    pos1, pos2 = cut_pos
+                    _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device), 
+                                                    _cinput[:,feat_id]-pos1)
+                    _cinput[:,feat_id] = torch.min((pos2-pos1-offsets[-1]-1)*torch.ones(_cinput.size(0),device=self.device), 
+                                                        _cinput[:,feat_id])
+                    return _cinput[:,feat_id:feat_id+1] + offsets
+                else:
+                    raise ValueError('input tensor and embeddings_per_feat do not match. Double check inputs.')
+            
     def get_embeddings_per_feat(self) -> List[int]:
         return self.embeddings_per_feat
 
     def get_base_dim(self) -> int:
         return self.base_emb_dim
-
-# class LoadBalanceManager(object):
-#     def __init__(self, embeddings_per_feat: List[int], num_groups=4, base_emb_dim=128, \
-#         do_fair=True, device=None, disable_random_behavior=False):
-#         assert len(embeddings_per_feat) >= num_groups, \
-#                 f"number of input fields {len(embeddings_per_feat)} must be larger than the world size {num_groups}"
-#         self.embeddings_per_feat = embeddings_per_feat
-#         self.num_groups = num_groups
-#         self.base_emb_dim = base_emb_dim
-#         self.do_fair = do_fair
-#         self.device = device
-#         if not self.do_fair:
-#             self._shuffle_initialize(disable_random_behavior)
-#         else:
-#             self._fair_initialize()
-        
-#     def _fair_initialize(self) -> None:
-#         self.num_embeddings_per_rank = sum(self.embeddings_per_feat) // self.num_groups
-#         dim_indices = np.array(range(len(self.embeddings_per_feat)))
-#         self.groups = []
-#         self.offsets = []
-#         _curr_grp = []
-#         _curr_offs = [0]
-
-#         self.cuts = dict()
-#         _num_cuts = 0
-#         _agg = self.num_embeddings_per_rank
-#         # Find cut positions and shard groups
-#         for ind in dim_indices:
-#             while self.embeddings_per_feat[ind] > _agg:
-#                 if _num_cuts >= self.num_groups - 1: # never cut when enough groups
-#                     break
-#                 if ind in self.cuts.keys():
-#                     self.cuts[ind].append(_agg)
-#                 else:
-#                     self.cuts[ind] = [_agg]
-#                 _num_cuts += 1
-                
-#                 self.offsets.append(torch.from_numpy(np.asarray(_curr_offs,dtype=np.int64)).to(self.device))
-#                 _curr_offs = [0]
-#                 _curr_grp.append(ind)
-#                 self.groups.append(_curr_grp)
-#                 _curr_grp = []
-                
-#                 _agg += self.num_embeddings_per_rank
-            
-#             if _agg >= self.embeddings_per_feat[ind] and len(_curr_offs) == 1:
-#                 _curr_offs.append(self.embeddings_per_feat[ind]-(_agg-self.num_embeddings_per_rank))
-#             else:
-#                 _curr_offs.append(self.embeddings_per_feat[ind])
-            
-#             _agg -= self.embeddings_per_feat[ind]
-#             _curr_grp.append(ind)
-        
-#         self.offsets.append(torch.from_numpy(np.asarray(_curr_offs[:-1],dtype=np.int64)).to(self.device))
-#         for i in range(len(self.offsets)):
-#             self.offsets[i] = torch.cumsum(self.offsets[i], dim=0)
-            
-#         self.groups.append(_curr_grp)
-        
-#         self.emb_dim = max(2, int(self.base_emb_dim / 
-#                                   2**(int(math.log2(self.num_groups)))))
-#         self.qr_bucket_size = math.ceil(math.sqrt(self.num_embeddings_per_rank))
-        
-#     def _shuffle_initialize(self, disable_random_behavior=False) -> None:
-#         if disable_random_behavior:
-#             dim_indices = np.argsort(self.embeddings_per_feat)
-#         else:
-#             dim_indices = np.array(range(len(self.embeddings_per_feat)))
-#             np.random.shuffle(dim_indices)
-#         chunk_size = len(self.embeddings_per_feat) // self.num_groups
-#         self.groups = []
-
-#         for i in range(self.num_groups):
-#             if i == self.num_groups-1:
-#                 self.groups.append(dim_indices[i*chunk_size:])
-#                 break
-#             self.groups.append(dim_indices[i*chunk_size:(i+1)*chunk_size])
-
-#         self.emb_dims = []
-#         total_sum = sum(self.embeddings_per_feat)
-#         for group in self.groups:
-#             div = total_sum / sum([self.embeddings_per_feat[x] for x in group])
-#             emb_dim = max(2, int(self.base_emb_dim / 2**(int(math.log2(div)))))
-#             self.emb_dims.append(emb_dim)
-            
-#         self.qr_bucket_sizes = [math.ceil(math.sqrt(sum([self.embeddings_per_feat[x] for x in group]))) 
-#                                for group in self.groups]
-        
-#         self.offsets = [torch.tensor((0,*np.cumsum(np.array( \
-#                             self.embeddings_per_feat, dtype=np.int64)[group])[:-1]), device=self.device)
-#                         for group in self.groups]
-
-#     def get_group(self, rank: int) -> List[int]:
-#         assert rank in range(0, self.num_groups)
-#         return list(self.groups[rank])
-    
-#     def get_offsets(self, rank: int) -> List[int]:
-#         assert rank in range(0, self.num_groups)
-#         return self.offsets[rank]
-        
-#     def get_num_embeddings_on_rank(self, rank: int) -> int:
-#         if not self.do_fair:
-#             group = self.get_group(rank)
-#             return sum([self.embeddings_per_feat[i] for i in group])
-#         else:
-#             return self.num_embeddings_per_rank
-    
-#     def get_block_dim(self, rank: int) -> int:
-#         assert rank in range(0, self.num_groups)
-#         if not self.do_fair:
-#             return self.emb_dims[rank]
-#         else:
-#             return self.emb_dim
-    
-#     def get_qr_bucket_size(self, rank: int) -> int:
-#         if not self.do_fair:
-#             assert rank in range(len(self.qr_bucket_sizes))
-#             return self.qr_bucket_sizes[rank]
-#         else:
-#             return self.qr_bucket_size
-        
-#     def shard_tensor(self, _input: Tensor, rank: int) -> Tensor:
-#         assert _input.dim() == 2 \
-#             and _input.size(1) == len(self.embeddings_per_feat)
-#         offsets = self.get_offsets(rank)
-#         if not self.do_fair:
-#             group = self.get_group(rank)
-#             assert min(group) >= 0 and max(group) < _input.size(1)
-#             return _input[:, group] + offsets
-#         else:
-#             if self.num_groups == 1: # no cut
-#                 assert rank == 0, 'Maximum rank exceeded, no cut is performed'
-#                 return _input + offsets
-#             _cinput = _input.clone()
-#             feats = list(self.cuts.keys())
-#             assert hasattr(self, 'cuts'), 'lbmgr object has no cuts attribute'
-#             assert rank in range(self.num_groups), 'invalid rank'
-#             if rank == 0:
-#                 feat_id = feats[0]
-#                 cut_pos = self.cuts[feat_id][0]
-#                 _cinput[:,feat_id] = torch.min((cut_pos-offsets[-1]-1)*torch.ones(_cinput.size(0),device=self.device),\
-#                                                 _cinput[:,feat_id])
-#                 return _cinput[:,:feat_id+1] + offsets 
-#             else:
-#                 rank -= 1
-#                 for (k,v) in self.cuts.items():
-#                     if rank - len(v) < 0:
-#                         cut_pos = v[rank:][:2] # this and next shard position
-#                         if len(cut_pos) < 2 and k != feats[-1]:
-#                             next_feat_id = feats[feats.index(k) + 1]
-#                         else:
-#                             next_feat_id = None
-#                         feat_id = k
-#                         break
-#                     rank -= len(v)
-#                 if len(cut_pos) == 1:
-#                     cut_pos = cut_pos[0]
-#                     if feat_id == feats[-1]: # last rank
-#                         _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device),
-#                                                        _cinput[:,feat_id]-cut_pos)
-#                         return _cinput[:,feat_id:] + offsets
-#                     else:
-#                         assert next_feat_id is not None
-#                         _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device), \
-#                                                        _cinput[:,feat_id]-cut_pos)
-#                         _cinput[:,next_feat_id] = torch.min((cut_pos-offsets[-1]-1)*torch.ones(_cinput.size(0), \
-#                                                                     device=self.device),_cinput[:,next_feat_id])
-#                         return _cinput[:,feat_id:next_feat_id+1] + offsets
-#                 elif len(cut_pos) == 2:
-#                     pos1, pos2 = cut_pos
-#                     _cinput[:,feat_id] = torch.max(torch.zeros(_cinput.size(0),device=self.device), 
-#                                                     _cinput[:,feat_id]-pos1)
-#                     _cinput[:,feat_id] = torch.min((pos2-pos1-offsets[-1]-1)*torch.ones(_cinput.size(0),device=self.device), 
-#                                                         _cinput[:,feat_id])
-#                     return _cinput[:,feat_id:feat_id+1] + offsets
-#                 else:
-#                     raise ValueError('input tensor and embeddings_per_feat do not match. Double check inputs.')
-            
-#     def get_embeddings_per_feat(self) -> List[int]:
-#         return self.embeddings_per_feat
-
-#     def get_base_dim(self) -> int:
-#         return self.base_emb_dim
-
-
-class AdaEmbeddingBag(nn.Module):
-    """Adaptive Embedding Bag [Work In-Progress]"""
-    pass
 
 
 class QREmbeddingBag(nn.Module):
@@ -344,7 +276,7 @@ class QREmbeddingBag(nn.Module):
                                              per_sample_weights, self.include_last_offset, self.r_padding_idx) # R-embedding
 
         # Use multiplication as a combiner operation
-        output_parallel = quotient_embed + remainder_embed
+        output_parallel = quotient_embed * remainder_embed
         assert output_parallel.size() == (input_.size(0), self.embedding_dim)
         return output_parallel
 
@@ -513,6 +445,75 @@ class BlockEmbeddingBag(nn.Module):
             assert isinstance(self.linear_weight, Tensor)
             return [self.embed_weight.detach() if detach 
                     else self.embed_weight, self.linear_weight]
+
+
+class AdaEmbeddingBag(BlockEmbeddingBag):
+    def __init__(self, 
+                update_word_frequency: bool = True, 
+                word_frequencies: Optional[Union[List,Tensor]] = None,
+                num_of_quantiles: int = 5,
+                update_count: int = 20,
+                *args, 
+                **kwargs):
+        super().__init__(*args, **kwargs)
+        self.update_word_frequency = update_word_frequency
+        self.update_count = self.curr_count = update_count
+        self.num_of_quantiles = num_of_quantiles
+        if word_frequencies is not None:
+            self.register_buffer('word_frequencies',torch.tensor(word_frequencies))
+        else:
+            self.register_buffer('word_frequencies',torch.zeros(self.num_embeddings))
+        self.embed_weight = [self.embed_weight.clone()]
+        self._update_weights()
+        
+    def _padding_zeros(self, _input: Tensor) -> None:
+        return F.pad(_input,(0, self.block_embedding_dim-_input.size(0)),'constant',0)
+    
+    def _update_weights(self) -> None:
+        total = sum(self.word_frequencies)
+        if total == 0:
+            return
+        else:
+            # TODO: using quantiles and multiprocessing to parallelize embedding lookup of different lengths
+            # _embed_weight = torch.empty(self.embed_weight.shape)
+            for (i,v) in enumerate(self.word_frequencies):
+                _v = max(2,int(self.block_embedding_dim / int(math.log(total / max(1,v)))))
+                self.embed_weight[i] = self._padding_zeros(self.embed_weight[i,:_v].clone().detach())
+            # self.embed_weight = nn.Parameter(_embed_weight)
+
+    def toggle_update_behavior(self, disable=True):
+        assert hasattr(self, 'update_word_frequency')
+        if disable:
+            self.update_word_frequency = False
+        else:
+            self.update_word_frequency = True
+        
+        self.curr_count=self.update_count
+
+    def set_word_frequencies(self, word_frequencies: Union[List,Tensor]):
+        assert len(word_frequencies) == self.num_embeddings, \
+                        'ensure input word frequencies cover all possible words'
+        self.word_frequencies = torch.tensor(word_frequencies.copy())
+        self._update_weights()
+
+    def forward(self, input_, offsets=None, per_sample_weights=None):
+        if self.update_word_frequency and self.curr_count >= 0:
+            for batch in input_:
+                self.word_frequencies[batch] += 1
+            self.curr_count -= 1
+            if self.curr_count < 0:
+                self._update_weights()
+                self.toggle_update_behavior()
+
+        output_parallel = F.embedding_bag(input_, self.embed_weight, offsets, self.max_norm, self.norm_type,
+                                          self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
+                                          self.include_last_offset, self.padding_idx)
+
+        if self.block_embedding_dim != self.base_embedding_dim:
+            output_parallel = F.linear(output_parallel, self.linear_weight, bias=None)
+
+        assert output_parallel.size() == (input_.size(0), self.base_embedding_dim)
+        return output_parallel
 
 
 class ParallelMixVocabEmbeddingBag(nn.Module):
