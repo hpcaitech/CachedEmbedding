@@ -1,7 +1,9 @@
 import numpy as np
 import torch
+from torch.profiler import record_function
 from typing import List, Optional
 from contexttimer import Timer
+
 
 class ChunkParamMgr(object):
     """
@@ -39,7 +41,7 @@ class ChunkParamMgr(object):
 
         # pin memory cpu for higher CPU-GPU copy bandwidth
         self.cpu_weight = weight.pin_memory()
-        
+
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
         self.index_mapping_table = []
@@ -50,9 +52,13 @@ class ChunkParamMgr(object):
         self.chunk_id_cuda_offset = {}
         self.evict_backlist = set()
 
+        self.num_hits_history = []
+        self.num_miss_history = []
+        self.num_write_back_history = []
+        self.input_id_percent_in_load_chunk = []
         self._reset_comm_stats()
 
-    def cpu_weight_chunk(self, chunk_id : int) -> torch.Tensor:
+    def cpu_weight_chunk(self, chunk_id: int) -> torch.Tensor:
         """
         access a chunk of CPU weight.
 
@@ -62,7 +68,9 @@ class ChunkParamMgr(object):
         Returns:
             torch.Tensor: a piece of memory in CPU weight corresponding to chunk id's payload. The tensor is 1-D.
         """
-        return self.cpu_weight.data.view(-1).narrow(0, chunk_id * self.chunk_size * self.embedding_dim, self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
+        return self.cpu_weight.data.view(-1).narrow(0, chunk_id * self.chunk_size * self.embedding_dim,
+                                                    self.chunk_size * self.embedding_dim).view(
+                                                        self.chunk_size, self.embedding_dim)
 
     def _reset_comm_stats(self):
         self._cpu_to_cuda_numel = 0
@@ -89,7 +97,8 @@ class ChunkParamMgr(object):
             sorted_idx = np.flipud(np.argsort(ids_freq_mapping))
 
         for _id in range(self.num_embeddings):
-            self.index_mapping_table.append(divmod((sorted_idx[_id] if ids_freq_mapping else _id), self.chunk_size))
+            self.index_mapping_table.append(
+                divmod(_id if ids_freq_mapping is None else sorted_idx[_id], self.chunk_size))
 
     def _id_to_cached_cuda_id(self, id: int) -> int:
         """
@@ -113,30 +122,49 @@ class ChunkParamMgr(object):
         Returns:
             torch.Tensor: indices on the cuda_partial_weight.
         """
-        chunk_id_set = set()
-        for id in ids:
-            chunk_id, offset_in_chunk = self.index_mapping_table[id]
-            chunk_id_set.add(chunk_id)
+        with record_function("(zhg) categorize indices"):
+            chunk_id_set = set()
+            chunk_counter = dict()
+            for id in ids:
+                chunk_id, offset_in_chunk = self.index_mapping_table[id]
+                chunk_id_set.add(chunk_id)
+                if chunk_id not in chunk_counter:
+                    chunk_counter[chunk_id] = 1
+                else:
+                    chunk_counter[chunk_id] += 1
 
-        assert len(chunk_id_set) <= self.cuda_chunk_num, \
-            f"the input indices pull {len(chunk_id_set)} chunks, " \
-            f"which is larger than the preseted {self.cuda_chunk_num}, " \
-            f"please increase cuda_chunk_num and chunk_size or shrink batch size"
-        self.evict_backlist = chunk_id_set
+            assert len(chunk_id_set) <= self.cuda_chunk_num, \
+                f"the input indices pull {len(chunk_id_set)} chunks, " \
+                f"which is larger than the preseted {self.cuda_chunk_num}, " \
+                f"please increase cuda_chunk_num and chunk_size or shrink batch size"
+            self.evict_backlist = chunk_id_set
 
-        # move chunk_id_set to CUDA
-        cpu_chunk_id_list = []
-        for chunk_id in chunk_id_set:
-            if not self._chunk_in_cuda(chunk_id):
-                cpu_chunk_id_list.append(chunk_id)
+            input_id_percent_in_load_chunk = 0
+            # move chunk_id_set to CUDA
+            cpu_chunk_id_list = []
+            for chunk_id in chunk_id_set:
+                if not self._chunk_in_cuda(chunk_id):
+                    cpu_chunk_id_list.append(chunk_id)
+                    input_id_percent_in_load_chunk += chunk_counter[chunk_id]
+
+        self.num_hits_history.append(len(chunk_id_set) - len(cpu_chunk_id_list))
+        self.num_miss_history.append(len(cpu_chunk_id_list))
+        self.num_write_back_history.append(0)
+        self.input_id_percent_in_load_chunk.append(input_id_percent_in_load_chunk / len(cpu_chunk_id_list) /
+                                                   self.chunk_size)
 
         # move sure the cuda chunk will not be evicted!
-        self._prepare_chunks_on_cuda(cpu_chunk_id_list)
+        with record_function("(zhg) cache update"):
+            self._prepare_chunks_on_cuda(cpu_chunk_id_list)
 
         self.evict_backlist.clear()
         # new ids chunk_offset + offset_in_chunk
-        mapped_ids = [self._id_to_cached_cuda_id(id) for id in ids.view(-1)]
-        return torch.tensor(mapped_ids, device=ids.device, dtype=ids.dtype).view(ids.shape)
+        with record_function("(zhg) embed idx -> cache chunk id"):
+            mapped_ids = torch.tensor([self._id_to_cached_cuda_id(id) for id in ids.view(-1)],
+                                      device=ids.device,
+                                      dtype=ids.dtype).view(ids.shape)
+
+        return mapped_ids
 
     def _prepare_chunks_on_cuda(self, chunk_ids: List[int]) -> None:
         """prepare chunks in chunk_ids on CUDA memory
@@ -180,6 +208,7 @@ class ChunkParamMgr(object):
 
         self._cuda_to_cpu_numel += self.chunk_size * self.embedding_dim
         self._cuda_to_cpu_elapse += timer.elapsed
+        self.num_write_back_history[-1] += 1
         return min_slot_id
 
     def _find_free_cuda_slot(self) -> int:

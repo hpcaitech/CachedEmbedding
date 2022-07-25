@@ -9,23 +9,10 @@ from recsys import DISTMGR
 from colossalai.utils import free_port
 from colossalai.testing import rerun_if_address_is_in_use
 from recsys.modules.embeddings import CachedEmbeddingBag, ParallelCachedEmbeddingBag, CacheReplacePolicy
+from recsys.testing.utils import synthesize_1d_sparse_feature
 
 NUM_EMBEDDINGS, EMBEDDING_DIM = 100, 8
 BATCH_SIZE = 8
-
-
-def synthesize_sparse_feature(
-    batch_size,
-    num_embed,
-    device,
-):
-    indices_in_batch = batch_size * 2
-    indices = torch.randint(low=0, high=num_embed, size=(indices_in_batch,), device=device, dtype=torch.long)
-    offsets = torch.from_numpy(
-        np.array([
-            0, *np.sort(np.random.randint(low=0, high=indices_in_batch, size=(indices_in_batch - 1,))), indices_in_batch
-        ])).to(device).long()
-    return indices, offsets
 
 
 def run_cached_embedding_bag(cache_replace_policy):
@@ -46,7 +33,7 @@ def run_cached_embedding_bag(cache_replace_policy):
     ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
 
     for _ in range(3):
-        indices, offsets = synthesize_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
+        indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
         res = model(indices, offsets)
         ref_res = ref_model(indices, offsets)
         assert torch.allclose(res, ref_res), f"model result: {res}, reference: {ref_res}"
@@ -78,6 +65,7 @@ def gather_tensor(tensor):
     torch.distributed.gather(tensor, gather_list, dst=0, group=group)
     return gather_list
 
+
 def parallel_cached_embedding_bag(cache_replace_policy):
     device = torch.device("cuda", torch.cuda.current_device())
     rank = DISTMGR.get_rank()
@@ -108,7 +96,7 @@ def parallel_cached_embedding_bag(cache_replace_policy):
     # sync RNG states
     DISTMGR.set_seed(1234)
     for i in range(4):
-        indices, offsets = synthesize_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
+        indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
         res = model(indices, offsets)
 
         grad = torch.rand(BATCH_SIZE * 2, EMBEDDING_DIM, dtype=res.dtype, device=res.device)
