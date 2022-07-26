@@ -30,8 +30,12 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
                                    sparse=True,
                                    include_last_offset=True).to(device)
     elif embed_type == 'chunk':
-        model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True).to(device)
-        model._preprocess(cache_lines, cache_sets, id_freq_map)
+        with Timer() as timer:
+            model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True).to(device)
+        print(f"model init: {timer.elapsed:.2f}s")
+        with Timer() as timer:
+            model._preprocess(cache_lines, cache_sets, id_freq_map)
+        print(f"reorder: {timer.elapsed:.2f}s")
     else:
         raise RuntimeError(f"Unknown EB type: {embed_type}")
 

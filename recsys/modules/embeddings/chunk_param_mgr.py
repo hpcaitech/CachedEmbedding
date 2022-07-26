@@ -50,15 +50,18 @@ class ChunkParamMgr(object):
         # id -> chunk_id
         self.IMP_chunkid_Embedding = torch.nn.Embedding(self.num_embeddings,
                                                         1,
-                                                        _weight=torch.range(0, self.num_embeddings - 1).view(
-                                                            self.num_embeddings, 1),
-                                                        device=torch.cuda.current_device())
+                                                        _weight=torch.arange(0,
+                                                                             self.num_embeddings,
+                                                                             dtype=torch.float32,
+                                                                             device=torch.cuda.current_device()).view(
+                                                                                 self.num_embeddings, 1))
         # id -> offset_in_chunk
-        self.IMP_offsetinchunk_Embedding = torch.nn.Embedding(self.num_embeddings,
-                                                              1,
-                                                              _weight=torch.range(0, self.num_embeddings - 1).view(
-                                                                  self.num_embeddings, 1),
-                                                              device=torch.cuda.current_device())
+        self.IMP_offsetinchunk_Embedding = torch.nn.Embedding(
+            self.num_embeddings,
+            1,
+            _weight=torch.arange(0, self.num_embeddings, dtype=torch.float32,
+                                 device=torch.cuda.current_device()).view(self.num_embeddings, 1))
+
         self.IMP_chunkid_Embedding.requires_grad_ = False
         self.IMP_offsetinchunk_Embedding.requires_grad_ = False
 
@@ -119,15 +122,15 @@ class ChunkParamMgr(object):
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq. if None no reorder
         """
         if ids_freq_mapping is not None:
-            sorted_idx = np.flipud(np.argsort(ids_freq_mapping))
+            sorted_idx = torch.argsort(torch.from_numpy(ids_freq_mapping).cuda(), descending=True)
+        else:
+            sorted_idx = torch.arange(self.num_embeddings, device=torch.cuda.current_device(), dtype=torch.long)
 
-        for _id in range(self.num_embeddings):
-            chunk_id, offset_in_chunk = divmod(_id if ids_freq_mapping is None else sorted_idx[_id], self.chunk_size)
-            self.index_mapping_table.append((chunk_id, offset_in_chunk))
-            self.IMP_chunkid_Embedding.weight[_id] = chunk_id
-            self.IMP_offsetinchunk_Embedding.weight[_id] = offset_in_chunk
-        self.IMP_chunkid_Embedding = self.IMP_chunkid_Embedding.cuda()
-        self.IMP_offsetinchunk_Embedding = self.IMP_offsetinchunk_Embedding.cuda()
+        divs = torch.div(sorted_idx, self.chunk_size, rounding_mode='floor').unsqueeze(1)
+        mods = torch.remainder(sorted_idx, self.chunk_size).unsqueeze(1)
+
+        self.IMP_chunkid_Embedding.weight.data.copy_(divs)
+        self.IMP_offsetinchunk_Embedding.weight.data.copy_(mods)
 
     @torch.no_grad()
     def _id_to_cached_cuda_id(self, ids: torch.Tensor) -> torch.Tensor:
@@ -157,8 +160,6 @@ class ChunkParamMgr(object):
         Returns:
             torch.Tensor: indices on the cuda_partial_weight.
         """
-        ids = ids.cuda()
-
         with record_function("(zhg) get unique indices"):
             chunk_id_set = set()
             chunk_counter = dict()
@@ -173,7 +174,6 @@ class ChunkParamMgr(object):
                 f"which is larger than the preseted {self.cuda_chunk_num}, " \
                 f"please increase cuda_chunk_num and chunk_size or shrink batch size"
             self.evict_backlist = chunk_id_set
-
 
         with record_function("(zhg) get cpu chunk indices"):
             # #input_id / moving chunk size
