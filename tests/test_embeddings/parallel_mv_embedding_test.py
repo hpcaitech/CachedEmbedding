@@ -20,8 +20,21 @@ def _print_rank_0(msg):
     i = DISTMGR.get_rank()
     if i == 0:
         print(msg)
+        
+def check_multi_block_embeddingbag(mode):
+    device = get_current_device()
+    dtype = torch.float32
+    world_size = DISTMGR.get_world_size()
+    
+    # table-wise sharding (not fair)
+    example_sharded_field_groups = [[0,2],[]]
+    example_block_dim = EMBEDDING_DIM // 2
+    
+    all_blk_bag = BlockEmbeddingBag()
+    # TODO: finish the embedding bag test
+    
 
-def check_block_embeddingbag(mode):
+def check_single_block_embeddingbag(mode):
     dtype = torch.float32
     
     example_field_idx = [0,2]

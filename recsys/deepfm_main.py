@@ -108,7 +108,7 @@ def parse_dfm_args():
                         help='Batch size.')
     parser.add_argument('--lr', type=float, default=0.0001,
                         help='Learning rate.')
-    parser.add_argument('--epoch', type=int, default=3,
+    parser.add_argument('--epoch', type=int, default=4,
                         help='Number of epoch.')
     parser.add_argument('--weight_decay', type=float, default=1e-6)
     
@@ -198,7 +198,7 @@ def main(args):
 
     dist_logger.info(count_parameters(model,f'[rank{dist_manager.get_rank()}]model'), ranks=[0])
 
-    criterion = torch.nn.BCEWithLogitsLoss()
+    criterion = torch.nn.BCELoss()
     optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     with profile(
