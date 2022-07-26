@@ -79,4 +79,4 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
 
     @property
     def input_id_percent_in_load_chunk(self):
-        return np.mean(self.chunk_weight_mgr.input_id_percent_in_load_chunk) * 100
+        return 0    # np.mean(self.chunk_weight_mgr.input_id_percent_in_load_chunk) * 100
