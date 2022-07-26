@@ -130,22 +130,20 @@ class ChunkParamMgr(object):
     @torch.no_grad()
     def _id_to_cached_cuda_id(self, ids: torch.Tensor) -> torch.Tensor:
         """
-        convert an id to index in self.partial_cuda_weight
+        convert ids to indices in self.partial_cuda_weight.
+        Implemented with parallel operations on GPU.
 
         Args:
-            id (int): an id from the dataset
+            ids (torch.Tensor): ids from the dataset
 
         Returns:
-            int: the index in self.partial_cuda_weight
+            torch.Tensor: contains indices in self.partial_cuda_weight
         """
         ids = ids.view(-1)
         chunk_ids = self.IMP_chunkid_Embedding(ids).long()
         offset_in_chunks = self.IMP_offsetinchunk_Embedding(ids)
-
         ret = self.CCT(chunk_ids.view(-1)) + offset_in_chunks
         return ret
-        # chunk_id, offset_in_chunk = self.index_mapping_table[id]
-        # return int(self.chunk_id_cuda_offset[chunk_id] + offset_in_chunk)
 
     @torch.no_grad()
     def prepare_ids(self, ids: torch.Tensor) -> torch.Tensor:
@@ -166,13 +164,6 @@ class ChunkParamMgr(object):
 
             chunk_id_set = torch.unique(self.IMP_chunkid_Embedding(ids))
             chunk_id_set = set(chunk_id_set.cpu().numpy())
-            # for id in ids:
-            #     chunk_id, offset_in_chunk = self.index_mapping_table[id]
-            #     chunk_id_set.add(chunk_id)
-            #     if chunk_id not in chunk_counter:
-            #         chunk_counter[chunk_id] = 1
-            #     else:
-            #         chunk_counter[chunk_id] += 1
 
             assert len(chunk_id_set) <= self.cuda_chunk_num, \
                 f"the input indices pull {len(chunk_id_set)} chunks, " \
@@ -203,9 +194,6 @@ class ChunkParamMgr(object):
         self.evict_backlist.clear()
         # new ids chunk_offset + offset_in_chunk
         with record_function("(zhg) embed idx -> cache chunk id"):
-            # mapped_ids = torch.tensor([self._id_to_cached_cuda_id(ids)],
-            #                           device=ids.device,
-            #                           dtype=ids.dtype).view(ids.shape)
             mapped_ids = self._id_to_cached_cuda_id(ids).long().view(ids.shape)
         return mapped_ids
 
