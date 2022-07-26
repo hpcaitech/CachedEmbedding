@@ -13,8 +13,6 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
     def __init__(self, num_embeddings, embedding_dim, dtype=None, *args, **kwargs):
         super(FreqAwareEmbeddingBag, self).__init__(num_embeddings, embedding_dim, *args, **kwargs)
         self._weight = torch.randn(self.num_embeddings, self.embedding_dim, device='cpu', dtype=dtype)
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
 
     def _preprocess(self, chunk_size: int, cuda_chunk_num: int, ids_freq_mapping: Optional[List[int]] = None):
         """
