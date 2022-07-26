@@ -161,8 +161,6 @@ class ChunkParamMgr(object):
             torch.Tensor: indices on the cuda_partial_weight.
         """
         with record_function("(zhg) get unique indices"):
-            chunk_id_set = set()
-            chunk_counter = dict()
             # unique(IMT(ids)) -> chunk ids
             # self.IMT_Embedding(ids)
 
@@ -177,19 +175,15 @@ class ChunkParamMgr(object):
 
         with record_function("(zhg) get cpu chunk indices"):
             # #input_id / moving chunk size
-            input_id_percent_in_load_chunk = 0
             # move chunk_id_set to CUDA
             cpu_chunk_id_list = []
             for chunk_id in chunk_id_set:
                 if not self._chunk_in_cuda(chunk_id):
                     cpu_chunk_id_list.append(chunk_id)
-                    # input_id_percent_in_load_chunk += chunk_counter[chunk_id]
 
         self.num_hits_history.append(len(chunk_id_set) - len(cpu_chunk_id_list))
         self.num_miss_history.append(len(cpu_chunk_id_list))
         self.num_write_back_history.append(0)
-        self.input_id_percent_in_load_chunk.append(input_id_percent_in_load_chunk / len(cpu_chunk_id_list) /
-                                                   self.chunk_size)
 
         # move sure the cuda chunk will not be evicted!
         with record_function("(zhg) cache update"):
