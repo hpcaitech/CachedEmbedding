@@ -69,6 +69,12 @@ class ChunkParamMgr(object):
         # TODO optimize access speed
         self.cached_chunk_table = {}
         self.cached_chunk_ids = []
+        # 0 on cuda, 1 on cpu
+        self.cpu_chunk_embedding = torch.nn.Embedding(self.chunk_num, 1, 
+                                _weight = torch.ones(self.chunk_num, 1, device = torch.cuda.current_device()).view(self.chunk_num, 1), 
+                                device=torch.cuda.current_device())
+        self.cpu_chunk_embedding.requires_grad_ = False
+
         # chunk_id, offset in cuda_partial_weight
         self.chunk_id_cuda_offset = {}
         # chunk_ids -> offset in cuda_partial_weight
@@ -76,7 +82,7 @@ class ChunkParamMgr(object):
         self.CCT = torch.nn.Embedding(self.chunk_num, 1, device=torch.cuda.current_device())
         self.CCT.weight.requires_grad_ = False
 
-        self.evict_backlist = set()
+        self.evict_backlist = torch.Tensor([]).cuda()
 
         self.num_hits_history = []
         self.num_miss_history = []
@@ -105,6 +111,8 @@ class ChunkParamMgr(object):
         self._cpu_to_cuda_elpase = 0
         self._cuda_to_cpu_elapse = 0
         self._cuda_to_cpu_numel = 0
+
+        self._find_cpu_chunk = 0
 
     def _chunk_in_cuda(self, chunk_id) -> bool:
         for slot_idx, (_chunk_id, offset) in self.cached_chunk_table.items():
@@ -165,9 +173,7 @@ class ChunkParamMgr(object):
         with record_function("(zhg) get unique indices"):
             # unique(IMT(ids)) -> chunk ids
             # self.IMT_Embedding(ids)
-
             chunk_id_set = torch.unique(self.IMP_chunkid_Embedding(ids))
-            # chunk_id_set = set(chunk_id_set.cpu().numpy())
 
             assert len(chunk_id_set) <= self.cuda_chunk_num, \
                 f"the input indices pull {len(chunk_id_set)} chunks, " \
@@ -175,15 +181,18 @@ class ChunkParamMgr(object):
                 f"please increase cuda_chunk_num and chunk_size or shrink batch size"
             self.evict_backlist = chunk_id_set
 
-        with record_function("(zhg) get cpu chunk indices"):
-            # #input_id / moving chunk size
-            # move chunk_id_set to CUDA
-            # cpu_chunk_id_list = []
-            # for chunk_id in chunk_id_set:
-            #     if not self._chunk_in_cuda(chunk_id):
-            #         cpu_chunk_id_list.append(chunk_id)
-
-            cpu_chunk_id_list = [cid for cid in chunk_id_set if cid not in self.cached_chunk_ids]
+        with Timer() as timer:
+            with record_function("(zhg) identify cpu chunk indices"):
+                # chunk_id_set = set(chunk_id_set.cpu().numpy())
+                # cpu_chunk_id_list = []
+                # for chunk_id in chunk_id_set:
+                #     if not self._chunk_in_cuda(chunk_id):
+                #         cpu_chunk_id_list.append(chunk_id)
+                # cpu_chunk_id_list = [cid for cid in chunk_id_set if cid not in self.cached_chunk_ids]
+                tmp = self.cpu_chunk_embedding(chunk_id_set.long())
+                cpu_chunk_id_list = chunk_id_set[torch.nonzero(tmp.view(-1))]
+                
+        self._find_cpu_chunk += timer.elapsed
 
         self.num_hits_history.append(len(chunk_id_set) - len(cpu_chunk_id_list))
         self.num_miss_history.append(len(cpu_chunk_id_list))
@@ -214,6 +223,7 @@ class ChunkParamMgr(object):
                 self._evict()
             self._admit(chunk_id)
 
+    @torch.no_grad()
     def _evict(self):
         """
         evict one chunk from cuda to cpu.
@@ -239,6 +249,9 @@ class ChunkParamMgr(object):
         self.cached_chunk_table.pop(min_slot_id)
         self.chunk_id_cuda_offset.pop(min_chunk_id)
         self.cached_chunk_ids.remove(min_chunk_id)
+        
+        # 1 on cpu
+        self.cpu_chunk_embedding.weight[int(min_chunk_id)] = torch.Tensor([1]).cuda()
 
         self._cuda_to_cpu_numel += self.chunk_size * self.embedding_dim
         self._cuda_to_cpu_elapse += timer.elapsed
@@ -278,6 +291,9 @@ class ChunkParamMgr(object):
         self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)
         self.cached_chunk_ids.append(chunk_id)
 
+        # 0 on cuda
+        self.cpu_chunk_embedding.weight[int(chunk_id)] = torch.Tensor([0]).cuda()
+
         self.chunk_id_cuda_offset[chunk_id] = slot_offset
         self.CCT.weight[int(chunk_id)] = int(slot_offset)
 
@@ -300,3 +316,5 @@ class ChunkParamMgr(object):
             print(
                 f"CPU->CUDA BWD {self._cpu_to_cuda_numel * self.elem_size_in_byte / 1e6 / self._cpu_to_cuda_elpase} MB/s {self._cpu_to_cuda_numel / 1e6} M elem"
             )
+        
+        print(f'find_cpu_chunk {self._find_cpu_chunk}')

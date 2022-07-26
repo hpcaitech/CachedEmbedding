@@ -39,6 +39,7 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
     else:
         raise RuntimeError(f"Unknown EB type: {embed_type}")
 
+    print('begin training')
     # grad = None
     with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -75,8 +76,8 @@ if __name__ == "__main__":
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
     batch_size = [2048]
-    embed_dim = 512
-    cache_sets = [50_000]
+    embed_dim = 8
+    cache_sets = [50000]
     cache_lines = [512]
 
     # # row-wise cache

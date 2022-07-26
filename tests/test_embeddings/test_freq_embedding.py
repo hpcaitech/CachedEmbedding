@@ -3,7 +3,7 @@ import torch
 
 from recsys.modules.embeddings import ChunkParamMgr, FreqAwareEmbeddingBag
 from recsys.testing.utils import synthesize_1d_sparse_feature
-
+from contexttimer import Timer
 # torch.set_printoptions(profile="full")
 
 
@@ -42,7 +42,7 @@ def test_chunkmgr_admit():
 
 @pytest.mark.parametrize('chunk_size', [1, 2, 4])
 def test_freq_aware_embed(chunk_size):
-    NUM_EMBEDDINGS, EMBEDDING_DIM = 128, 8
+    NUM_EMBEDDINGS, EMBEDDING_DIM = 12800, 8
     BATCH_SIZE = 8
 
     device = torch.device('cuda', 0)
@@ -65,29 +65,33 @@ def test_freq_aware_embed(chunk_size):
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
     ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
 
-    for i in range(50):
-        indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
-        res = model(indices, offsets)
-        ref_res = ref_model(indices, offsets)
-        assert torch.allclose(res, ref_res), f"model result: {res}, reference: {ref_res}"
+    with Timer() as timer:
+        for i in range(50):
+            indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
+            res = model(indices, offsets)
+            ref_res = ref_model(indices, offsets)
+            assert torch.allclose(res, ref_res), f"model result: {res}, reference: {ref_res}"
 
-        grad = torch.rand_like(res)
-        # comparing gradient here is nontrivial
-        res.backward(grad)
-        ref_res.backward(grad)
-        optimizer.step()
-        optimizer.zero_grad()
+            grad = torch.rand_like(res)
+            # comparing gradient here is nontrivial
+            res.backward(grad)
+            ref_res.backward(grad)
+            optimizer.step()
+            optimizer.zero_grad()
 
-        ref_optimizer.step()
-        ref_optimizer.zero_grad()
+            ref_optimizer.step()
+            ref_optimizer.zero_grad()
 
     model.chunk_weight_mgr.flush()
     model_weight = model.weight.detach().to(device)
     ref_weight = ref_model.weight.detach()
     assert torch.allclose(model_weight, ref_weight), \
         f"model weight: {model_weight[10:18, :8]}, reference: {ref_weight[10:18, :8]}"
-
+    
+    print(f'time {timer.elapsed}')
+    model.chunk_weight_mgr.print_comm_stats()
 
 if __name__ == '__main__':
     # test_freq_aware_embed()
-    test_freq_aware_embed(2)
+    for chunk_size in [1, 2, 4]:
+        test_freq_aware_embed(chunk_size)
