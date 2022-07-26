@@ -46,7 +46,8 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
                 batch = next(data_iter)
                 sparse_feature = batch.sparse_features.to(device)
 
-                res = model(sparse_feature.values(), sparse_feature.offsets())
+                with torch.no_grad():
+                    res = model.chunk_weight_mgr.prepare_ids(sparse_feature.values())
 
                 # grad = torch.randn_like(res) if grad is None else grad
                 # res.backward(grad)
@@ -73,7 +74,7 @@ if __name__ == "__main__":
     batch_size = [2048]
     embed_dim = 512
     cache_sets = [50_000]
-    cache_lines = [256, 512]
+    cache_lines = [512]
 
     # # row-wise cache
     # for bs in batch_size:
