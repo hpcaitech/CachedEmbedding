@@ -66,7 +66,9 @@ class ChunkParamMgr(object):
         self.IMP_offsetinchunk_Embedding.requires_grad_ = False
 
         # CachedChunkTable: dict(slot_idx, (chunk_id, offset)) in self.cuda_partial_weight
+        # TODO optimize access speed
         self.cached_chunk_table = {}
+        self.cached_chunk_ids = []
         # chunk_id, offset in cuda_partial_weight
         self.chunk_id_cuda_offset = {}
         # chunk_ids -> offset in cuda_partial_weight
@@ -165,7 +167,7 @@ class ChunkParamMgr(object):
             # self.IMT_Embedding(ids)
 
             chunk_id_set = torch.unique(self.IMP_chunkid_Embedding(ids))
-            chunk_id_set = set(chunk_id_set.cpu().numpy())
+            # chunk_id_set = set(chunk_id_set.cpu().numpy())
 
             assert len(chunk_id_set) <= self.cuda_chunk_num, \
                 f"the input indices pull {len(chunk_id_set)} chunks, " \
@@ -176,10 +178,12 @@ class ChunkParamMgr(object):
         with record_function("(zhg) get cpu chunk indices"):
             # #input_id / moving chunk size
             # move chunk_id_set to CUDA
-            cpu_chunk_id_list = []
-            for chunk_id in chunk_id_set:
-                if not self._chunk_in_cuda(chunk_id):
-                    cpu_chunk_id_list.append(chunk_id)
+            # cpu_chunk_id_list = []
+            # for chunk_id in chunk_id_set:
+            #     if not self._chunk_in_cuda(chunk_id):
+            #         cpu_chunk_id_list.append(chunk_id)
+
+            cpu_chunk_id_list = [cid for cid in chunk_id_set if cid not in self.cached_chunk_ids]
 
         self.num_hits_history.append(len(chunk_id_set) - len(cpu_chunk_id_list))
         self.num_miss_history.append(len(cpu_chunk_id_list))
@@ -189,7 +193,7 @@ class ChunkParamMgr(object):
         with record_function("(zhg) cache update"):
             self._prepare_chunks_on_cuda(cpu_chunk_id_list)
 
-        self.evict_backlist.clear()
+        self.evict_backlist = torch.Tensor([]).cuda()
         # new ids chunk_offset + offset_in_chunk
         with record_function("(zhg) embed idx -> cache chunk id"):
             mapped_ids = self._id_to_cached_cuda_id(ids).long().view(ids.shape)
@@ -234,6 +238,7 @@ class ChunkParamMgr(object):
         # update CCT
         self.cached_chunk_table.pop(min_slot_id)
         self.chunk_id_cuda_offset.pop(min_chunk_id)
+        self.cached_chunk_ids.remove(min_chunk_id)
 
         self._cuda_to_cpu_numel += self.chunk_size * self.embedding_dim
         self._cuda_to_cpu_elapse += timer.elapsed
@@ -271,6 +276,8 @@ class ChunkParamMgr(object):
 
         # update the CCT
         self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)
+        self.cached_chunk_ids.append(chunk_id)
+
         self.chunk_id_cuda_offset[chunk_id] = slot_offset
         self.CCT.weight[int(chunk_id)] = int(slot_offset)
 
