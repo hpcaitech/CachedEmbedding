@@ -67,6 +67,7 @@ class ChunkParamMgr(object):
         # chunk_id, offset in cuda_partial_weight
         self.chunk_id_cuda_offset = {}
         # chunk_ids -> offset in cuda_partial_weight
+
         self.CCT = torch.nn.Embedding(self.chunk_num, 1, device=torch.cuda.current_device())
         self.CCT.weight.requires_grad_ = False
 
@@ -88,6 +89,7 @@ class ChunkParamMgr(object):
         Returns:
             torch.Tensor: a piece of memory in CPU weight corresponding to chunk id's payload. The tensor is 1-D.
         """
+
         return self.cpu_weight.data.view(-1).narrow(0,
                                                     int(chunk_id) * self.chunk_size * self.embedding_dim,
                                                     self.chunk_size * self.embedding_dim).view(
@@ -156,6 +158,7 @@ class ChunkParamMgr(object):
             torch.Tensor: indices on the cuda_partial_weight.
         """
         ids = ids.cuda()
+
         with record_function("(zhg) get unique indices"):
             chunk_id_set = set()
             chunk_counter = dict()
@@ -170,6 +173,7 @@ class ChunkParamMgr(object):
                 f"which is larger than the preseted {self.cuda_chunk_num}, " \
                 f"please increase cuda_chunk_num and chunk_size or shrink batch size"
             self.evict_backlist = chunk_id_set
+
 
         with record_function("(zhg) get cpu chunk indices"):
             # #input_id / moving chunk size
