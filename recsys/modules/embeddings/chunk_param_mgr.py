@@ -44,9 +44,6 @@ class ChunkParamMgr(object):
 
         # IndexMappingTable: id-> chunk_id, offset_in_chunk
         # a static table build by reorder.
-        # TODO(jiarui) optimize indexing speed using Embedding.
-        self.index_mapping_table = []
-
         # id -> chunk_id
         self.IMP_chunkid_Embedding = torch.nn.Embedding(self.num_embeddings,
                                                         1,
@@ -68,7 +65,6 @@ class ChunkParamMgr(object):
         # CachedChunkTable: dict(slot_idx, (chunk_id, offset)) in self.cuda_partial_weight
         # TODO optimize access speed
         self.cached_chunk_table = {}
-        self.cached_chunk_ids = []
         # 0 on cuda, 1 on cpu
         self.cpu_chunk_embedding = torch.nn.Embedding(self.chunk_num, 1, 
                                 _weight = torch.ones(self.chunk_num, 1, device = torch.cuda.current_device()).view(self.chunk_num, 1), 
@@ -183,15 +179,9 @@ class ChunkParamMgr(object):
 
         with Timer() as timer:
             with record_function("(zhg) identify cpu chunk indices"):
-                # chunk_id_set = set(chunk_id_set.cpu().numpy())
-                # cpu_chunk_id_list = []
-                # for chunk_id in chunk_id_set:
-                #     if not self._chunk_in_cuda(chunk_id):
-                #         cpu_chunk_id_list.append(chunk_id)
-                # cpu_chunk_id_list = [cid for cid in chunk_id_set if cid not in self.cached_chunk_ids]
                 tmp = self.cpu_chunk_embedding(chunk_id_set.long())
                 cpu_chunk_id_list = chunk_id_set[torch.nonzero(tmp.view(-1))]
-                
+
         self._find_cpu_chunk += timer.elapsed
 
         self.num_hits_history.append(len(chunk_id_set) - len(cpu_chunk_id_list))
@@ -248,7 +238,6 @@ class ChunkParamMgr(object):
         # update CCT
         self.cached_chunk_table.pop(min_slot_id)
         self.chunk_id_cuda_offset.pop(min_chunk_id)
-        self.cached_chunk_ids.remove(min_chunk_id)
         
         # 1 on cpu
         self.cpu_chunk_embedding.weight[int(min_chunk_id)] = torch.Tensor([1]).cuda()
@@ -289,7 +278,6 @@ class ChunkParamMgr(object):
 
         # update the CCT
         self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)
-        self.cached_chunk_ids.append(chunk_id)
 
         # 0 on cuda
         self.cpu_chunk_embedding.weight[int(chunk_id)] = torch.Tensor([0]).cuda()
