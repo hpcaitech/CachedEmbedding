@@ -47,8 +47,10 @@ class ChunkParamMgr(object):
         # TODO(jiarui) optimize indexing speed using Embedding.
         self.index_mapping_table = []
 
+        # id -> chunk_id
         self.IMP_chunkid_Embedding = torch.nn.Embedding(self.num_embeddings, 1, _weight = torch.range(0, self.num_embeddings - 1).view(self.num_embeddings, 1),
                                     device=torch.cuda.current_device())
+        # id -> offset_in_chunk
         self.IMP_offsetinchunk_Embedding = torch.nn.Embedding(self.num_embeddings, 1, _weight = torch.range(0, self.num_embeddings - 1).view(self.num_embeddings, 1), 
                                     device=torch.cuda.current_device())
         self.IMP_chunkid_Embedding.requires_grad_ = False
@@ -58,6 +60,11 @@ class ChunkParamMgr(object):
         self.cached_chunk_table = {}
         # chunk_id, offset in cuda_partial_weight
         self.chunk_id_cuda_offset = {}
+        # chunk_ids -> offset in cuda_partial_weight
+        self.CCT = torch.nn.Embedding(self.chunk_num, 1, 
+                                      device=torch.cuda.current_device())
+        self.CCT.weight.requires_grad_ = False
+
         self.evict_backlist = set()
 
         self.num_hits_history = []
@@ -113,7 +120,9 @@ class ChunkParamMgr(object):
             self.IMP_offsetinchunk_Embedding.weight[_id] = offset_in_chunk
         self.IMP_chunkid_Embedding = self.IMP_chunkid_Embedding.cuda()
         self.IMP_offsetinchunk_Embedding = self.IMP_offsetinchunk_Embedding.cuda()
-    def _id_to_cached_cuda_id(self, id: int) -> int:
+    
+    @torch.no_grad()
+    def _id_to_cached_cuda_id(self, ids: torch.Tensor) -> torch.Tensor:
         """
         convert an id to index in self.partial_cuda_weight
 
@@ -123,8 +132,14 @@ class ChunkParamMgr(object):
         Returns:
             int: the index in self.partial_cuda_weight
         """
-        chunk_id, offset_in_chunk = self.index_mapping_table[id]
-        return int(self.chunk_id_cuda_offset[chunk_id] + offset_in_chunk)
+        ids = ids.view(-1)
+        chunk_ids = self.IMP_chunkid_Embedding(ids).long()
+        offset_in_chunks = self.IMP_offsetinchunk_Embedding(ids)
+
+        ret = self.CCT(chunk_ids.view(-1)) + offset_in_chunks
+        return ret
+        # chunk_id, offset_in_chunk = self.index_mapping_table[id]
+        # return int(self.chunk_id_cuda_offset[chunk_id] + offset_in_chunk)
 
     @torch.no_grad()
     def prepare_ids(self, ids: torch.Tensor) -> torch.Tensor:
@@ -181,10 +196,10 @@ class ChunkParamMgr(object):
         self.evict_backlist.clear()
         # new ids chunk_offset + offset_in_chunk
         with record_function("(zhg) embed idx -> cache chunk id"):
-            mapped_ids = torch.tensor([self._id_to_cached_cuda_id(id) for id in ids.view(-1)],
-                                      device=ids.device,
-                                      dtype=ids.dtype).view(ids.shape)
-
+            # mapped_ids = torch.tensor([self._id_to_cached_cuda_id(ids)],
+            #                           device=ids.device,
+            #                           dtype=ids.dtype).view(ids.shape)
+            mapped_ids = self._id_to_cached_cuda_id(ids).long().view(ids.shape)
         return mapped_ids
 
     def _prepare_chunks_on_cuda(self, chunk_ids: List[int]) -> None:
@@ -238,6 +253,7 @@ class ChunkParamMgr(object):
                 return slot_idx
         return -1
 
+    @torch.no_grad()
     def _admit(self, chunk_id: int):
         """
         move in chunk_id to CUDA
@@ -263,6 +279,7 @@ class ChunkParamMgr(object):
         # update the CCT
         self.cached_chunk_table[slot_id] = (chunk_id, slot_offset)
         self.chunk_id_cuda_offset[chunk_id] = slot_offset
+        self.CCT.weight[int(chunk_id)] = int(slot_offset)
 
         self._cpu_to_cuda_numel += self.chunk_size * self.embedding_dim
         self._cpu_to_cuda_elpase += timer.elapsed

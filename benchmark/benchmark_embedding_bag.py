@@ -30,7 +30,7 @@ def benchmark(num_embeddings, embedding_dim, batch_size):
 
 if __name__ == '__main__':
     for batch_size in [16*1024, 32 * 1024]:
-        for embedding_dim in [64, 128]:
+        for embedding_dim in [1, 64, 128]:
             for num_embeddings in [30000, 30*10**4, 60*10**4]:
                 benchmark(num_embeddings, embedding_dim, batch_size)
 
