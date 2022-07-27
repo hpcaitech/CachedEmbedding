@@ -10,7 +10,6 @@
 # You may need additional modifications for the file name,
 # and you can evenly split the whole dataset into 7 days by split_criteo_kaggle.py
 
-
 import argparse
 import os
 import sys
@@ -38,11 +37,9 @@ def tsv_to_npys(
         dense = [safe_cast(row[i], int, 0) for i in range(1, 1 + INT_FEATURE_COUNT)]
         sparse = [
             int(safe_cast(row[i], str, "0") or "0", 16)
-            for i in range(
-                1 + INT_FEATURE_COUNT, 1 + INT_FEATURE_COUNT + CAT_FEATURE_COUNT
-            )
+            for i in range(1 + INT_FEATURE_COUNT, 1 + INT_FEATURE_COUNT + CAT_FEATURE_COUNT)
         ]
-        return dense, sparse, label  # pyre-ignore[7]
+        return dense, sparse, label    # pyre-ignore[7]
 
     dense, sparse, labels = [], [], []
     for (row_dense, row_sparse, row_label) in CriteoIterDataPipe([in_file], row_mapper=row_mapper):
@@ -73,9 +70,7 @@ def tsv_to_npys(
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Criteo tsv -> npy preprocessing script."
-    )
+    parser = argparse.ArgumentParser(description="Criteo tsv -> npy preprocessing script.")
     parser.add_argument(
         "--input_dir",
         type=str,
@@ -113,10 +108,8 @@ def main(argv: List[str]) -> None:
         dense_out_file_path = os.path.join(output_dir, f + "_dense.npy")
         sparse_out_file_path = os.path.join(output_dir, f + "_sparse.npy")
         labels_out_file_path = os.path.join(output_dir, f + "_labels.npy")
-        print(
-            f"Processing {in_file_path}. Outputs will be saved to {dense_out_file_path}"
-            f", {sparse_out_file_path}, and {labels_out_file_path}..."
-        )
+        print(f"Processing {in_file_path}. Outputs will be saved to {dense_out_file_path}"
+              f", {sparse_out_file_path}, and {labels_out_file_path}...")
         tsv_to_npys(
             in_file_path,
             dense_out_file_path,

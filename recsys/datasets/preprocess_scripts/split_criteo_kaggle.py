@@ -16,16 +16,16 @@ def main(data_dir, output_dir, days=7):
     files = [os.path.join(data_dir, f"train.txt_{split}.npy") for split in STAGES]
     total_rows = BinaryCriteoUtils.get_shape_from_npy(files[0])[0]
 
-    indices = list(range(0, total_rows, total_rows//days))
+    indices = list(range(0, total_rows, total_rows // days))
     ranges = []
-    for i in range(len(indices)-1):
+    for i in range(len(indices) - 1):
         left_idx = indices[i]
-        right_idx = indices[i+1] if i < len(indices)-2 else total_rows
+        right_idx = indices[i + 1] if i < len(indices) - 2 else total_rows
         ranges.append((left_idx, right_idx))
 
     for _s, _f in zip(STAGES, files):
         for day, (left_idx, right_idx) in enumerate(ranges):
-            chunk = BinaryCriteoUtils.load_npy_range(_f, left_idx, right_idx-left_idx)
+            chunk = BinaryCriteoUtils.load_npy_range(_f, left_idx, right_idx - left_idx)
             output_fname = f"day_{day}_{_s}.npy"
             np.save(os.path.join(output_dir, output_fname), chunk)
 
