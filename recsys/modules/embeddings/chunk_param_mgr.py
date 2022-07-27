@@ -49,25 +49,11 @@ class ChunkParamMgr(object):
         # id -> chunk_id
         self.IMP_chunkid = torch.arange(self.num_embeddings, dtype=torch.long,
                                         device=torch.cuda.current_device()).unsqueeze(1)
-        # self.IMP_chunkid_Embedding = torch.nn.Embedding(self.num_embeddings,
-        #                                                 1,
-        #                                                 _weight=torch.arange(0,
-        #                                                                      self.num_embeddings,
-        #                                                                      dtype=torch.float32,
-        #                                                                      device=torch.cuda.current_device()).view(
-        #                                                                          self.num_embeddings, 1))
-
         # id -> offset_in_chunk
         self.IMP_offsetinchunk = torch.arange(self.num_embeddings, dtype=torch.long,
                                               device=torch.cuda.current_device()).unsqueeze(1)
-        # self.IMP_offsetinchunk_Embedding = torch.nn.Embedding(
-        #     self.num_embeddings,
-        #     1,
-        #     _weight=torch.arange(0, self.num_embeddings, dtype=torch.float32,
-        #                          device=torch.cuda.current_device()).view(self.num_embeddings, 1))
 
         # CachedChunkTable: dict(slot_idx, (chunk_id, offset)) in self.cuda_partial_weight
-        # self.cached_chunk_table = {}
         self.cached_chunk_table = torch.empty(cuda_chunk_num, 2, device=torch.cuda.current_device(),
                                               dtype=torch.long).fill_(-1)
 
@@ -204,17 +190,28 @@ class ChunkParamMgr(object):
         """
         evict one chunk from cuda to cpu.
         """
-        min_chunk_id = 2 * self.chunk_num
-        min_slot_id = None
-        min_offset = None
-        for slot_id, row in enumerate(self.cached_chunk_table):
-            if 0 <= row[0] < min_chunk_id and row[0] not in self.evict_backlist:
-                min_chunk_id = row[0].item()
-                min_slot_id = slot_id
-                min_offset = row[1].item()
+        # min_chunk_id = 2 * self.chunk_num
+        # min_slot_id = None
+        # min_offset = None
+        # for slot_id, row in enumerate(self.cached_chunk_table):
+        #     if 0 <= row[0] < min_chunk_id and row[0] not in self.evict_backlist:
+        #         min_chunk_id = row[0].item()
+        #         min_slot_id = slot_id
+        #         min_offset = row[1].item()
+        #
+        # if min_slot_id is None:
+        #     raise RuntimeError("Can not evict a chunk")
+        mask = torch.logical_or(torch.isin(self.cached_chunk_table[:, 0], self.evict_backlist),
+                                self.cached_chunk_table[:, 0] == -1)
+        buf = self.cached_chunk_table[mask, 0].clone()
+        idx = torch.nonzero(mask).squeeze(1)
+        self.cached_chunk_table[:, 0].index_fill_(0, idx, self.chunk_num)
+        min_row, min_slot_id = torch.min(self.cached_chunk_table[:, 0], dim=0)
 
-        if min_slot_id is None:
-            raise RuntimeError("Can not evict a chunk")
+        min_chunk_id, min_offset = self.cached_chunk_table[min_slot_id]
+        min_chunk_id = min_chunk_id.item()
+        # recover
+        self.cached_chunk_table[:, 0].index_copy_(0, idx, buf)
 
         with Timer() as timer:
             cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, min_offset * self.embedding_dim,
@@ -254,7 +251,6 @@ class ChunkParamMgr(object):
             slot_id = self._evict()
 
         slot_offset = slot_id * self.chunk_size
-
         # copy payload from cpu to cuda
         with Timer() as timer:
             cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, slot_offset * self.embedding_dim,
@@ -276,7 +272,7 @@ class ChunkParamMgr(object):
         """flush all CUDA chunks to CPU.
         The function is usually called after training finished.
         """
-        while torch.sum(self.cached_chunk_table[:, 0] >= 0) > 0:
+        while self._cuda_available_chunk_num < self.cuda_chunk_num:
             self._evict()
 
     def print_comm_stats(self):
