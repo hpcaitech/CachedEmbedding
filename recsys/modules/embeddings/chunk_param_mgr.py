@@ -43,9 +43,10 @@ class ChunkParamMgr(object):
         # pin memory cpu for higher CPU-GPU copy bandwidth
         self.cpu_weight = weight.pin_memory()
 
-        # IndexMappingTable: id-> chunk_id, offset_in_chunk
-        # a static table build by reorder.
-        # TODO(jiarui) optimize indexing speed using Embedding.
+        # IndexMappingTable (IMP): implemented with two lists. 
+        # id-> chunk_id and id -> offset_in_chunk
+        # It is a static table build by reorder and never changes during training
+
         # id -> chunk_id
         self.IMP_chunkid = torch.arange(self.num_embeddings, dtype=torch.long,
                                         device=torch.cuda.current_device()).unsqueeze(1)
@@ -53,7 +54,7 @@ class ChunkParamMgr(object):
         self.IMP_offsetinchunk = torch.arange(self.num_embeddings, dtype=torch.long,
                                               device=torch.cuda.current_device()).unsqueeze(1)
 
-        # CachedChunkTable: dict(slot_idx, (chunk_id, offset)) in self.cuda_partial_weight
+        # CachedChunkTable: dict(slot_idx, (chunk_id, offset)), slot_ids is the offset in Tensor self.cuda_partial_weight
         self.cached_chunk_table = torch.empty(cuda_chunk_num, 2, device=torch.cuda.current_device(),
                                               dtype=torch.long).fill_(-1)
 
@@ -227,7 +228,6 @@ class ChunkParamMgr(object):
 
         # update CCT
         self.cached_chunk_table[min_slot_id, 0] = -1
-        self.chunk_id_cuda_offset.pop(min_chunk_id)
 
         self._cuda_available_chunk_num += 1
 
@@ -250,7 +250,7 @@ class ChunkParamMgr(object):
         Args:
             chunk_id (int): the id of chunk to be moved in
         """
-        # find a free slot
+        # find a free slot in partial cuda weight
         slot_id = self._find_free_cuda_slot()
 
         if slot_id == -1:
@@ -267,7 +267,6 @@ class ChunkParamMgr(object):
         # update the CCT
         self.cached_chunk_table[slot_id].data.copy_(
             torch.tensor((chunk_id, slot_offset), device=torch.cuda.current_device(), dtype=torch.float32))
-        self.chunk_id_cuda_offset[chunk_id] = slot_offset
         self.CCT[chunk_id] = slot_offset
 
         self._cuda_available_chunk_num -= 1
