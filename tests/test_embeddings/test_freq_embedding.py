@@ -14,7 +14,6 @@ def test_uneven_weight(chunk_size):
     assert mgr.cpu_weight.shape[0] % chunk_size == 0
 
 
-@pytest.mark.skip
 def test_chunkmgr_admit():
     model = torch.nn.EmbeddingBag(10000, 128)
     # 10 chunks, 5 in cuda
@@ -22,23 +21,25 @@ def test_chunkmgr_admit():
     assert mgr.cuda_chunk_num == 5
 
     mgr._admit(1)
-    assert mgr.cached_chunk_table[0] == (1, 0)
+    assert not mgr._chunk_in_cuda(2)
+    assert mgr._chunk_in_cuda(1)
+
+    # print(mgr.cached_chunk_table)
     mgr._admit(8)
-    assert mgr.cached_chunk_table[1] == (8, 1000)
 
     # now 3 chunk is available
-    assert mgr.cuda_available_chunk_num() == 3
+    assert mgr.cuda_available_chunk_num == 3
 
     mgr._evict()
-    assert mgr.cuda_available_chunk_num() == 4
+    assert mgr.cuda_available_chunk_num == 4
 
     mgr._prepare_chunks_on_cuda([9, 6, 5])
     mgr._prepare_chunks_on_cuda([3, 4, 5])
-    print(mgr.cached_chunk_table)
-    mgr.print_comm_stats()
+    # print(mgr.cached_chunk_table)
+    # mgr.print_comm_stats()
 
     mgr.flush()
-    assert mgr.cuda_available_chunk_num() == 5
+    assert mgr.cuda_available_chunk_num == 5
 
 
 @pytest.mark.parametrize('chunk_size', [1, 2, 4])
@@ -91,4 +92,5 @@ def test_freq_aware_embed(chunk_size):
 
 if __name__ == '__main__':
     # test_freq_aware_embed()
-    test_freq_aware_embed(2)
+    test_chunkmgr_admit()
+    # test_freq_aware_embed(2)
