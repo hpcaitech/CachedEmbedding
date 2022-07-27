@@ -21,6 +21,7 @@ class ChunkParamMgr(object):
         self.chunk_size = chunk_size
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_chunk_num = cuda_chunk_num
+        self._cuda_available_chunk_num = cuda_chunk_num
 
         self.elem_size_in_byte = weight.element_size()
 
@@ -111,8 +112,9 @@ class ChunkParamMgr(object):
                 return True
         return False
 
+    @property
     def cuda_available_chunk_num(self):
-        return self.cuda_chunk_num - len(self.cached_chunk_table)
+        return self._cuda_available_chunk_num
 
     @torch.no_grad()
     def reorder(self, ids_freq_mapping: Optional[List[int]] = None):
@@ -163,24 +165,15 @@ class ChunkParamMgr(object):
         """
         with record_function("(zhg) get unique indices"):
             # unique(IMT(ids)) -> chunk ids
-            # self.IMT_Embedding(ids)
-
             chunk_id_set = torch.unique(self.IMP_chunkid_Embedding(ids).long())
-            # chunk_id_set = set(chunk_id_set.cpu().numpy())
 
             assert len(chunk_id_set) <= self.cuda_chunk_num, \
                 f"the input indices pull {len(chunk_id_set)} chunks, " \
-                f"which is larger than the preseted {self.cuda_chunk_num}, " \
+                f"which is larger than the presented {self.cuda_chunk_num}, " \
                 f"please increase cuda_chunk_num and chunk_size or shrink batch size"
             self.evict_backlist = chunk_id_set
 
         with record_function("(zhg) get cpu chunk indices"):
-            # #input_id / moving chunk size
-            # move chunk_id_set to CUDA
-            # cpu_chunk_id_list = []
-            # for chunk_id in chunk_id_set:
-            #     if not self._chunk_in_cuda(chunk_id):
-            #         cpu_chunk_id_list.append(chunk_id)
             cpu_chunk_id_list = chunk_id_set[torch.isin(chunk_id_set, self.cached_chunk_table[:, 0],
                                                         invert=True)].tolist()
 
@@ -204,13 +197,6 @@ class ChunkParamMgr(object):
             chunk_ids (List[int]): the chunks to be placed on CUDA
         """
         for chunk_id in chunk_ids:
-            # this if-statement is logically overlapped with line #125,
-            # but it is required to pass the unit test
-            # if self._chunk_in_cuda(chunk_id):
-            #     continue
-            #
-            # if self._find_free_cuda_slot() == -1:
-            #     self._evict()
             self._admit(chunk_id)
 
     def _evict(self):
@@ -238,15 +224,17 @@ class ChunkParamMgr(object):
         self.cached_chunk_table[min_slot_id, 0] = -1
         self.chunk_id_cuda_offset.pop(min_chunk_id)
 
+        self._cuda_available_chunk_num += 1
+
         self._cuda_to_cpu_numel += self.chunk_size * self.embedding_dim
         self._cuda_to_cpu_elapse += timer.elapsed
         # self.num_write_back_history[-1] += 1
         return min_slot_id
 
     def _find_free_cuda_slot(self) -> int:
-        candidates = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)
-        if candidates.shape[0] == 0:
+        if self._cuda_available_chunk_num == 0:
             return -1
+        candidates = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)
         return candidates[0].item()
 
     @torch.no_grad()
@@ -277,6 +265,8 @@ class ChunkParamMgr(object):
             torch.tensor((chunk_id, slot_offset), device=torch.cuda.current_device(), dtype=torch.float32))
         self.chunk_id_cuda_offset[chunk_id] = slot_offset
         self.CCT.weight[int(chunk_id)] = int(slot_offset)
+
+        self._cuda_available_chunk_num -= 1
 
         self._cpu_to_cuda_numel += self.chunk_size * self.embedding_dim
         self._cpu_to_cuda_elpase += timer.elapsed
