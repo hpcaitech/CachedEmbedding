@@ -58,10 +58,6 @@ class ChunkParamMgr(object):
         self.cached_chunk_table = torch.empty(cuda_chunk_num, 2, device=torch.cuda.current_device(),
                                               dtype=torch.long).fill_(-1)
 
-        # chunk_id, offset in cuda_partial_weight
-        self.chunk_id_cuda_offset = {}
-        # chunk_ids -> offset in cuda_partial_weight
-
         self.CCT = torch.zeros(self.chunk_num, 1, device=torch.cuda.current_device(), dtype=torch.long)
 
         self.evict_backlist = set()
