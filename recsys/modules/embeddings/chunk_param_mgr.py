@@ -58,9 +58,10 @@ class ChunkParamMgr(object):
         self.cached_chunk_table = torch.empty(cuda_chunk_num, 2, device=torch.cuda.current_device(),
                                               dtype=torch.long).fill_(-1)
 
-        self.CCT = torch.zeros(self.chunk_num, 1, device=torch.cuda.current_device(), dtype=torch.long)
+        # chunk_id, slot_offset. slot_offset is the offset in chunk, -1 means chunk_id not in CUDA.
+        self.CCT = torch.zeros(self.chunk_num, 1, device=torch.cuda.current_device(), dtype=torch.long).fill_(-1)
 
-        self.evict_backlist = set()
+        self.evict_backlist = torch.tensor([], device = torch.cuda.current_device())
 
         self.num_hits_history = []
         self.num_miss_history = []
@@ -90,11 +91,8 @@ class ChunkParamMgr(object):
         self._cuda_to_cpu_elapse = 0
         self._cuda_to_cpu_numel = 0
 
-    def _chunk_in_cuda(self, chunk_id) -> bool:
-        for slot_idx, (_chunk_id, offset) in self.cached_chunk_table.items():
-            if _chunk_id == chunk_id:
-                return True
-        return False
+    def _chunk_in_cuda(self, chunk_id : int) -> bool:
+        return self.CCT[chunk_id] != -1
 
     @property
     def cuda_available_chunk_num(self):
@@ -183,9 +181,11 @@ class ChunkParamMgr(object):
         for chunk_id in chunk_ids:
             self._admit(chunk_id)
 
-    def _evict(self):
+    def _evict(self) -> int:
         """
         evict one chunk from cuda to cpu.
+        Returns: 
+        (int) : the slot id be evicted.
         """
         # min_chunk_id = 2 * self.chunk_num
         # min_slot_id = None
@@ -222,8 +222,9 @@ class ChunkParamMgr(object):
                                        self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
             self.cpu_weight_chunk(min_chunk_id).data.copy_(cuda_tensor)
 
-        # update CCT
+        # update CCT, min_slot_id is evicted from cuda
         self.cached_chunk_table[min_slot_id, 0] = -1
+        self.CCT[min_chunk_id] = -1
 
         self._cuda_available_chunk_num += 1
 

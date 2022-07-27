@@ -77,7 +77,8 @@ if __name__ == "__main__":
     batch_size = [2048]
     embed_dim = 512
     cache_sets = [50_000]
-    cache_lines = [512]
+    # chunk size
+    cache_lines = [8] 
 
     # # row-wise cache
     # for bs in batch_size:
