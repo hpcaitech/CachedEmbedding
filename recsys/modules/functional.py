@@ -8,9 +8,10 @@ except ImportError:
     class ReduceOp:
         SUM = None
         MAX = None
+        AVG = None
     DISTLogger.warning("Unsupported `ReduceOp` for distributed computing", ranks=[0])
 
-_reduce_ops = dict(sum=ReduceOp.SUM, max=ReduceOp.MAX, mean=ReduceOp.SUM)
+_reduce_ops = dict(sum=ReduceOp.SUM, max=ReduceOp.MAX, mean=ReduceOp.AVG)
 
 
 def _reduce(x, parallel_mode, reduce_op: str):
