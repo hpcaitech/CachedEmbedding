@@ -185,7 +185,7 @@ class ChunkParamMgr(object):
         with record_function("(zhg) cache update"):
             self._prepare_chunks_on_cuda(cpu_chunk_id_list)
 
-        self.evict_backlist = []
+        self.evict_backlist = torch.tensor([], device=chunk_id_set.device, dtype=chunk_id_set.dtype)
         # new ids chunk_offset + offset_in_chunk
         with record_function("(zhg) embed idx -> cache chunk id"):
             mapped_ids = self._id_to_cached_cuda_id(ids).long().view(ids.shape)
