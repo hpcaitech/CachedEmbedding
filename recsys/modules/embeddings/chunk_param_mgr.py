@@ -61,6 +61,7 @@ class ChunkParamMgr(object):
         # chunk_id, slot_offset. slot_offset is the offset in chunk, -1 means chunk_id not in CUDA.
         self.CCT = torch.zeros(self.chunk_num, 1, device=torch.cuda.current_device(), dtype=torch.long).fill_(-1)
 
+
         self.evict_backlist = torch.tensor([], device = torch.cuda.current_device())
 
         self.num_hits_history = []
@@ -224,7 +225,9 @@ class ChunkParamMgr(object):
 
         # update CCT, min_slot_id is evicted from cuda
         self.cached_chunk_table[min_slot_id, 0] = -1
+
         self.CCT[min_chunk_id] = -1
+
 
         self._cuda_available_chunk_num += 1
 
