@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from recsys.datasets import criteo
 from recsys.datasets.feature_counter import GlobalFeatureCounter, CriteoSparseProcessor
 
-CRITEO_PATH = "../criteo_kaggle"
+CRITEO_PATH = "../criteo_kaggle_data"
 NUM_EMBED = 33762577
 
 

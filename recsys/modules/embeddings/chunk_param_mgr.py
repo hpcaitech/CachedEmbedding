@@ -201,17 +201,24 @@ class ChunkParamMgr(object):
         #
         # if min_slot_id is None:
         #     raise RuntimeError("Can not evict a chunk")
+        max_int_value = 2147483647
+
         mask = torch.logical_or(torch.isin(self.cached_chunk_table[:, 0], self.evict_backlist),
                                 self.cached_chunk_table[:, 0] == -1)
         buf = self.cached_chunk_table[mask, 0].clone()
         idx = torch.nonzero(mask).squeeze(1)
-        self.cached_chunk_table[:, 0].index_fill_(0, idx, self.chunk_num)
+        self.cached_chunk_table[:, 0].index_fill_(0, idx, max_int_value)
         min_row, min_slot_id = torch.min(self.cached_chunk_table[:, 0], dim=0)
 
         min_chunk_id, min_offset = self.cached_chunk_table[min_slot_id]
+        
+        if min_chunk_id == max_int_value:
+            raise RuntimeError("Can not evict a chunk")
+         
         min_chunk_id = min_chunk_id.item()
         # recover
         self.cached_chunk_table[:, 0].index_copy_(0, idx, buf)
+
 
         with Timer() as timer:
             cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, min_offset * self.embedding_dim,
