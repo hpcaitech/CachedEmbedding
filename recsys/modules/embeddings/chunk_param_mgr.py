@@ -7,9 +7,9 @@ from contexttimer import Timer
 
 class ChunkParamMgr(object):
     """
-    Manage Chunk Weights on CPU and CUDA memory.
-    CPU maintains a replica of the original weight. CUDA maintains a subset of weight chunks.
-    During training, we need to swapin/out chunks.
+    Manage Weights in Chunk on CPU and CUDA memory.
+    CPU maintains a replica of the original weight. CUDA maintains a subset of weight chunks used in the comming computation.
+    During training, GPU needs to admit/evict chunks.
     """
 
     def __init__(self,
@@ -91,7 +91,7 @@ class ChunkParamMgr(object):
         return self._cuda_available_chunk_num
 
     @torch.no_grad()
-    def reorder(self, ids_freq_mapping: Optional[List[int]] = None):
+    def reorder(self, ids_freq_mapping: Optional[List[int]] = None, use_warmup = True):
         """reorder the cpu_weight according to ids' frequency in dataset before training.
         Also Build the IndexMappingTable, aka index_mapping_table.
         Execute only once before training.
@@ -110,7 +110,22 @@ class ChunkParamMgr(object):
         self.IMP_chunkid.data.copy_(divs)
         self.IMP_offsetinchunk.data.copy_(mods)
 
-
+        # Warmup the cuda cache by moving high freq chunks (lowest chunk id) to cuda
+        if use_warmup:
+            empty_ratio = 0.3
+            print(f'begin warmup CUDA Cache. Please wait in patient. empty ratio {empty_ratio}')
+            print(f'before warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.')
+            with Timer() as timer:
+                cid = 0
+                # fill in 1-empty_ratio of the cache space, left empty_ratio not used.
+                while self.cuda_available_chunk_num > int(self.cuda_chunk_num * empty_ratio):
+                    self._admit(cid)
+                    cid = cid+1
+                print(f'cid {cid}')
+            print(f'Cache warmup finished cost {timer.elapsed} sec.')
+            print(f'after warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.')
+        self._reset_comm_stats()
+    
     def flush(self):
         """flush all CUDA chunks to CPU.
         The function is usually called after training finished.
