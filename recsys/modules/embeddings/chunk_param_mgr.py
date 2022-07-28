@@ -43,7 +43,7 @@ class ChunkParamMgr(object):
         # pin memory cpu for higher CPU-GPU copy bandwidth
         self.cpu_weight = weight.pin_memory()
 
-        # IndexMappingTable (IMP): implemented with two lists. 
+        # IndexMappingTable (IMP): implemented with two lists.
         # id-> chunk_id and id -> offset_in_chunk
         # It is a static table build by reorder and never changes during training
 
@@ -61,8 +61,7 @@ class ChunkParamMgr(object):
         # chunk_id, slot_offset. slot_offset is the offset in chunk, -1 means chunk_id not in CUDA.
         self.CCT = torch.zeros(self.chunk_num, 1, device=torch.cuda.current_device(), dtype=torch.long).fill_(-1)
 
-
-        self.evict_backlist = torch.tensor([], device = torch.cuda.current_device())
+        self.evict_backlist = torch.tensor([], device=torch.cuda.current_device())
 
         self.num_hits_history = []
         self.num_miss_history = []
@@ -92,7 +91,7 @@ class ChunkParamMgr(object):
         self._cuda_to_cpu_elapse = 0
         self._cuda_to_cpu_numel = 0
 
-    def _chunk_in_cuda(self, chunk_id : int) -> bool:
+    def _chunk_in_cuda(self, chunk_id: int) -> bool:
         return self.CCT[chunk_id] != -1
 
     @property
@@ -108,7 +107,8 @@ class ChunkParamMgr(object):
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq. if None no reorder
         """
         if ids_freq_mapping is not None:
-            sorted_idx = torch.argsort(torch.from_numpy(ids_freq_mapping).cuda(), descending=True)
+            tmp_idx = torch.argsort(torch.from_numpy(ids_freq_mapping).cuda(), descending=True)
+            sorted_idx = torch.argsort(tmp_idx)
         else:
             sorted_idx = torch.arange(self.num_embeddings, device=torch.cuda.current_device(), dtype=torch.long)
 
@@ -209,14 +209,13 @@ class ChunkParamMgr(object):
         min_row, min_slot_id = torch.min(self.cached_chunk_table[:, 0], dim=0)
 
         min_chunk_id, min_offset = self.cached_chunk_table[min_slot_id]
-        
+
         if min_chunk_id == max_int_value:
             raise RuntimeError("Can not evict a chunk")
-         
+
         min_chunk_id = min_chunk_id.item()
         # recover
         self.cached_chunk_table[:, 0].index_copy_(0, idx, buf)
-
 
         with Timer() as timer:
             cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, min_offset * self.embedding_dim,
@@ -227,7 +226,6 @@ class ChunkParamMgr(object):
         self.cached_chunk_table[min_slot_id, 0] = -1
 
         self.CCT[min_chunk_id] = -1
-
 
         self._cuda_available_chunk_num += 1
 

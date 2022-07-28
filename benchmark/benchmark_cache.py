@@ -7,6 +7,7 @@
 import itertools
 from tqdm import tqdm
 from contexttimer import Timer
+from contextlib import nullcontext
 
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
@@ -41,11 +42,12 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
 
     # grad = None
     with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                     schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
-                     profile_memory=True,
-                     on_trace_ready=tensorboard_trace_handler(
-                         f"log/b{batch_size}-e{embedding_dim}-num_chunk{cache_sets}-chunk_size{cache_lines}")) as prof:
+        # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        #              schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
+        #              profile_memory=True,
+        #              on_trace_ready=tensorboard_trace_handler(
+        #                  f"log/b{batch_size}-e{embedding_dim}-num_chunk{cache_sets}-chunk_size{cache_lines}")) as prof:
+        with nullcontext():
             for it in itertools.count():
                 batch = next(data_iter)
                 sparse_feature = batch.sparse_features.to(device)
@@ -57,7 +59,7 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
                 # res.backward(grad)
                 #
                 # model.zero_grad()
-                prof.step()
+                # prof.step()
                 running_hits = sum(model.num_hits_history)
                 running_miss = sum(model.num_miss_history)
                 hit_rate = running_hits / (running_hits + running_miss)
@@ -65,7 +67,7 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
                                   f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
                                   f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
                 t.update()
-                if it == 25:
+                if it == 50:
                     break
 
 
@@ -75,10 +77,10 @@ if __name__ == "__main__":
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
     batch_size = [2048]
-    embed_dim = 512
+    embed_dim = 32
     cache_sets = [50_000]
     # chunk size
-    cache_lines = [8] 
+    cache_lines = [256]
 
     # # row-wise cache
     # for bs in batch_size:

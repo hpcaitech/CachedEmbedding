@@ -1,5 +1,6 @@
 import pytest
 import torch
+import numpy as np
 
 from recsys.modules.embeddings import ChunkParamMgr, FreqAwareEmbeddingBag
 from recsys.testing.utils import synthesize_1d_sparse_feature
@@ -40,6 +41,32 @@ def test_chunkmgr_admit():
 
     mgr.flush()
     assert mgr.cuda_available_chunk_num == 5
+
+
+def test_reorder_with_freq():
+    num_embed = 100
+    chunk_size = 5
+    num_chunk = 5
+
+    id_freq_map = np.random.randint(10000, size=(num_embed,))
+    sorted_idx = np.flipud(np.argsort(id_freq_map)).tolist()
+    chunkid, offset_in_chunk = [], []
+    for i in range(100):
+        idx = sorted_idx.index(i)
+        chunkid.append(idx // chunk_size)
+        offset_in_chunk.append(idx % chunk_size)
+
+    chunkid = torch.tensor(chunkid, dtype=torch.long, device=torch.cuda.current_device()).unsqueeze(1)
+    offset_in_chunk = torch.tensor(offset_in_chunk, dtype=torch.long, device=torch.cuda.current_device()).unsqueeze(1)
+
+    weight = torch.rand(num_embed, 2)
+    mgr = ChunkParamMgr(weight, chunk_size, num_chunk)
+
+    mgr.reorder(id_freq_map)
+
+    assert torch.allclose(chunkid, mgr.IMP_chunkid), f"chunk id: {chunkid}, mgr: {mgr.IMP_chunkid}"
+    assert torch.allclose(offset_in_chunk, mgr.IMP_offsetinchunk), \
+        f"offset in chunk: {offset_in_chunk}, mgr: {mgr.IMP_offsetinchunk}"
 
 
 @pytest.mark.parametrize('chunk_size', [1, 2, 4])
@@ -92,5 +119,6 @@ def test_freq_aware_embed(chunk_size):
 
 if __name__ == '__main__':
     # test_freq_aware_embed()
-    test_chunkmgr_admit()
+    # test_chunkmgr_admit()
     # test_freq_aware_embed(2)
+    test_reorder_with_freq()
