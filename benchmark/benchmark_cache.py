@@ -8,6 +8,7 @@ import itertools
 from tqdm import tqdm
 from contexttimer import Timer
 from contextlib import nullcontext
+import numpy as np
 
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
@@ -41,6 +42,7 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
         raise RuntimeError(f"Unknown EB type: {embed_type}")
 
     # grad = None
+    hist_str = None
     with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
         # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         #              schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
@@ -60,15 +62,20 @@ def main(batch_size, embedding_dim, cache_sets, cache_lines, embed_type, id_freq
                 #
                 # model.zero_grad()
                 # prof.step()
-                running_hits = sum(model.num_hits_history)
-                running_miss = sum(model.num_miss_history)
+                running_hits = model.num_hits_history[-1]    # sum(model.num_hits_history)
+                running_miss = model.num_miss_history[-1]    # sum(model.num_miss_history)
                 hit_rate = running_hits / (running_hits + running_miss)
                 t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
                                   f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
                                   f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
                 t.update()
-                if it == 50:
+                if it == 100:
+                    hit_hist = np.array(model.num_hits_history)
+                    miss_hist = np.array(model.num_miss_history)
+                    hist = hit_hist / (hit_hist + miss_hist)
+                    hist_str = '\n'.join([f"{it}it: {_h*100:.2f} %" for it, _h in enumerate(hist.tolist())])
                     break
+    print(f"hit rate history: {hist_str}")
 
 
 if __name__ == "__main__":
@@ -78,9 +85,9 @@ if __name__ == "__main__":
 
     batch_size = [2048]
     embed_dim = 32
-    cache_sets = [50_000]
+    cache_sets = [10_000]
     # chunk size
-    cache_lines = [256]
+    cache_lines = [512]
 
     # # row-wise cache
     # for bs in batch_size:
