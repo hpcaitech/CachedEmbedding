@@ -142,8 +142,17 @@ class ChunkParamMgr(object):
         """flush all CUDA chunks to CPU.
         The function is usually called after training finished.
         """
-        while self._cuda_available_chunk_num < self.cuda_chunk_num:
-            self._evict()
+        slots = torch.nonzero(self.cached_chunk_table[:, 0] > -1).squeeze(1)
+        chunk_ids = self.cached_chunk_table[slots, 0]
+        chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, slots).cpu()
+        self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, chunk_ids.cpu(), chunks)
+        self.cached_chunk_table[:, 0].index_fill_(0, slots, -1)
+        self.CCT.squeeze(1).index_fill_(0, chunk_ids, -1)
+        self._cuda_available_chunk_num += slots.numel()
+
+        assert self._cuda_available_chunk_num == self.cuda_chunk_num
+        assert torch.all(self.CCT == -1).item()
+        assert torch.all(self.cached_chunk_table[:, 0] == -1).item()
 
     def print_comm_stats(self):
         if self._cuda_to_cpu_numel > 0:
