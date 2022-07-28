@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
     batch_size = [2048]
     embed_dim = 32
-    cache_ratio = [1]
+    cache_ratio = [0.5]
     # chunk size
     cache_lines = [1024]
 
