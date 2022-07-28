@@ -96,6 +96,7 @@ class ChunkParamMgr(object):
         Execute only once before training.
         Args:
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq. if None no reorder
+            warmup_ratio (float): the amount of chunks preloaded in cuda cache
         """
         if ids_freq_mapping is not None:
             tmp_idx = torch.argsort(torch.from_numpy(ids_freq_mapping).cuda(), descending=True)

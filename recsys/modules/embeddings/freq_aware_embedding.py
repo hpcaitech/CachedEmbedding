@@ -27,6 +27,7 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
             chunk_size (int): chunk size
             cuda_chunk_num (int): number of chunk can be hosted in CUDA memory
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq
+            warmup_ratio (float): the amount of chunks preloaded in cuda cache
         """
         self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
