@@ -17,7 +17,7 @@ from recsys.modules.embeddings import CachedEmbeddingBag, FreqAwareEmbeddingBag
 from data_utils import get_dataloader, get_id_freq_map, NUM_EMBED
 
 
-def benchmark_cache_embedding(batch_size, embedding_dim, cache_ratio, cache_lines, embed_type, id_freq_map=None):
+def benchmark_cache_embedding(batch_size, embedding_dim, cache_ratio, cache_lines, embed_type, id_freq_map=None, use_warmup = True):
     dataloader = get_dataloader('train', batch_size)
     chunk_num = (NUM_EMBED + cache_lines - 1) // cache_lines
     cuda_chunk_num = int(cache_ratio * chunk_num)
@@ -40,7 +40,7 @@ def benchmark_cache_embedding(batch_size, embedding_dim, cache_ratio, cache_line
             model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True).to(device)
         print(f"model init: {timer.elapsed:.2f}s")
         with Timer() as timer:
-            model._preprocess(cache_lines, cuda_chunk_num, id_freq_map)
+            model.preprocess(cache_lines, cuda_chunk_num, id_freq_map, use_warmup=use_warmup)
         print(f"reorder: {timer.elapsed:.2f}s")
     else:
         raise RuntimeError(f"Unknown EB type: {embed_type}")
@@ -80,7 +80,7 @@ def benchmark_cache_embedding(batch_size, embedding_dim, cache_ratio, cache_line
                     hist_str = '\n'.join([f"{it}it: {_h*100:.2f} %" for it, _h in enumerate(hist.tolist())])
                     break
     print(f"hit rate history: {hist_str}")
-
+    model.chunk_weight_mgr.print_comm_stats()
 
 if __name__ == "__main__":
     with Timer() as timer:
@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
     batch_size = [2048]
     embed_dim = 32
-    cache_ratio = [0.2, 0.4]
+    cache_ratio = [1]
     # chunk size
     cache_lines = [1024]
 
@@ -102,10 +102,11 @@ if __name__ == "__main__":
     for bs in batch_size:
         for cr in cache_ratio:
             for cl in cache_lines:
-                try:
-                    benchmark_cache_embedding(bs, embed_dim, cache_ratio=cr, cache_lines=cl, embed_type='chunk', id_freq_map=id_freq_map)
-                    print('=' * 50 + '\n')
+                for use_warmup in [True]:
+                    try:
+                        benchmark_cache_embedding(bs, embed_dim, cache_ratio=cr, cache_lines=cl, embed_type='chunk', id_freq_map=id_freq_map, use_warmup = use_warmup)
+                        print('=' * 50 + '\n')
 
-                except AssertionError as ae:
-                    print(f"batch size: {bs}, cache ratio: {cr}, num cache lines: {cl}, raise error: {ae}")
-                    print('=' * 50 + '\n')
+                    except AssertionError as ae:
+                        print(f"batch size: {bs}, cache ratio: {cr}, num cache lines: {cl}, raise error: {ae}")
+                        print('=' * 50 + '\n')
