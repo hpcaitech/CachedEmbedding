@@ -23,7 +23,7 @@ def benchmark_cache_embedding(batch_size,
                               cache_lines,
                               embed_type,
                               id_freq_map=None,
-                              use_warmup=True):
+                              warmup_ratio=0.):
     dataloader = get_dataloader('train', batch_size)
     chunk_num = (NUM_EMBED + cache_lines - 1) // cache_lines
     cuda_chunk_num = int(cache_ratio * chunk_num)
@@ -46,7 +46,7 @@ def benchmark_cache_embedding(batch_size,
             model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True).to(device)
         print(f"model init: {timer.elapsed:.2f}s")
         with Timer() as timer:
-            model.preprocess(cache_lines, cuda_chunk_num, id_freq_map, use_warmup=use_warmup)
+            model.preprocess(cache_lines, cuda_chunk_num, id_freq_map, warmup_ratio=warmup_ratio)
         print(f"reorder: {timer.elapsed:.2f}s")
     else:
         raise RuntimeError(f"Unknown EB type: {embed_type}")
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     for bs in batch_size:
         for cr in cache_ratio:
             for cl in cache_lines:
-                for use_warmup in [True]:
+                for warmup_ratio in [0.7]:
                     try:
                         benchmark_cache_embedding(bs,
                                                   embed_dim,
@@ -116,7 +116,7 @@ if __name__ == "__main__":
                                                   cache_lines=cl,
                                                   embed_type='chunk',
                                                   id_freq_map=id_freq_map,
-                                                  use_warmup=use_warmup)
+                                                  warmup_ratio=warmup_ratio)
                         print('=' * 50 + '\n')
 
                     except AssertionError as ae:

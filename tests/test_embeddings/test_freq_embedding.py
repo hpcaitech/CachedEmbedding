@@ -81,7 +81,7 @@ def test_freq_aware_embed(chunk_size):
         mode='mean',
         include_last_offset=True,
     ).to(device)
-    model._preprocess(chunk_size=chunk_size, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
+    model.preprocess(chunk_size=chunk_size, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
 
     assert model.weight.shape[0] == NUM_EMBEDDINGS
     ref_model = torch.nn.EmbeddingBag.from_pretrained(model.weight.detach().to(device),

@@ -85,13 +85,12 @@ class ChunkParamMgr(object):
                                                     self.chunk_size * self.embedding_dim).view(
                                                         self.chunk_size, self.embedding_dim)
 
-
     @property
     def cuda_available_chunk_num(self):
         return self._cuda_available_chunk_num
 
     @torch.no_grad()
-    def reorder(self, ids_freq_mapping: Optional[List[int]] = None, use_warmup = True):
+    def reorder(self, ids_freq_mapping: Optional[List[int]] = None, warmup_ratio=0.7):
         """reorder the cpu_weight according to ids' frequency in dataset before training.
         Also Build the IndexMappingTable, aka index_mapping_table.
         Execute only once before training.
@@ -111,21 +110,33 @@ class ChunkParamMgr(object):
         self.IMP_offsetinchunk.data.copy_(mods)
 
         # Warmup the cuda cache by moving high freq chunks (lowest chunk id) to cuda
-        if use_warmup:
-            empty_ratio = 0.3
-            print(f'begin warmup CUDA Cache. Please wait in patient. empty ratio {empty_ratio}')
-            print(f'before warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.')
+        preload_chunk_num = int(np.ceil(self.cuda_chunk_num * warmup_ratio))
+        if preload_chunk_num > 0:
+            print(f'begin warmup CUDA Cache. Please wait in patient. preload {preload_chunk_num} chunks')
+            print(
+                f'before warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.'
+            )
             with Timer() as timer:
-                cid = 0
-                # fill in 1-empty_ratio of the cache space, left empty_ratio not used.
-                while self.cuda_available_chunk_num > int(self.cuda_chunk_num * empty_ratio):
-                    self._admit(cid)
-                    cid = cid+1
-                print(f'cid {cid}')
+                # extract chunks from cpu weight
+                preload_chunk_ids = torch.arange(preload_chunk_num)
+                preload_chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, preload_chunk_ids).cuda()
+
+                # move chunks to cuda cache
+                preload_slot_ids = preload_chunk_ids.cuda()
+                self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, preload_slot_ids, preload_chunks)
+
+                # update auxiliary info
+                slot_offsets = preload_slot_ids.unsqueeze(1) * self.chunk_size
+                self.cached_chunk_table[preload_slot_ids] = torch.cat([preload_slot_ids.unsqueeze(1), slot_offsets],
+                                                                      dim=1)
+                self.CCT[preload_slot_ids] = slot_offsets
+                self._cuda_available_chunk_num -= preload_chunk_num
             print(f'Cache warmup finished cost {timer.elapsed} sec.')
-            print(f'after warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.')
+            print(
+                f'after warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.'
+            )
         self._reset_comm_stats()
-    
+
     def flush(self):
         """flush all CUDA chunks to CPU.
         The function is usually called after training finished.
@@ -142,7 +153,6 @@ class ChunkParamMgr(object):
             print(
                 f"CPU->CUDA BWD {self._cpu_to_cuda_numel * self.elem_size_in_byte / 1e6 / self._cpu_to_cuda_elpase} MB/s {self._cpu_to_cuda_numel / 1e6} M elem"
             )
-
 
     @torch.no_grad()
     def _id_to_cached_cuda_id(self, ids: torch.Tensor) -> torch.Tensor:
@@ -208,7 +218,6 @@ class ChunkParamMgr(object):
 
     def _chunk_in_cuda(self, chunk_id: int) -> bool:
         return self.CCT[chunk_id] != -1
-
 
     def _prepare_chunks_on_cuda(self, chunk_ids: List[int]) -> None:
         """prepare chunks in chunk_ids on CUDA memory
