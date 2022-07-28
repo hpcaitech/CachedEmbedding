@@ -193,8 +193,7 @@ class ChunkParamMgr(object):
             self.evict_backlist = chunk_id_set
 
         with record_function("(zhg) get cpu chunk indices"):
-            cpu_chunk_id_list = chunk_id_set[torch.isin(chunk_id_set, self.cached_chunk_table[:, 0],
-                                                        invert=True)].tolist()
+            cpu_chunk_id_list = chunk_id_set[torch.isin(chunk_id_set, self.cached_chunk_table[:, 0], invert=True)]
 
         self.num_hits_history.append(len(chunk_id_set) - len(cpu_chunk_id_list))
         self.num_miss_history.append(len(cpu_chunk_id_list))
@@ -219,13 +218,39 @@ class ChunkParamMgr(object):
     def _chunk_in_cuda(self, chunk_id: int) -> bool:
         return self.CCT[chunk_id] != -1
 
-    def _prepare_chunks_on_cuda(self, chunk_ids: List[int]) -> None:
+    @torch.no_grad()
+    def _prepare_chunks_on_cuda(self, chunk_ids: torch.Tensor) -> None:
         """prepare chunks in chunk_ids on CUDA memory
         Args:
-            chunk_ids (List[int]): the chunks to be placed on CUDA
+            chunk_ids (torch.Tensor): the chunks to be placed on CUDA
         """
-        for chunk_id in chunk_ids:
-            self._admit(chunk_id)
+        evict_num = chunk_ids.numel() - self.cuda_available_chunk_num
+        if evict_num > 0:
+            mask = torch.isin(self.cached_chunk_table[:, 0], self.evict_backlist)
+            buf = self.cached_chunk_table[mask, 0].clone()
+            idx = torch.nonzero(mask).squeeze(1)
+
+            self.cached_chunk_table[:, 0].index_fill_(0, idx, -2)
+            evict_slot_ids = torch.argsort(self.cached_chunk_table[:, 0], descending=True)[:evict_num]
+            self.cached_chunk_table[:, 0].index_copy_(0, idx, buf)
+
+            evict_info = self.cached_chunk_table[evict_slot_ids]
+
+            chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids).cpu()
+            self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), chunks)
+
+            self.cached_chunk_table[:, 0].index_fill_(0, evict_slot_ids, -1)
+            self.CCT.squeeze(1).index_fill_(0, evict_info[:, 0], -1)
+            self._cuda_available_chunk_num += evict_num
+
+        slots = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)[:chunk_ids.numel()]
+        chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, chunk_ids.cpu()).cuda()
+        self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, slots, chunks)
+        slot_offsets = slots * self.chunk_size
+        self.cached_chunk_table[slots, 0] = chunk_ids
+        self.cached_chunk_table[slots, 1] = slot_offsets
+        self.CCT.squeeze(1).index_copy_(0, chunk_ids, slot_offsets)
+        self._cuda_available_chunk_num -= chunk_ids.numel()
 
     def _evict(self) -> int:
         """
