@@ -17,7 +17,13 @@ from recsys.modules.embeddings import CachedEmbeddingBag, FreqAwareEmbeddingBag
 from data_utils import get_dataloader, get_id_freq_map, NUM_EMBED
 
 
-def benchmark_cache_embedding(batch_size, embedding_dim, cache_ratio, cache_lines, embed_type, id_freq_map=None, use_warmup = True):
+def benchmark_cache_embedding(batch_size,
+                              embedding_dim,
+                              cache_ratio,
+                              cache_lines,
+                              embed_type,
+                              id_freq_map=None,
+                              use_warmup=True):
     dataloader = get_dataloader('train', batch_size)
     chunk_num = (NUM_EMBED + cache_lines - 1) // cache_lines
     cuda_chunk_num = int(cache_ratio * chunk_num)
@@ -45,7 +51,7 @@ def benchmark_cache_embedding(batch_size, embedding_dim, cache_ratio, cache_line
     else:
         raise RuntimeError(f"Unknown EB type: {embed_type}")
 
-    # grad = None
+    grad = None
     hist_str = None
     with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
         # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -58,13 +64,12 @@ def benchmark_cache_embedding(batch_size, embedding_dim, cache_ratio, cache_line
                 batch = next(data_iter)
                 sparse_feature = batch.sparse_features.to(device)
 
-                with torch.no_grad():
-                    res = model.chunk_weight_mgr.prepare_ids(sparse_feature.values())
+                res = model(sparse_feature.values(), sparse_feature.offsets())
 
-                # grad = torch.randn_like(res) if grad is None else grad
-                # res.backward(grad)
-                #
-                # model.zero_grad()
+                grad = torch.randn_like(res) if grad is None else grad
+                res.backward(grad)
+
+                model.zero_grad()
                 # prof.step()
                 running_hits = model.num_hits_history[-1]    # sum(model.num_hits_history)
                 running_miss = model.num_miss_history[-1]    # sum(model.num_miss_history)
@@ -81,6 +86,7 @@ def benchmark_cache_embedding(batch_size, embedding_dim, cache_ratio, cache_line
                     break
     print(f"hit rate history: {hist_str}")
     model.chunk_weight_mgr.print_comm_stats()
+
 
 if __name__ == "__main__":
     with Timer() as timer:
@@ -104,7 +110,13 @@ if __name__ == "__main__":
             for cl in cache_lines:
                 for use_warmup in [True]:
                     try:
-                        benchmark_cache_embedding(bs, embed_dim, cache_ratio=cr, cache_lines=cl, embed_type='chunk', id_freq_map=id_freq_map, use_warmup = use_warmup)
+                        benchmark_cache_embedding(bs,
+                                                  embed_dim,
+                                                  cache_ratio=cr,
+                                                  cache_lines=cl,
+                                                  embed_type='chunk',
+                                                  id_freq_map=id_freq_map,
+                                                  use_warmup=use_warmup)
                         print('=' * 50 + '\n')
 
                     except AssertionError as ae:
