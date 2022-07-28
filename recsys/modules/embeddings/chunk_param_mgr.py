@@ -188,51 +188,38 @@ class ChunkParamMgr(object):
         Returns: 
         (int) : the slot id be evicted.
         """
-        # min_chunk_id = 2 * self.chunk_num
-        # min_slot_id = None
-        # min_offset = None
-        # for slot_id, row in enumerate(self.cached_chunk_table):
-        #     if 0 <= row[0] < min_chunk_id and row[0] not in self.evict_backlist:
-        #         min_chunk_id = row[0].item()
-        #         min_slot_id = slot_id
-        #         min_offset = row[1].item()
-        #
-        # if min_slot_id is None:
-        #     raise RuntimeError("Can not evict a chunk")
-        max_int_value = 2147483647
-
         mask = torch.logical_or(torch.isin(self.cached_chunk_table[:, 0], self.evict_backlist),
                                 self.cached_chunk_table[:, 0] == -1)
         buf = self.cached_chunk_table[mask, 0].clone()
         idx = torch.nonzero(mask).squeeze(1)
-        self.cached_chunk_table[:, 0].index_fill_(0, idx, max_int_value)
-        min_row, min_slot_id = torch.min(self.cached_chunk_table[:, 0], dim=0)
+        self.cached_chunk_table[:, 0].index_fill_(0, idx, -1)
+        max_row, max_slot_id = torch.max(self.cached_chunk_table[:, 0], dim=0)
 
-        min_chunk_id, min_offset = self.cached_chunk_table[min_slot_id]
+        max_chunk_id, max_offset = self.cached_chunk_table[max_slot_id]
 
-        if min_chunk_id == max_int_value:
+        if max_chunk_id == -1:
             raise RuntimeError("Can not evict a chunk")
 
-        min_chunk_id = min_chunk_id.item()
+        max_chunk_id = max_chunk_id.item()
         # recover
         self.cached_chunk_table[:, 0].index_copy_(0, idx, buf)
 
         with Timer() as timer:
-            cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, min_offset * self.embedding_dim,
+            cuda_tensor = torch.narrow(self.cuda_partial_weight.view(-1), 0, max_offset * self.embedding_dim,
                                        self.chunk_size * self.embedding_dim).view(self.chunk_size, self.embedding_dim)
-            self.cpu_weight_chunk(min_chunk_id).data.copy_(cuda_tensor)
+            self.cpu_weight_chunk(max_chunk_id).data.copy_(cuda_tensor)
 
         # update CCT, min_slot_id is evicted from cuda
-        self.cached_chunk_table[min_slot_id, 0] = -1
+        self.cached_chunk_table[max_slot_id, 0] = -1
 
-        self.CCT[min_chunk_id] = -1
+        self.CCT[max_chunk_id] = -1
 
         self._cuda_available_chunk_num += 1
 
         self._cuda_to_cpu_numel += self.chunk_size * self.embedding_dim
         self._cuda_to_cpu_elapse += timer.elapsed
         # self.num_write_back_history[-1] += 1
-        return min_slot_id
+        return max_slot_id
 
     def _find_free_cuda_slot(self) -> int:
         if self._cuda_available_chunk_num == 0:
