@@ -85,14 +85,6 @@ class ChunkParamMgr(object):
                                                     self.chunk_size * self.embedding_dim).view(
                                                         self.chunk_size, self.embedding_dim)
 
-    def _reset_comm_stats(self):
-        self._cpu_to_cuda_numel = 0
-        self._cpu_to_cuda_elpase = 0
-        self._cuda_to_cpu_elapse = 0
-        self._cuda_to_cpu_numel = 0
-
-    def _chunk_in_cuda(self, chunk_id: int) -> bool:
-        return self.CCT[chunk_id] != -1
 
     @property
     def cuda_available_chunk_num(self):
@@ -117,6 +109,25 @@ class ChunkParamMgr(object):
 
         self.IMP_chunkid.data.copy_(divs)
         self.IMP_offsetinchunk.data.copy_(mods)
+
+
+    def flush(self):
+        """flush all CUDA chunks to CPU.
+        The function is usually called after training finished.
+        """
+        while self._cuda_available_chunk_num < self.cuda_chunk_num:
+            self._evict()
+
+    def print_comm_stats(self):
+        if self._cuda_to_cpu_numel > 0:
+            print(
+                f"CUDA->CPU BWD {self._cuda_to_cpu_numel * self.elem_size_in_byte / 1e6 / self._cuda_to_cpu_elapse} MB/s {self._cuda_to_cpu_numel / 1e6} M elem"
+            )
+        if self._cpu_to_cuda_numel > 0:
+            print(
+                f"CPU->CUDA BWD {self._cpu_to_cuda_numel * self.elem_size_in_byte / 1e6 / self._cpu_to_cuda_elpase} MB/s {self._cpu_to_cuda_numel / 1e6} M elem"
+            )
+
 
     @torch.no_grad()
     def _id_to_cached_cuda_id(self, ids: torch.Tensor) -> torch.Tensor:
@@ -173,6 +184,16 @@ class ChunkParamMgr(object):
         with record_function("(zhg) embed idx -> cache chunk id"):
             mapped_ids = self._id_to_cached_cuda_id(ids).view(ids.shape)
         return mapped_ids
+
+    def _reset_comm_stats(self):
+        self._cpu_to_cuda_numel = 0
+        self._cpu_to_cuda_elpase = 0
+        self._cuda_to_cpu_elapse = 0
+        self._cuda_to_cpu_numel = 0
+
+    def _chunk_in_cuda(self, chunk_id: int) -> bool:
+        return self.CCT[chunk_id] != -1
+
 
     def _prepare_chunks_on_cuda(self, chunk_ids: List[int]) -> None:
         """prepare chunks in chunk_ids on CUDA memory
@@ -258,20 +279,3 @@ class ChunkParamMgr(object):
 
         self._cpu_to_cuda_numel += self.chunk_size * self.embedding_dim
         self._cpu_to_cuda_elpase += timer.elapsed
-
-    def flush(self):
-        """flush all CUDA chunks to CPU.
-        The function is usually called after training finished.
-        """
-        while self._cuda_available_chunk_num < self.cuda_chunk_num:
-            self._evict()
-
-    def print_comm_stats(self):
-        if self._cuda_to_cpu_numel > 0:
-            print(
-                f"CUDA->CPU BWD {self._cuda_to_cpu_numel * self.elem_size_in_byte / 1e6 / self._cuda_to_cpu_elapse} MB/s {self._cuda_to_cpu_numel / 1e6} M elem"
-            )
-        if self._cpu_to_cuda_numel > 0:
-            print(
-                f"CPU->CUDA BWD {self._cpu_to_cuda_numel * self.elem_size_in_byte / 1e6 / self._cpu_to_cuda_elpase} MB/s {self._cpu_to_cuda_numel / 1e6} M elem"
-            )
