@@ -1,5 +1,7 @@
 import math
-from typing import List, Optional, Union
+from collections import defaultdict
+from typing import Dict, List, Optional, Union
+from sympy import numbered_symbols
 
 import torch
 import torch.nn as nn
@@ -10,7 +12,7 @@ import numpy as np
 from recsys import DISTMGR, ParallelMode, DISTLogger
 from ..functional import reduce_forward
 
-np.random.seed(1)  
+np.random.seed(111)  
 
 
 class LoadBalanceManager(object):
@@ -23,6 +25,8 @@ class LoadBalanceManager(object):
         self.base_emb_dim = base_emb_dim
         self.do_fair = do_fair
         self.device = device
+        self.all_feat_offsets = torch.cumsum(torch.tensor([0]+self.embeddings_per_feat,
+                                                          device=self.device),dim=0)
         if not self.do_fair:
             self._shuffle_initialize(disable_random_behavior)
         else:
@@ -128,15 +132,15 @@ class LoadBalanceManager(object):
             return self.emb_dim
     
     def get_qr_bucket_size(self, rank: int) -> int:
+        """deprecated as qr embedding is no longer of use"""
         if not self.do_fair:
             assert rank in range(len(self.qr_bucket_sizes))
             return self.qr_bucket_sizes[rank]
         else:
             return self.qr_bucket_size
         
-    def shard_tensor(self, _input: Tensor, rank: int) -> Tensor:
-        assert _input.dim() == 2 \
-            and _input.size(1) == len(self.embeddings_per_feat)
+    def shard_tensor_deprecated(self, _input: Tensor, rank: int) -> Tensor:
+        assert _input.dim() == 2 and _input.size(1) == len(self.embeddings_per_feat)
         offsets = self.get_offsets(rank)
         if not self.do_fair:
             group = self.get_group(rank)
@@ -190,17 +194,56 @@ class LoadBalanceManager(object):
                     return _cinput[:,feat_id:feat_id+1] + offsets
                 else:
                     raise ValueError('input tensor and embeddings_per_feat do not match. Double check inputs.')
-            
+         
+    def shard_tensor(self, _input: Tensor, rank:int) -> Tensor:
+        """simpler and more correct shard_tensor function"""
+        assert self.do_fair, 'offset only supports fair division'
+        assert _input.dim() == 2 and _input.size(1) == len(self.embeddings_per_feat)
+        if self.device is not None:
+            assert _input.device == self.device, 'input device {x1} should be consistent with lbmgr device {x2}'\
+                                .format(x1=_input.device,x2=self.device)
+        group = self.get_group(rank)
+        _cinput = _input[:,group].clone() + self.all_feat_offsets[group]
+        assert torch.max(_cinput) < self.all_feat_offsets[-1], \
+            'input tensor should not have offsets added beforehand'
+        num_embeddings_this_rank = self.get_num_embeddings_on_rank(rank)
+        lower_bnd = rank * num_embeddings_this_rank
+        upper_bnd = (rank+1) * num_embeddings_this_rank \
+                            if rank != self.num_groups-1 \
+                            else self.all_feat_offsets[-1]
+        # shard input tensor into expected internal
+        _cinput = _cinput - lower_bnd
+        # _cinput = torch.max(torch.ones(_cinput.size(1), device=self.device) \
+        #                     * lower_bnd, _cinput) - lower_bnd
+        # _cinput = torch.min(torch.ones(_cinput.size(1), device=self.device) \
+        #                     * (upper_bnd-lower_bnd-1), _cinput)
+        return _cinput.to(torch.int64)
+        
+    def shard_1d_tensor(self) -> Tensor:
+        """current idea is to reshape it and trigger shard_tensor()"""
+        pass
+         
+    def shard_weights(self, weights: Tensor, rank: int) -> Tensor:
+        assert weights.dim() == 2 and weights.size(0) == self.all_feat_offsets[-1]
+        if not self.do_fair:
+            group = self.get_group(rank)
+            offsets = torch.cumsum(self.embeddings_per_feat, dim=0)
+            shard_weights = []
+            for i in range(1,len(self.embeddings_per_feat)):
+                if i in group:
+                    shard_weights.append(weights[offsets[i-1]:offsets[i],:])
+            return torch.cat(shard_weights, dim=0)
+        else:
+            num_embeddings = self.get_num_embeddings_on_rank(rank)
+            if rank == self.num_groups - 1:
+                return weights[num_embeddings*rank:,:]
+            return weights[num_embeddings*rank:num_embeddings*(rank+1),:]
+         
     def get_embeddings_per_feat(self) -> List[int]:
         return self.embeddings_per_feat
 
     def get_base_dim(self) -> int:
         return self.base_emb_dim
-
-
-class AdaEmbeddingBag(nn.Module):
-    """Adaptive Embedding Bag [Work In-Progress]"""
-    pass
 
 
 class QREmbeddingBag(nn.Module):
@@ -279,7 +322,7 @@ class QREmbeddingBag(nn.Module):
                                              per_sample_weights, self.include_last_offset, self.r_padding_idx) # R-embedding
 
         # Use multiplication as a combiner operation
-        output_parallel = quotient_embed + remainder_embed
+        output_parallel = quotient_embed * remainder_embed
         assert output_parallel.size() == (input_.size(0), self.embedding_dim)
         return output_parallel
 
@@ -347,6 +390,8 @@ class BlockEmbeddingBag(nn.Module):
         self.num_embeddings = num_embeddings
         self.block_embedding_dim = block_embedding_dim
         self.base_embedding_dim = base_embedding_dim
+        self.device = device
+        self.dtype = dtype
         
         print('Saved params (M)',(self.num_embeddings*(self.base_embedding_dim-self.block_embedding_dim)\
                                 - self.block_embedding_dim*self.base_embedding_dim)/1_000_000)
@@ -370,10 +415,10 @@ class BlockEmbeddingBag(nn.Module):
         
         if embed_w is None:
             self.embed_weight = nn.Parameter(
-                torch.empty(num_embeddings, block_embedding_dim, device=device, dtype=dtype))
-            if padding_idx is not None:
+                torch.empty(num_embeddings, block_embedding_dim, device=self.device, dtype=dtype))
+            if self.padding_idx is not None:
                 with torch.no_grad():
-                    self.embed_weight[padding_idx].fill_(0)
+                    self.embed_weight[self.padding_idx].fill_(0)
             init_method(self.embed_weight)
         else:
             assert list(embed_w.shape) == [num_embeddings, block_embedding_dim]
@@ -384,7 +429,7 @@ class BlockEmbeddingBag(nn.Module):
         else:
             if linear_w is None:
                 self.linear_weight = nn.Parameter(
-                    torch.empty(base_embedding_dim, block_embedding_dim, device=device, dtype=dtype))
+                    torch.empty(base_embedding_dim, block_embedding_dim, device=self.device, dtype=dtype))
                 init_method(self.linear_weight)
             else:
                 assert list(linear_w.shape) == [base_embedding_dim, block_embedding_dim], \
@@ -392,7 +437,8 @@ class BlockEmbeddingBag(nn.Module):
                         ".format(x1=list(linear_w.shape), x2=[block_embedding_dim, base_embedding_dim])
                 self.linear_weight = nn.Parameter(linear_w, requires_grad=(not freeze_w))
 
-    def forward(self, input_, offsets=None, per_sample_weights=None):
+    def forward(self, input_: Tensor, offsets=None, per_sample_weights=None):
+        input_ = self.handle_unexpected_inputs(input_)
         output_parallel = F.embedding_bag(input_, self.embed_weight, offsets, self.max_norm, self.norm_type,
                                           self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
                                           self.include_last_offset, self.padding_idx)
@@ -402,6 +448,24 @@ class BlockEmbeddingBag(nn.Module):
         
         assert output_parallel.size() == (input_.size(0), self.base_embedding_dim)
         return output_parallel
+    
+    def handle_unexpected_inputs(self, input_: Tensor) -> Tensor:
+        if torch.max(input_) > self.num_embeddings or torch.min(input_) < 0:
+            if self.padding_idx is None:
+                self.padding_idx = self.num_embeddings
+                _embed_weight = torch.empty((self.num_embeddings+1, self.block_embedding_dim),
+                                            device=self.device, dtype=self.dtype)
+                _extra_weight = torch.zeros((1, self.block_embedding_dim),
+                                            device=self.device, dtype=self.dtype)
+                _embed_weight.data.copy_(torch.cat(self.embed_weight.data,
+                                                   _extra_weight.data,
+                                                   dim=0))
+                self.embed_weight = nn.Parameter(_embed_weight)
+                with torch.no_grad():
+                    self.embed_weight[self.padding_idx].fill_(0)
+            print(input_[(input_ >= self.num_embeddings) | (input_ < 0)])
+            input_[(input_ >= self.num_embeddings) | (input_ < 0)] = self.padding_idx
+        return input_
 
     @classmethod
     def from_pretrained(cls,
@@ -415,6 +479,8 @@ class BlockEmbeddingBag(nn.Module):
                         sparse: bool = False,
                         include_last_offset: bool = False,
                         padding_idx: Optional[int] = None,
+                        device = None,
+                        dtype = None,
                         init_method = nn.init.xavier_normal_) -> 'BlockEmbeddingBag':
         assert len(weights) == 2 and weights[0].dim() == 2, \
             'Both embedding and linear weights are expected \n \
@@ -433,6 +499,8 @@ class BlockEmbeddingBag(nn.Module):
                            sparse=sparse,
                            include_last_offset=include_last_offset,
                            padding_idx=padding_idx,
+                           device=device,
+                           dtype=dtype,
                            init_method=init_method)
         return embeddingbag
 
@@ -448,6 +516,75 @@ class BlockEmbeddingBag(nn.Module):
             assert isinstance(self.linear_weight, Tensor)
             return [self.embed_weight.detach() if detach 
                     else self.embed_weight, self.linear_weight]
+
+
+class AdaEmbeddingBag(BlockEmbeddingBag):
+    def __init__(self, 
+                update_word_frequency: bool = True, 
+                word_frequencies: Optional[Union[List,Tensor]] = None,
+                num_of_quantiles: int = 5,
+                update_count: int = 20,
+                *args, 
+                **kwargs):
+        super().__init__(*args, **kwargs)
+        self.update_word_frequency = update_word_frequency
+        self.update_count = self.curr_count = update_count
+        self.num_of_quantiles = num_of_quantiles
+        if word_frequencies is not None:
+            self.register_buffer('word_frequencies',torch.tensor(word_frequencies))
+        else:
+            self.register_buffer('word_frequencies',torch.zeros(self.num_embeddings))
+        self.embed_weight = [self.embed_weight.clone()]
+        self._update_weights()
+        
+    def _padding_zeros(self, _input: Tensor) -> None:
+        return F.pad(_input,(0, self.block_embedding_dim-_input.size(0)),'constant',0)
+    
+    def _update_weights(self) -> None:
+        total = sum(self.word_frequencies)
+        if total == 0:
+            return
+        else:
+            # TODO: using quantiles and multiprocessing to parallelize embedding lookup of different lengths
+            # _embed_weight = torch.empty(self.embed_weight.shape)
+            for (i,v) in enumerate(self.word_frequencies):
+                _v = max(2,int(self.block_embedding_dim / int(math.log(total / max(1,v)))))
+                self.embed_weight[i] = self._padding_zeros(self.embed_weight[i,:_v].clone().detach())
+            # self.embed_weight = nn.Parameter(_embed_weight)
+
+    def toggle_update_behavior(self, disable=True):
+        assert hasattr(self, 'update_word_frequency')
+        if disable:
+            self.update_word_frequency = False
+        else:
+            self.update_word_frequency = True
+        
+        self.curr_count=self.update_count
+
+    def set_word_frequencies(self, word_frequencies: Union[List,Tensor]):
+        assert len(word_frequencies) == self.num_embeddings, \
+                        'ensure input word frequencies cover all possible words'
+        self.word_frequencies = torch.tensor(word_frequencies.copy())
+        self._update_weights()
+
+    def forward(self, input_, offsets=None, per_sample_weights=None):
+        if self.update_word_frequency and self.curr_count >= 0:
+            for batch in input_:
+                self.word_frequencies[batch] += 1
+            self.curr_count -= 1
+            if self.curr_count < 0:
+                self._update_weights()
+                self.toggle_update_behavior()
+
+        output_parallel = F.embedding_bag(input_, self.embed_weight, offsets, self.max_norm, self.norm_type,
+                                          self.scale_grad_by_freq, self.mode, self.sparse, per_sample_weights,
+                                          self.include_last_offset, self.padding_idx)
+
+        if self.block_embedding_dim != self.base_embedding_dim:
+            output_parallel = F.linear(output_parallel, self.linear_weight, bias=None)
+
+        assert output_parallel.size() == (input_.size(0), self.base_embedding_dim)
+        return output_parallel
 
 
 class ParallelMixVocabEmbeddingBag(nn.Module):

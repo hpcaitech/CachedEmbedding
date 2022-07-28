@@ -1,1 +1,1 @@
-torchrun --nproc_per_node=4 --nnodes=1 --node_rank=0 --rdzv_backend='c10d' --rdzv_endpoint='127.0.0.1:29502' deepfm_main.py --dataset 'criteo' --repeated_run 1 --group 'deepfm-mvemb' --embed_dim 1248 --multiples 1 --in_memory_binary_criteo_path '//data/scratch/RecSys/criteo_kaggle_npy/'
+torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --rdzv_backend='c10d' --rdzv_endpoint='127.0.0.1:29502' deepfm_main.py --dataset 'criteo' --repeated_run 1 --group 'deepfm-mvemb' --embed_dim 128 -t --multiples 1 --in_memory_binary_criteo_path '../criteo_kaggle'

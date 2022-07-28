@@ -99,7 +99,7 @@ def parse_dfm_args():
     parser.add_argument(
         "--mlp",
         type=str,
-        default="[128,64]",
+        default="[128]",
         help="Comma separated layer sizes for dense arch.",
     )
     parser.add_argument('--dropout', nargs='?', default=0.2,
@@ -186,9 +186,11 @@ def main(args):
 
     if args.use_torchrec_dl:
         train_data_loader = criteo.get_dataloader(args, 'train')
+        valid_data_loader = criteo.get_dataloader(args, 'val')
         test_data_loader = criteo.get_dataloader(args, "test")
     else:
         train_data_loader = CriteoDataset(args,mode='train')
+        valid_data_loader = CriteoDataset(args,mode='val')
         test_data_loader = CriteoDataset(args,mode='test')
 
     model = DeepFactorizationMachine(args.num_embeddings_per_feature, len(criteo.DEFAULT_INT_NAMES),\
@@ -196,7 +198,7 @@ def main(args):
 
     dist_logger.info(count_parameters(model,f'[rank{dist_manager.get_rank()}]model'), ranks=[0])
 
-    criterion = torch.nn.BCEWithLogitsLoss()
+    criterion = torch.nn.BCELoss()
     optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     with profile(
@@ -204,11 +206,13 @@ def main(args):
             profile_memory=True, 
             record_shapes=True,
             schedule=schedule(wait=0, warmup=30, active=2, repeat=1),
-            on_trace_ready=tensorboard_trace_handler(f'log/{args.tboard_name}'),
+            # on_trace_ready=tensorboard_trace_handler(f'log/{args.tboard_name}'),
     ) as prof:
         t0 = time.time()
         for epoch_i in range(args.epoch):
             train_loss = train(model, criterion, optimizer, train_data_loader, curr_device, prof, epoch_i)
+            auc = test(model, criterion, valid_data_loader, curr_device)
+            print('valid auc:',auc)
 
             dist_logger.info(
             f"Epoch {epoch_i} - train loss: {train_loss:.5}",ranks=[0])
@@ -227,7 +231,7 @@ if __name__ == '__main__':
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
-    dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
+    # dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
     print(dist_manager.get_distributed_info())
     
     dist_logger.info(f'Number of embeddings per feature: {args.num_embeddings_per_feature}',ranks=[0])

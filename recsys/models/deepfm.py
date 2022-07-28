@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 from torch.profiler import record_function
 
-from recsys import ParallelMode, DISTLogger, DISTMGR
-from recsys.modules.embeddings import ParallelMixVocabEmbeddingBag
+from recsys import ParallelMode
+from recsys.modules.embeddings import ParallelMixVocabEmbeddingBag, BlockEmbeddingBag
 from colo_recsys.utils import count_parameters
 
 
@@ -13,13 +13,16 @@ class FeatureEmbedding(nn.Module):
     
     def __init__(self, field_dims, emb_dim, enable_qr):
         super().__init__()
-        self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='mean',
+        self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, 
                                                           parallel_mode=ParallelMode.TENSOR_PARALLEL,
                                                           enable_qr=enable_qr, do_fair=True)
+        # # single bag:
+        # self.embedding = BlockEmbeddingBag(sum(field_dims),int(math.sqrt(emb_dim)),emb_dim)
             
         # print('Saved params (M)',emb_dim*(sum(field_dims) - math.ceil(math.sqrt(sum(field_dims))))//1_000_000)
 
     def forward(self,sparse_features):
+        sparse_features = sparse_features.values().reshape(-1,16384).T
         return self.embedding(sparse_features)
     
 
@@ -73,8 +76,6 @@ class DeepFactorizationMachine(nn.Module):
     
     def __init__(self, num_embed_per_feature, dense_input_dim, embed_dim, mlp_dims, dropout, enable_qr):
         super().__init__()
-        world_size = DISTMGR.get_world_size()
-        rank = DISTMGR.get_rank()
         self.linear = FeatureLinear(dense_input_dim, embed_dim)
         self.fm = FactorizationMachine(reduce_sum=True)
         self.embedding = FeatureEmbedding(num_embed_per_feature, embed_dim, enable_qr)
