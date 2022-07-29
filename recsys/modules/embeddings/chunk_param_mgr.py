@@ -16,7 +16,7 @@ class ChunkParamMgr(object):
                  weight: torch.Tensor,
                  chunk_size: int = 16 * 1024 * 1024,
                  cuda_chunk_num: int = 0,
-                 use_limit_buff: bool = True,
+                 use_limit_buff: bool = False,
                  *args,
                  **kwargs) -> None:
 
@@ -69,7 +69,7 @@ class ChunkParamMgr(object):
 
         # index copy buffer size should less than 10% of cuda weight.
         if self.use_limit_buff:
-            self.limit_buff_index_copyer = LimitBuffIndexCopyer(max(self.cuda_chunk_num * 0.1, 20))
+            self.limit_buff_index_copyer = LimitBuffIndexCopyer(self.cuda_chunk_num * 0.1)
 
         self.num_hits_history = []
         self.num_miss_history = []
