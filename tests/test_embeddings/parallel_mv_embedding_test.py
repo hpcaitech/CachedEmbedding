@@ -17,10 +17,26 @@ from common import EMBEDDING_DIM, NUM_EMBEDDINGS_PER_FEATURE, BATCH_SIZE, check_
 from recsys.modules.functional import reduce_forward
 
 
-def _print_rank_0(msg):
+def _print_rank_0(*msg):
     i = DISTMGR.get_rank()
     if i == 0:
-        print(msg)
+        print(*msg)
+        
+def test_all_reduce():
+    device = get_current_device()
+    rank = DISTMGR.get_rank()
+    x = torch.randint(0,10,(1,2),requires_grad=True,device=device,dtype=torch.float)*(rank+1)
+    _print_rank_0(x)
+    
+    agg_x = reduce_forward(x, ParallelMode.DEFAULT, reduce_op='mean')
+    _print_rank_0(agg_x)
+    
+    sample_grad = torch.randn(x.shape).to(device)
+    dist.broadcast(sample_grad, 0)
+    _print_rank_0(sample_grad)
+    agg_x.backward(sample_grad)
+    _print_rank_0(x.grad)
+    
         
 def check_multi_block_embeddingbag(mode, do_fair):
     device = get_current_device()
@@ -31,15 +47,16 @@ def check_multi_block_embeddingbag(mode, do_fair):
     # the whole embedding w/o sharding
     BLOCK_EMBED_DIM = EMBEDDING_DIM // 2
     embed_weight = torch.randn(size=(sum(NUM_EMBEDDINGS_PER_FEATURE),BLOCK_EMBED_DIM),
-                               device=device)
+                               requires_grad=True,device=device)
     linear_weight = torch.randn(size=(EMBEDDING_DIM,BLOCK_EMBED_DIM),
-                               device=device)
+                               requires_grad=True,device=device)
     weights = [embed_weight, linear_weight]
-    embed = BlockEmbeddingBag.from_pretrained(
-                            weights,
-                            EMBEDDING_DIM,
-                            device=device,
-                            mode=mode)
+    if rank == 0:
+        embed = BlockEmbeddingBag.from_pretrained(
+                                weights,
+                                EMBEDDING_DIM,
+                                device=device,
+                                mode=mode)
     
     # example random input
     _A = []
@@ -48,7 +65,7 @@ def check_multi_block_embeddingbag(mode, do_fair):
                                                size=(BATCH_SIZE,)).unsqueeze(1))
     A = torch.cat(_A,dim=1).to(device)
     A_grad = torch.randn(size=(BATCH_SIZE,EMBEDDING_DIM)).to(device)
-    
+
     ## table-wise sharding (not fair)
     lbmgr = LoadBalanceManager(
         NUM_EMBEDDINGS_PER_FEATURE,
@@ -56,53 +73,66 @@ def check_multi_block_embeddingbag(mode, do_fair):
         do_fair=do_fair,device=device)
     
     shard_weights = [lbmgr.shard_weights(weights[0],rank),weights[1]]
+    num_embeddings_this_rank = lbmgr.get_num_embeddings_on_rank(rank)
+    
+    # test weight sharding correctness
+    if rank != world_size - 1: # not last rank
+        assert torch.allclose(shard_weights[0], 
+                              weights[0][num_embeddings_this_rank*rank:
+                                  num_embeddings_this_rank*(rank+1),:])
+    else:
+        assert torch.allclose(shard_weights[0], 
+                              weights[0][num_embeddings_this_rank*rank:,:])
+    
     shard_embed = BlockEmbeddingBag.from_pretrained(shard_weights,
                                                     EMBEDDING_DIM,
                                                     device=device,
-                                                    mode=mode,
-                                                    padding_idx=0)
-    # embed weight sharding test
-    residual = sum(NUM_EMBEDDINGS_PER_FEATURE) % world_size
-    indv_embed_weight = shard_embed.get_weights(True)[0]
-    grouped_embed_weights = []
-    for i in range(world_size):
-        if i == world_size - 1:
-            shape = (indv_embed_weight.size(0)+residual,EMBEDDING_DIM)
-            grouped_embed_weights.append(torch.zeros(shape,device=device))
-    dist.all_gather(grouped_embed_weights,indv_embed_weight,group=DISTMGR.get_group())
-    for i in range(world_size-1):
-        grouped_embed_weights[i] = grouped_embed_weights[i][:-residual,:]
-    grouped_embed_weights = torch.cat(grouped_embed_weights,dim=0)
-    if rank == 0:
-        print(grouped_embed_weights)
-        print(weights[0])
-    assert torch.allclose(weights[0],grouped_embed_weights)
+                                                    mode=mode)
     
     # forward test
-    A_master = A.clone()
-    C = embed(A_master)
-    shard_A = lbmgr.shard_tensor(A, rank)
-    _print_rank_0(A.shape)
-    print(shard_A.shape)
+    if rank == 0:
+        A_master = A.clone() + lbmgr.get_offsets(return_all=True)
+        C = embed(A_master)
+    shard_A = lbmgr.put_tensor_on_rank(A, rank)
     shard_C = shard_embed(shard_A)
     test_C = reduce_forward(shard_C, parallel_mode=ParallelMode.DEFAULT, reduce_op=mode)
-    
-    _print_rank_0(C)
-    _print_rank_0(test_C)
-    
-    assert torch.allclose(C, test_C)
+    if rank == 0:
+        assert torch.allclose(C, test_C)
     
     # backward test
-    C.backward(A_grad)
-    shard_C.backward(A_grad)
+    if rank == 0:
+        C.backward(A_grad.clone())
+        test_C.backward(A_grad.clone())
+        
+        def getBack(print, var_grad_fn):
+            print(var_grad_fn)
+            for n in var_grad_fn.next_functions:
+                if n[0]:
+                    try:
+                        tensor = getattr(n[0], 'variable')
+                        print(n[0])
+                        print('Tensor with grad found:', tensor)
+                        print(' - gradient:', tensor.grad)
+                        print()
+                    except AttributeError as e:
+                        getBack(print,n[0])
+        # getBack(print,C.grad_fn)
+        # print('-'*20)
+        # getBack(print,test_C.grad_fn)
     
-    # embed layer
-    assert torch.allclose(lbmgr.shard_weights(embed.get_weights(True)[0].grad),
-                          shard_embed.get_weights(True)[0].grad)
+        # embed layer
+        embed_grad = lbmgr.shard_weights(embed.get_weights(False)[0].grad, rank)
+        test_embed_grad = shard_embed.get_weights(False)[0].grad[:-1,:] # last one was padding idx
+        # mask = ~torch.eq(embed_grad,test_embed_grad)
+        # print(embed_grad[mask])
+        # print(test_embed_grad[mask])
+        assert torch.allclose(embed_grad,test_embed_grad)
     
-    # linear layer (not meant to be equal)
-    assert torch.allclose(embed.get_weights(True)[1].grad,
-                          shard_embed.get_weights(True)[1].grad)
+        # linear layer
+        # print(embed.get_weights(False)[1].grad)
+        # print(shard_embed.get_weights(False)[1].grad)
+        # assert torch.allclose(embed.get_weights(False)[1].grad,
+        #                       shard_embed.get_weights(False)[1].grad)
     
 def check_single_block_embeddingbag(mode):
     dtype = torch.float32
@@ -250,6 +280,7 @@ def check_layer(rank, world_size, port, do_fair, enable_qr, mode):
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
     # check_single_block_embeddingbag(mode)
+    # test_all_reduce()
     check_multi_block_embeddingbag(mode, do_fair)
     # check_mv_embeddingbag(do_fair, enable_qr, mode)
     
@@ -267,4 +298,4 @@ def test_layer(world_size, do_fair, enable_qr, mode):
     mp.spawn(run_func, nprocs=world_size)
 
 if __name__ == '__main__':
-    test_layer(4, True, True, 'max')
+    test_layer(4, True, True, 'mean')

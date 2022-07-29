@@ -108,7 +108,7 @@ def parse_dfm_args():
                         help='Batch size.')
     parser.add_argument('--lr', type=float, default=0.0001,
                         help='Learning rate.')
-    parser.add_argument('--epoch', type=int, default=1,
+    parser.add_argument('--epoch', type=int, default=5,
                         help='Number of epoch.')
     parser.add_argument('--weight_decay', type=float, default=1e-6)
     
@@ -231,7 +231,7 @@ if __name__ == '__main__':
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
-    # dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
+    dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
     print(dist_manager.get_distributed_info())
     
     dist_logger.info(f'Number of embeddings per feature: {args.num_embeddings_per_feature}',ranks=[0])
