@@ -113,10 +113,6 @@ class ChunkParamMgr(object):
         # Warmup the cuda cache by moving high freq chunks (lowest chunk id) to cuda
         preload_chunk_num = int(np.ceil(self.cuda_chunk_num * warmup_ratio))
         if preload_chunk_num > 0:
-            print(f'begin warmup CUDA Cache. Please wait in patient. preload {preload_chunk_num} chunks')
-            print(
-                f'before warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.'
-            )
             with Timer() as timer:
                 # extract chunks from cpu weight
                 preload_chunk_ids = torch.arange(preload_chunk_num)
@@ -133,10 +129,6 @@ class ChunkParamMgr(object):
                 self.CCT[preload_slot_ids] = slot_offsets
                 self._cuda_available_chunk_num -= preload_chunk_num
             print(f'Cache warmup finished cost {timer.elapsed} sec.')
-            print(
-                f'after warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.'
-            )
-        self._reset_comm_stats()
 
     def flush(self):
         """flush all CUDA chunks to CPU.
@@ -236,31 +228,40 @@ class ChunkParamMgr(object):
         """
         evict_num = chunk_ids.numel() - self.cuda_available_chunk_num
         if evict_num > 0:
-            mask = torch.isin(self.cached_chunk_table[:, 0], self.evict_backlist)
-            buf = self.cached_chunk_table[mask, 0].clone()
-            idx = torch.nonzero(mask).squeeze(1)
+            with Timer() as timer:
+                mask = torch.isin(self.cached_chunk_table[:, 0], self.evict_backlist)
+                buf = self.cached_chunk_table[mask, 0].clone()
+                idx = torch.nonzero(mask).squeeze(1)
 
-            self.cached_chunk_table[:, 0].index_fill_(0, idx, -2)
-            evict_slot_ids = torch.argsort(self.cached_chunk_table[:, 0], descending=True)[:evict_num]
-            self.cached_chunk_table[:, 0].index_copy_(0, idx, buf)
+                self.cached_chunk_table[:, 0].index_fill_(0, idx, -2)
+                evict_slot_ids = torch.argsort(self.cached_chunk_table[:, 0], descending=True)[:evict_num]
+                self.cached_chunk_table[:, 0].index_copy_(0, idx, buf)
 
-            evict_info = self.cached_chunk_table[evict_slot_ids]
+                evict_info = self.cached_chunk_table[evict_slot_ids]
 
-            chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids).cpu()
-            self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), chunks)
+                chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids).cpu()
+                self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), chunks)
+                self.cached_chunk_table[:, 0].index_fill_(0, evict_slot_ids, -1)
+                self.CCT.squeeze(1).index_fill_(0, evict_info[:, 0], -1)
+                self._cuda_available_chunk_num += evict_num
+            self._cuda_to_cpu_elapse += timer.elapsed
+            weight_size = chunks.numel()
+            self._cuda_to_cpu_numel += weight_size
+            print(f"evict embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
 
-            self.cached_chunk_table[:, 0].index_fill_(0, evict_slot_ids, -1)
-            self.CCT.squeeze(1).index_fill_(0, evict_info[:, 0], -1)
-            self._cuda_available_chunk_num += evict_num
-
-        slots = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)[:chunk_ids.numel()]
-        chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, chunk_ids.cpu()).cuda()
-        self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, slots, chunks)
-        slot_offsets = slots * self.chunk_size
-        self.cached_chunk_table[slots, 0] = chunk_ids
-        self.cached_chunk_table[slots, 1] = slot_offsets
-        self.CCT.squeeze(1).index_copy_(0, chunk_ids, slot_offsets)
-        self._cuda_available_chunk_num -= chunk_ids.numel()
+        with Timer() as timer:
+            slots = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)[:chunk_ids.numel()]
+            chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, chunk_ids.cpu()).cuda()
+            self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, slots, chunks)
+            slot_offsets = slots * self.chunk_size
+            self.cached_chunk_table[slots, 0] = chunk_ids
+            self.cached_chunk_table[slots, 1] = slot_offsets
+            self.CCT.squeeze(1).index_copy_(0, chunk_ids, slot_offsets)
+            self._cuda_available_chunk_num -= chunk_ids.numel()
+        self._cpu_to_cuda_elpase += timer.elapsed
+        weight_size = chunks.numel()
+        self._cpu_to_cuda_numel += weight_size
+        print(f"admit embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
 
     def _evict(self) -> int:
         """

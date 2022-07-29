@@ -52,7 +52,7 @@ def benchmark_cache_embedding(batch_size,
         raise RuntimeError(f"Unknown EB type: {embed_type}")
 
     grad = None
-    hist_str = None
+    avg_hit_rate = None
     with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
         # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         #              schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
@@ -78,13 +78,13 @@ def benchmark_cache_embedding(batch_size,
                                   f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
                                   f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
                 t.update()
-                if it == 100:
-                    hit_hist = np.array(model.num_hits_history)
-                    miss_hist = np.array(model.num_miss_history)
-                    hist = hit_hist / (hit_hist + miss_hist)
-                    hist_str = '\n'.join([f"{it}it: {_h*100:.2f} %" for it, _h in enumerate(hist.tolist())])
+                if it == 200:
                     break
-    print(f"hit rate history: {hist_str}")
+    hit_hist = np.array(model.num_hits_history)
+    miss_hist = np.array(model.num_miss_history)
+    hist = hit_hist / (hit_hist + miss_hist)
+    avg_hit_rate = np.mean(hist)
+    print(f"average hit rate: {avg_hit_rate}")
     model.chunk_weight_mgr.print_comm_stats()
 
 
@@ -93,11 +93,11 @@ if __name__ == "__main__":
         id_freq_map = get_id_freq_map()
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
-    batch_size = [2048]
+    batch_size = [16384]
     embed_dim = 32
-    cache_ratio = [0.5]
+    cache_ratio = [0.1]
     # chunk size
-    cache_lines = [1024]
+    cache_lines = [1]
 
     # # row-wise cache
     # for bs in batch_size:
