@@ -53,7 +53,6 @@ def benchmark_cache_embedding(batch_size,
 
     grad = None
     avg_hit_rate = None
-
     with Timer() as timer:
         with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
             # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -77,8 +76,8 @@ def benchmark_cache_embedding(batch_size,
                     running_miss = model.num_miss_history[-1]    # sum(model.num_miss_history)
                     hit_rate = running_hits / (running_hits + running_miss)
                     t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
-                                    f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
-                                    f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
+                                      f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
+                                      f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
                     t.update()
                     if it == 200:
                         break
@@ -90,6 +89,7 @@ def benchmark_cache_embedding(batch_size,
     model.chunk_weight_mgr.print_comm_stats()
 
     print(f'overall training time {timer.elapsed:.2f}s')
+
 
 if __name__ == "__main__":
     with Timer() as timer:

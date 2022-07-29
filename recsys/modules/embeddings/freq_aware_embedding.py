@@ -6,6 +6,9 @@ from typing import List, Optional, Iterator, Tuple
 from .base_embeddings import BaseEmbeddingBag
 from .chunk_param_mgr import ChunkParamMgr
 from torch.nn.parameter import Parameter
+from recsys import ParallelMode, DISTMGR, DISTLogger as logger
+from recsys.utils import get_partition
+from ..functional import dual_all_to_all
 
 
 class FreqAwareEmbeddingBag(BaseEmbeddingBag):
@@ -83,3 +86,100 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
     @property
     def input_id_percent_in_load_chunk(self):
         return 0    # np.mean(self.chunk_weight_mgr.input_id_percent_in_load_chunk) * 100
+
+
+class ParallelFreqAwareEmbeddingBag(BaseEmbeddingBag):
+
+    def __init__(self,
+                 num_embeddings,
+                 embedding_dim,
+                 padding_idx=None,
+                 max_norm=None,
+                 norm_type=2.,
+                 scale_grad_by_freq=False,
+                 sparse=False,
+                 _weight=None,
+                 mode='mean',
+                 include_last_offset=False,
+                 parallel_mode=ParallelMode.DEFAULT,
+                 dtype=None,
+                 debug=True):
+        super(ParallelFreqAwareEmbeddingBag,
+              self).__init__(num_embeddings, embedding_dim, padding_idx, max_norm, norm_type, scale_grad_by_freq,
+                             sparse, mode, include_last_offset)
+
+        self.parallel_mode = parallel_mode
+        self.debug = debug
+        self.rank = DISTMGR.get_rank(self.parallel_mode)
+        self.world_size = DISTMGR.get_world_size(self.parallel_mode)
+
+        self.partition_start_index, self.partition_end_index, divisible = get_partition(
+            embedding_dim, self.rank, self.world_size)
+        self.embedding_dim_per_partition = self.partition_end_index - self.partition_start_index
+
+        if _weight is None:
+            self._weight = torch.empty(self.num_embeddings, self.embedding_dim_per_partition, device='cpu', dtype=dtype)
+            self.init_parameters()
+        else:
+            assert list(_weight.shape) == [num_embeddings, embedding_dim]
+            partition = torch.tensor_split(_weight, self.world_size, 1)[self.rank]
+            assert list(partition.shape) == [num_embeddings, self.embedding_dim_per_partition]
+            self._weight = partition
+
+    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
+        yield 'weight', self.chunk_weight_mgr.cuda_partial_weight
+
+    def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
+        yield self.chunk_weight_mgr.cuda_partial_weight
+
+    @torch.no_grad()
+    def init_parameters(self):
+        self._weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
+        if self.padding_idx is not None:
+            self._weight[self.padding_idx].fill_(0)
+
+    def preprocess(self,
+                   chunk_size: int,
+                   cuda_chunk_num: int,
+                   ids_freq_mapping: Optional[List[int]] = None,
+                   warmup_ratio: float = 0.7):
+        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num)
+        self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
+
+    def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
+        with torch.no_grad():
+            reorder_ids = self.chunk_weight_mgr.prepare_ids(indices)
+
+        output_shard = F.embedding_bag(reorder_ids, self.chunk_weight_mgr.cuda_partial_weight, offsets, self.max_norm,
+                                       self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
+                                       per_sample_weights, self.include_last_offset, self.padding_idx)
+
+        if shape_hook is not None:
+            output_shard = shape_hook(output_shard)
+
+        output_full = dual_all_to_all(output_shard, self.parallel_mode, scatter_dim=scatter_dim, gather_dim=gather_dim)
+        return output_full
+
+    @classmethod
+    def from_pretrained(cls,
+                        embedding: torch.Tensor,
+                        freeze: bool = True,
+                        padding_idx: Optional[int] = None,
+                        max_norm: Optional[float] = None,
+                        norm_type: float = 2.,
+                        scale_grad_by_freq: bool = False,
+                        sparse: bool = False,
+                        mode: str = 'mean',
+                        include_last_offset: bool = False,
+                        parallel_mode: ParallelMode = ParallelMode.DEFAULT,
+                        debug: bool = True,
+                        chunk_size: int = 16,
+                        cuda_chunk_num: int = 100_000,
+                        ids_freq_mapping: Optional[List[int]] = None,
+                        warmup_ratio: float = 0.7) -> 'ParallelFreqAwareEmbeddingBag':
+        rows, cols = embedding.shape
+        embedding_bag = cls(rows, cols, padding_idx, max_norm, norm_type, scale_grad_by_freq, sparse, embedding.cpu(),
+                            mode, include_last_offset, parallel_mode, debug)
+        embedding_bag.preprocess(chunk_size, cuda_chunk_num, ids_freq_mapping, warmup_ratio)
+        embedding_bag.chunk_weight_mgr.cuda_partial_weight.requires_grad_ = not freeze
+        return embedding_bag

@@ -1,11 +1,19 @@
 import pytest
+from functools import partial
 import torch
+import torch.multiprocessing as mp
 import numpy as np
 
-from recsys.modules.embeddings import ChunkParamMgr, FreqAwareEmbeddingBag
-from recsys.testing.utils import synthesize_1d_sparse_feature
+from colossalai.utils import free_port
+from colossalai.testing import rerun_if_address_is_in_use
 
-# torch.set_printoptions(profile="full")
+from recsys.modules.embeddings import ChunkParamMgr, FreqAwareEmbeddingBag, ParallelFreqAwareEmbeddingBag
+from recsys import launch, disable_existing_loggers
+from recsys import DISTMGR
+from recsys.testing.utils import synthesize_1d_sparse_feature, gather_tensor
+
+NUM_EMBED, EMBED_DIM = 100, 8
+BATCH_SIZE = 8
 
 
 @pytest.mark.parametrize('chunk_size', [1, 3, 4, 11])
@@ -71,19 +79,16 @@ def test_reorder_with_freq():
 
 @pytest.mark.parametrize('chunk_size', [1, 2, 4])
 def test_freq_aware_embed(chunk_size):
-    NUM_EMBEDDINGS, EMBEDDING_DIM = 128, 8
-    BATCH_SIZE = 8
-
     device = torch.device('cuda', 0)
     model = FreqAwareEmbeddingBag(
-        NUM_EMBEDDINGS,
-        EMBEDDING_DIM,
+        NUM_EMBED,
+        EMBED_DIM,
         mode='mean',
         include_last_offset=True,
     ).to(device)
     model.preprocess(chunk_size=chunk_size, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
 
-    assert model.weight.shape[0] == NUM_EMBEDDINGS
+    assert model.weight.shape[0] == NUM_EMBED
     ref_model = torch.nn.EmbeddingBag.from_pretrained(model.weight.detach().to(device),
                                                       mode='mean',
                                                       include_last_offset=True,
@@ -95,7 +100,7 @@ def test_freq_aware_embed(chunk_size):
     ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
 
     for i in range(50):
-        indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBEDDINGS, device)
+        indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBED, device)
         res = model(indices, offsets)
         ref_res = ref_model(indices, offsets)
         assert torch.allclose(res, ref_res), f"model result: {res}, reference: {ref_res}"
@@ -117,8 +122,76 @@ def test_freq_aware_embed(chunk_size):
         f"model weight: {model_weight[10:18, :8]}, reference: {ref_weight[10:18, :8]}"
 
 
+def run_parallel_freq_aware_embed(rank, world_size, port, chunk_size):
+    disable_existing_loggers()
+    launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
+
+    device = torch.device('cuda', torch.cuda.current_device())
+    rank = DISTMGR.get_rank()
+    world_size = DISTMGR.get_world_size()
+
+    weight = torch.rand(NUM_EMBED, EMBED_DIM)
+    model = ParallelFreqAwareEmbeddingBag.from_pretrained(weight.detach().clone(),
+                                                          include_last_offset=True,
+                                                          freeze=False,
+                                                          chunk_size=chunk_size,
+                                                          cuda_chunk_num=BATCH_SIZE * 2)
+
+    assert model.chunk_weight_mgr.cpu_weight.device.type == 'cpu'
+    assert model.chunk_weight_mgr.cuda_partial_weight.requires_grad
+    weight_in_rank = torch.tensor_split(weight, world_size, 1)[rank]
+    assert torch.allclose(weight_in_rank, model.chunk_weight_mgr.cpu_weight.detach())
+
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+
+    if rank == 0:
+        ref_model = torch.nn.EmbeddingBag.from_pretrained(weight.detach().clone(),
+                                                          include_last_offset=True,
+                                                          freeze=False).to(device)
+        ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
+
+    DISTMGR.set_seed(4321)
+    for i in range(5):
+        indices, offsets = synthesize_1d_sparse_feature(BATCH_SIZE, NUM_EMBED, device)
+        res = model(indices, offsets)
+
+        grad = torch.rand(BATCH_SIZE * 2, EMBED_DIM, dtype=res.dtype, device=res.device)
+        grad_in_rank = torch.tensor_split(grad, world_size, 0)[rank]
+        res.backward(grad_in_rank)
+
+        optimizer.step()
+        optimizer.zero_grad()
+
+        res_list = gather_tensor(res.detach())
+
+        if rank == 0:
+            ref_res = ref_model(indices, offsets)
+            recover_res = torch.cat(res_list, dim=0)
+
+            assert torch.allclose(ref_res, recover_res)
+
+            ref_res.backward(grad)
+            ref_optimizer.step()
+            ref_optimizer.zero_grad()
+
+    model.chunk_weight_mgr.flush()
+    weight_list = gather_tensor(model.chunk_weight_mgr.cpu_weight.detach().cuda())
+    if rank == 0:
+        recover_weight = torch.cat(weight_list, dim=1)
+        assert torch.allclose(recover_weight, ref_model.weight.detach())
+
+
+@pytest.mark.parametrize('world_size', [1, 4])
+@pytest.mark.parametrize('chunk_size', [1, 4])
+@rerun_if_address_is_in_use()
+def test_parallel_freq_aware_embed(world_size, chunk_size):
+    run_func = partial(run_parallel_freq_aware_embed, world_size=world_size, port=free_port(), chunk_size=chunk_size)
+    mp.spawn(run_func, nprocs=world_size)
+
+
 if __name__ == '__main__':
     # test_freq_aware_embed()
     # test_chunkmgr_admit()
-    test_freq_aware_embed(2)
+    # test_freq_aware_embed(2)
     # test_reorder_with_freq()
+    test_parallel_freq_aware_embed(4, 4)
