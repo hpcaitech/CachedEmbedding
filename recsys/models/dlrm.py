@@ -17,7 +17,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import record_function
 
 from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
-from ..modules.embeddings import ColumnParallelEmbeddingBag, FusedHybridParallelEmbeddingBag, ParallelCachedEmbeddingBag
+from ..modules.embeddings import ColumnParallelEmbeddingBag, FusedHybridParallelEmbeddingBag, \
+    ParallelCachedEmbeddingBag, ParallelFreqAwareEmbeddingBag
 from .. import ParallelMode, DISTLogger, DISTMGR as dist_manager
 from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
@@ -120,29 +121,36 @@ def sparse_embedding_shape_hook(embeddings, feature_size, batch_size):
 
 class FusedSparseModules(nn.Module):
 
-    def __init__(
-        self,
-        num_embeddings_per_feature,
-        embedding_dim,
-        fused_op='all_to_all',
-        reduction_mode='sum',
-        parallel_mode=ParallelMode.DEFAULT,
-        sparse=False,
-        output_device_type=None,
-        use_cache=False,
-        cache_sets=500_000,
-        cache_lines=1,
-    ):
+    def __init__(self,
+                 num_embeddings_per_feature,
+                 embedding_dim,
+                 fused_op='all_to_all',
+                 reduction_mode='sum',
+                 parallel_mode=ParallelMode.DEFAULT,
+                 sparse=False,
+                 output_device_type=None,
+                 use_cache=False,
+                 cache_sets=500_000,
+                 cache_lines=1,
+                 id_freq_map=None,
+                 warmup_ratio=0.7):
         super(FusedSparseModules, self).__init__()
         if use_cache:
-            self.embed = ParallelCachedEmbeddingBag(sum(num_embeddings_per_feature),
-                                                    embedding_dim,
-                                                    cache_sets=cache_sets,
-                                                    cache_lines=cache_lines,
-                                                    sparse=sparse,
-                                                    mode=reduction_mode,
-                                                    include_last_offset=True,
-                                                    parallel_mode=parallel_mode)
+            # self.embed = ParallelCachedEmbeddingBag(sum(num_embeddings_per_feature),
+            #                                         embedding_dim,
+            #                                         cache_sets=cache_sets,
+            #                                         cache_lines=cache_lines,
+            #                                         sparse=sparse,
+            #                                         mode=reduction_mode,
+            #                                         include_last_offset=True,
+            #                                         parallel_mode=parallel_mode)
+            self.embed = ParallelFreqAwareEmbeddingBag(sum(num_embeddings_per_feature),
+                                                       embedding_dim,
+                                                       sparse=True,
+                                                       mode=reduction_mode,
+                                                       include_last_offset=True,
+                                                       parallel_mode=parallel_mode)
+            self.embed.preprocess(cache_lines, cache_sets, id_freq_map, warmup_ratio)
         else:
             self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
                                                          embedding_dim,
@@ -208,7 +216,9 @@ class HybridParallelDLRM(nn.Module):
                  fused_op='all_to_all',
                  use_cache=False,
                  cache_sets=500_000,
-                 cache_lines=1):
+                 cache_lines=1,
+                 id_freq_map=None,
+                 warmup_ratio=0.7):
 
         super(HybridParallelDLRM, self).__init__()
         if use_cache and sparse_device.type != dense_device.type:
@@ -226,7 +236,9 @@ class HybridParallelDLRM(nn.Module):
                                                  output_device_type=dense_device.type,
                                                  use_cache=use_cache,
                                                  cache_sets=cache_sets,
-                                                 cache_lines=cache_lines).to(sparse_device)
+                                                 cache_lines=cache_lines,
+                                                 id_freq_map=id_freq_map,
+                                                 warmup_ratio=warmup_ratio).to(sparse_device)
         self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                           dense_arch_layer_sizes,
                                                           over_arch_layer_sizes).to(dense_device),
