@@ -16,7 +16,7 @@ class ChunkParamMgr(object):
                  weight: torch.Tensor,
                  chunk_size: int = 16 * 1024 * 1024,
                  cuda_chunk_num: int = 0,
-                 use_limit_buff: bool = False,
+                 use_limit_buff: bool = True,
                  *args,
                  **kwargs) -> None:
 
@@ -123,7 +123,6 @@ class ChunkParamMgr(object):
         # Warmup the cuda cache by moving high freq chunks (lowest chunk id) to cuda
         preload_chunk_num = int(np.ceil(self.cuda_chunk_num * warmup_ratio))
         if preload_chunk_num > 0:
-            assert self.cuda_chunk_num < self.chunk_num
             with Timer() as timer:
                 # extract chunks from cpu weight
                 preload_chunk_ids = torch.arange(preload_chunk_num)
