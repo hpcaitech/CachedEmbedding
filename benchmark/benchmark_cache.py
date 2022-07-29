@@ -53,39 +53,42 @@ def benchmark_cache_embedding(batch_size,
 
     grad = None
     avg_hit_rate = None
-    with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
-        # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        #              schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
-        #              profile_memory=True,
-        #              on_trace_ready=tensorboard_trace_handler(
-        #                  f"log/b{batch_size}-e{embedding_dim}-num_chunk{cuda_chunk_num}-chunk_size{cache_lines}")) as prof:
-        with nullcontext():
-            for it in itertools.count():
-                batch = next(data_iter)
-                sparse_feature = batch.sparse_features.to(device)
+    with Timer() as timer:
+        with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
+            # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            #              schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
+            #              profile_memory=True,
+            #              on_trace_ready=tensorboard_trace_handler(
+            #                  f"log/b{batch_size}-e{embedding_dim}-num_chunk{cuda_chunk_num}-chunk_size{cache_lines}")) as prof:
+            with nullcontext():
+                for it in itertools.count():
+                    batch = next(data_iter)
+                    sparse_feature = batch.sparse_features.to(device)
 
-                res = model(sparse_feature.values(), sparse_feature.offsets())
+                    res = model(sparse_feature.values(), sparse_feature.offsets())
 
-                grad = torch.randn_like(res) if grad is None else grad
-                res.backward(grad)
+                    grad = torch.randn_like(res) if grad is None else grad
+                    res.backward(grad)
 
-                model.zero_grad()
-                # prof.step()
-                running_hits = model.num_hits_history[-1]    # sum(model.num_hits_history)
-                running_miss = model.num_miss_history[-1]    # sum(model.num_miss_history)
-                hit_rate = running_hits / (running_hits + running_miss)
-                t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
-                                  f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
-                                  f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
-                t.update()
-                if it == 200:
-                    break
+                    model.zero_grad()
+                    # prof.step()
+                    running_hits = model.num_hits_history[-1]    # sum(model.num_hits_history)
+                    running_miss = model.num_miss_history[-1]    # sum(model.num_miss_history)
+                    hit_rate = running_hits / (running_hits + running_miss)
+                    t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
+                                      f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
+                                      f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
+                    t.update()
+                    if it == 200:
+                        break
     hit_hist = np.array(model.num_hits_history)
     miss_hist = np.array(model.num_miss_history)
     hist = hit_hist / (hit_hist + miss_hist)
     avg_hit_rate = np.mean(hist)
     print(f"average hit rate: {avg_hit_rate}")
     model.chunk_weight_mgr.print_comm_stats()
+
+    print(f'overall training time {timer.elapsed:.2f}s')
 
 
 if __name__ == "__main__":
@@ -95,7 +98,7 @@ if __name__ == "__main__":
 
     batch_size = [16384]
     embed_dim = 32
-    cache_ratio = [0.1]
+    cache_ratio = [1, 0.1]
     # chunk size
     cache_lines = [1]
 

@@ -110,6 +110,8 @@ class ChunkParamMgr(object):
         self.IMP_chunkid.data.copy_(divs)
         self.IMP_offsetinchunk.data.copy_(mods)
 
+        # TODO() The following code will allocate extra CUDA memory. preload_chunk_num * chunks.
+        # As cuda_partial_weight is very big. You may not have that much available memory!
         # Warmup the cuda cache by moving high freq chunks (lowest chunk id) to cuda
         preload_chunk_num = int(np.ceil(self.cuda_chunk_num * warmup_ratio))
         if preload_chunk_num > 0:
@@ -239,18 +241,23 @@ class ChunkParamMgr(object):
 
                 evict_info = self.cached_chunk_table[evict_slot_ids]
 
-                chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids).cpu()
-                self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), chunks)
+                # TODO() allocate tmp memory on CPU and copy chunks on CUDA to CPU.
+                tmp_cuda_chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids)
+                tmp_cpu_chunks = torch.empty_like(tmp_cuda_chunks, device='cpu', pin_memory=True)
+                tmp_cpu_chunks.copy_(tmp_cuda_chunks)
+                self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), tmp_cpu_chunks)
                 self.cached_chunk_table[:, 0].index_fill_(0, evict_slot_ids, -1)
                 self.CCT.squeeze(1).index_fill_(0, evict_info[:, 0], -1)
                 self._cuda_available_chunk_num += evict_num
+
+                weight_size = tmp_cpu_chunks.numel()
             self._cuda_to_cpu_elapse += timer.elapsed
-            weight_size = chunks.numel()
             self._cuda_to_cpu_numel += weight_size
             print(f"evict embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
 
         with Timer() as timer:
             slots = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)[:chunk_ids.numel()]
+            # Here also allocate extra memory on CUDA. #chunk_ids * chunk.
             chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, chunk_ids.cpu()).cuda()
             self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, slots, chunks)
             slot_offsets = slots * self.chunk_size
