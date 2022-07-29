@@ -42,10 +42,10 @@ def _reduce_backward(grad, parallel_mode, reduce_op: str, mask: int=None):
     
     rank = dist_manager.get_rank(parallel_mode)
     if reduce_op == 'max':
-        grad[~torch.eq(mask[rank],rank)] = None
+        grad[~torch.eq(mask[rank],rank)].fill_(0)
     elif reduce_op == 'mean':
         grad /= dist_manager.get_world_size(parallel_mode)
-    
+
     return grad
 
 
