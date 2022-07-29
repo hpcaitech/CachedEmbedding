@@ -30,22 +30,24 @@ class LimitBuffIndexCopyer(object):
         tgt_device = tgt.device
         src_device = src.device
 
+        assert src_index.numel() == tgt_index.numel()
         dim_size = src_index.numel() 
         src_index = src_index.to(src_device)
-        
-        # src.shape[dim]
         for begin_pos in range(0, dim_size, self._buff_size):
             cur_len = min(self._buff_size, dim_size - begin_pos)
-            
             src_idx_piece = src_index.narrow(0, begin_pos, cur_len)
-            tmp_buffer = src.index_select(dim, src_idx_piece).to(tgt_device)
-            
-            src_piece = tmp_buffer.narrow(0, begin_pos, cur_len)
+            if src_device.type == 'cpu' and tgt_device.type == 'cuda':
+                cpu_tmp_buffer = src.index_select(dim, src_idx_piece).pin_memory()
+                tmp_buffer = torch.empty_like(cpu_tmp_buffer, device=tgt_device)
+                tmp_buffer.copy_(cpu_tmp_buffer)
+            else:
+                tmp_buffer = src.index_select(dim, src_idx_piece).to(tgt_device)
             tgt_idx_piece = tgt_index.narrow(0, begin_pos, cur_len)
-            tgt.index_copy_(dim, tgt_idx_piece, src_piece)
+            tgt.index_copy_(dim, tgt_idx_piece, tmp_buffer)
 
 
 if __name__ == '__main__':
+    # TODO(jiaruifang) fix the unittest and move it test directory.
     src = torch.randn(10, 8)
     dst1 = torch.empty(123, 8)
     dst2 = torch.empty(123, 8)

@@ -16,8 +16,11 @@ class ChunkParamMgr(object):
                  weight: torch.Tensor,
                  chunk_size: int = 16 * 1024 * 1024,
                  cuda_chunk_num: int = 0,
+                 use_limit_buff: bool = True,
                  *args,
                  **kwargs) -> None:
+
+        self.use_limit_buff = use_limit_buff
         self.chunk_size = chunk_size
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_chunk_num = cuda_chunk_num
@@ -63,8 +66,10 @@ class ChunkParamMgr(object):
 
         self.evict_backlist = torch.tensor([], device=torch.cuda.current_device())
 
+
         # index copy buffer size should less than 10% of cuda weight.
-        self.limit_buff_index_copyer = LimitBuffIndexCopyer(20)
+        if self.use_limit_buff:
+            self.limit_buff_index_copyer = LimitBuffIndexCopyer(max(self.cuda_chunk_num * 0.1, 20))
 
         self.num_hits_history = []
         self.num_miss_history = []
@@ -118,14 +123,21 @@ class ChunkParamMgr(object):
         # Warmup the cuda cache by moving high freq chunks (lowest chunk id) to cuda
         preload_chunk_num = int(np.ceil(self.cuda_chunk_num * warmup_ratio))
         if preload_chunk_num > 0:
+            assert self.cuda_chunk_num < self.chunk_num
             with Timer() as timer:
                 # extract chunks from cpu weight
                 preload_chunk_ids = torch.arange(preload_chunk_num)
                 preload_slot_ids = preload_chunk_ids.cuda()
-                # preload_chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, preload_chunk_ids).cuda()
-                # move chunks to cuda cache
-                self.limit_buff_index_copyer.index_copy(0, preload_chunk_ids, preload_slot_ids, self.cpu_weight.view(self.chunk_num, -1), self.cuda_partial_weight.view(self.cuda_chunk_num, -1))
-                # self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, preload_slot_ids, preload_chunks)
+
+                if self.use_limit_buff:
+                    self.limit_buff_index_copyer.index_copy(0, 
+                            src_index=preload_chunk_ids, 
+                            tgt_index=preload_slot_ids, 
+                            src=self.cpu_weight.view(self.chunk_num, -1), 
+                            tgt=self.cuda_partial_weight.view(self.cuda_chunk_num, -1))
+                else:
+                    preload_chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, preload_chunk_ids).cuda()
+                    self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, preload_slot_ids, preload_chunks)
 
                 # update auxiliary info
                 slot_offsets = preload_slot_ids.unsqueeze(1) * self.chunk_size
@@ -244,17 +256,20 @@ class ChunkParamMgr(object):
 
                 evict_info = self.cached_chunk_table[evict_slot_ids]
 
-                # allocate tmp memory on CPU and copy chunks on CUDA to CPU.
-                # TODO() may allocate cuda_chunk_num * chunk on CUDA
-                # tmp_cuda_chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids)
-                # tmp_cpu_chunks = torch.empty_like(tmp_cuda_chunks, device='cpu', pin_memory=True)
-                # tmp_cpu_chunks.copy_(tmp_cuda_chunks)
-
-                self.limit_buff_index_copyer.index_copy(0, src_index=evict_slot_ids,
-                                     tgt_index=evict_info[:, 0].cpu(), 
-                                     src=self.cuda_partial_weight.view(self.cuda_chunk_num, -1), 
-                                     tgt=self.cpu_weight.view(self.chunk_num, -1))
-                # self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), tmp_cpu_chunks)
+                
+                if self.use_limit_buff:
+                    self.limit_buff_index_copyer.index_copy(0, 
+                                        src_index=evict_slot_ids,
+                                        tgt_index=evict_info[:, 0].cpu(), 
+                                        src=self.cuda_partial_weight.view(self.cuda_chunk_num, -1), 
+                                        tgt=self.cpu_weight.view(self.chunk_num, -1))
+                else:
+                    # allocate tmp memory on CPU and copy chunks on CUDA to CPU.
+                    tmp_cuda_chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids)
+                    tmp_cpu_chunks = torch.empty_like(tmp_cuda_chunks, device='cpu', pin_memory=True)
+                    tmp_cpu_chunks.copy_(tmp_cuda_chunks)
+                    self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), tmp_cpu_chunks)
+            
                 self.cached_chunk_table[:, 0].index_fill_(0, evict_slot_ids, -1)
                 self.CCT.squeeze(1).index_fill_(0, evict_info[:, 0], -1)
                 self._cuda_available_chunk_num += evict_num
