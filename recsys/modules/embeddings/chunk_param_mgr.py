@@ -41,7 +41,7 @@ class ChunkParamMgr(object):
                 weight = torch.cat([weight, padding], dim=0)
 
         # pin memory cpu for higher CPU-GPU copy bandwidth
-        self.cpu_weight = weight.pin_memory()
+        self.cpu_weight = weight.contiguous().pin_memory()
 
         # IndexMappingTable (IMP): implemented with two lists.
         # id-> chunk_id and id -> offset_in_chunk
