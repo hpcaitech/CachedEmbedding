@@ -34,8 +34,8 @@ def test_chunkmgr_admit():
     mgr._evict()
     assert mgr.cuda_available_chunk_num == 4
 
-    mgr._prepare_chunks_on_cuda([9, 6, 5])
-    mgr._prepare_chunks_on_cuda([3, 4, 5])
+    mgr._prepare_chunks_on_cuda(torch.tensor([9, 6, 5], dtype=torch.long, device=0))
+    mgr._prepare_chunks_on_cuda(torch.tensor([3, 4, 5], dtype=torch.long, device=0))
     # print(mgr.cached_chunk_table)
     # mgr.print_comm_stats()
 
@@ -81,7 +81,7 @@ def test_freq_aware_embed(chunk_size):
         mode='mean',
         include_last_offset=True,
     ).to(device)
-    model._preprocess(chunk_size=chunk_size, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
+    model.preprocess(chunk_size=chunk_size, cuda_chunk_num=BATCH_SIZE * 2, ids_freq_mapping=None)
 
     assert model.weight.shape[0] == NUM_EMBEDDINGS
     ref_model = torch.nn.EmbeddingBag.from_pretrained(model.weight.detach().to(device),

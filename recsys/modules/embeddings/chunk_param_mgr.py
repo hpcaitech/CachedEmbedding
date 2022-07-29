@@ -85,18 +85,18 @@ class ChunkParamMgr(object):
                                                     self.chunk_size * self.embedding_dim).view(
                                                         self.chunk_size, self.embedding_dim)
 
-
     @property
     def cuda_available_chunk_num(self):
         return self._cuda_available_chunk_num
 
     @torch.no_grad()
-    def reorder(self, ids_freq_mapping: Optional[List[int]] = None, use_warmup = True):
+    def reorder(self, ids_freq_mapping: Optional[List[int]] = None, warmup_ratio=0.7):
         """reorder the cpu_weight according to ids' frequency in dataset before training.
         Also Build the IndexMappingTable, aka index_mapping_table.
         Execute only once before training.
         Args:
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq. if None no reorder
+            warmup_ratio (float): the amount of chunks preloaded in cuda cache
         """
         if ids_freq_mapping is not None:
             tmp_idx = torch.argsort(torch.from_numpy(ids_freq_mapping).cuda(), descending=True)
@@ -111,27 +111,48 @@ class ChunkParamMgr(object):
         self.IMP_offsetinchunk.data.copy_(mods)
 
         # Warmup the cuda cache by moving high freq chunks (lowest chunk id) to cuda
-        if use_warmup:
-            empty_ratio = 0.3
-            print(f'begin warmup CUDA Cache. Please wait in patient. empty ratio {empty_ratio}')
-            print(f'before warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.')
+        preload_chunk_num = int(np.ceil(self.cuda_chunk_num * warmup_ratio))
+        if preload_chunk_num > 0:
+            print(f'begin warmup CUDA Cache. Please wait in patient. preload {preload_chunk_num} chunks')
+            print(
+                f'before warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.'
+            )
             with Timer() as timer:
-                cid = 0
-                # fill in 1-empty_ratio of the cache space, left empty_ratio not used.
-                while self.cuda_available_chunk_num > int(self.cuda_chunk_num * empty_ratio):
-                    self._admit(cid)
-                    cid = cid+1
-                print(f'cid {cid}')
+                # extract chunks from cpu weight
+                preload_chunk_ids = torch.arange(preload_chunk_num)
+                preload_chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, preload_chunk_ids).cuda()
+
+                # move chunks to cuda cache
+                preload_slot_ids = preload_chunk_ids.cuda()
+                self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, preload_slot_ids, preload_chunks)
+
+                # update auxiliary info
+                slot_offsets = preload_slot_ids.unsqueeze(1) * self.chunk_size
+                self.cached_chunk_table[preload_slot_ids] = torch.cat([preload_slot_ids.unsqueeze(1), slot_offsets],
+                                                                      dim=1)
+                self.CCT[preload_slot_ids] = slot_offsets
+                self._cuda_available_chunk_num -= preload_chunk_num
             print(f'Cache warmup finished cost {timer.elapsed} sec.')
-            print(f'after warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.')
+            print(
+                f'after warmup: chunk num avialable  {self.cuda_available_chunk_num} vs. cuda capacity {self.cuda_chunk_num}.'
+            )
         self._reset_comm_stats()
-    
+
     def flush(self):
         """flush all CUDA chunks to CPU.
         The function is usually called after training finished.
         """
-        while self._cuda_available_chunk_num < self.cuda_chunk_num:
-            self._evict()
+        slots = torch.nonzero(self.cached_chunk_table[:, 0] > -1).squeeze(1)
+        chunk_ids = self.cached_chunk_table[slots, 0]
+        chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, slots).cpu()
+        self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, chunk_ids.cpu(), chunks)
+        self.cached_chunk_table[:, 0].index_fill_(0, slots, -1)
+        self.CCT.squeeze(1).index_fill_(0, chunk_ids, -1)
+        self._cuda_available_chunk_num += slots.numel()
+
+        assert self._cuda_available_chunk_num == self.cuda_chunk_num
+        assert torch.all(self.CCT == -1).item()
+        assert torch.all(self.cached_chunk_table[:, 0] == -1).item()
 
     def print_comm_stats(self):
         if self._cuda_to_cpu_numel > 0:
@@ -142,7 +163,6 @@ class ChunkParamMgr(object):
             print(
                 f"CPU->CUDA BWD {self._cpu_to_cuda_numel * self.elem_size_in_byte / 1e6 / self._cpu_to_cuda_elpase} MB/s {self._cpu_to_cuda_numel / 1e6} M elem"
             )
-
 
     @torch.no_grad()
     def _id_to_cached_cuda_id(self, ids: torch.Tensor) -> torch.Tensor:
@@ -183,8 +203,7 @@ class ChunkParamMgr(object):
             self.evict_backlist = chunk_id_set
 
         with record_function("(zhg) get cpu chunk indices"):
-            cpu_chunk_id_list = chunk_id_set[torch.isin(chunk_id_set, self.cached_chunk_table[:, 0],
-                                                        invert=True)].tolist()
+            cpu_chunk_id_list = chunk_id_set[torch.isin(chunk_id_set, self.cached_chunk_table[:, 0], invert=True)]
 
         self.num_hits_history.append(len(chunk_id_set) - len(cpu_chunk_id_list))
         self.num_miss_history.append(len(cpu_chunk_id_list))
@@ -209,14 +228,39 @@ class ChunkParamMgr(object):
     def _chunk_in_cuda(self, chunk_id: int) -> bool:
         return self.CCT[chunk_id] != -1
 
-
-    def _prepare_chunks_on_cuda(self, chunk_ids: List[int]) -> None:
+    @torch.no_grad()
+    def _prepare_chunks_on_cuda(self, chunk_ids: torch.Tensor) -> None:
         """prepare chunks in chunk_ids on CUDA memory
         Args:
-            chunk_ids (List[int]): the chunks to be placed on CUDA
+            chunk_ids (torch.Tensor): the chunks to be placed on CUDA
         """
-        for chunk_id in chunk_ids:
-            self._admit(chunk_id)
+        evict_num = chunk_ids.numel() - self.cuda_available_chunk_num
+        if evict_num > 0:
+            mask = torch.isin(self.cached_chunk_table[:, 0], self.evict_backlist)
+            buf = self.cached_chunk_table[mask, 0].clone()
+            idx = torch.nonzero(mask).squeeze(1)
+
+            self.cached_chunk_table[:, 0].index_fill_(0, idx, -2)
+            evict_slot_ids = torch.argsort(self.cached_chunk_table[:, 0], descending=True)[:evict_num]
+            self.cached_chunk_table[:, 0].index_copy_(0, idx, buf)
+
+            evict_info = self.cached_chunk_table[evict_slot_ids]
+
+            chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids).cpu()
+            self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), chunks)
+
+            self.cached_chunk_table[:, 0].index_fill_(0, evict_slot_ids, -1)
+            self.CCT.squeeze(1).index_fill_(0, evict_info[:, 0], -1)
+            self._cuda_available_chunk_num += evict_num
+
+        slots = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)[:chunk_ids.numel()]
+        chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, chunk_ids.cpu()).cuda()
+        self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, slots, chunks)
+        slot_offsets = slots * self.chunk_size
+        self.cached_chunk_table[slots, 0] = chunk_ids
+        self.cached_chunk_table[slots, 1] = slot_offsets
+        self.CCT.squeeze(1).index_copy_(0, chunk_ids, slot_offsets)
+        self._cuda_available_chunk_num -= chunk_ids.numel()
 
     def _evict(self) -> int:
         """

@@ -14,7 +14,11 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
         super(FreqAwareEmbeddingBag, self).__init__(num_embeddings, embedding_dim, *args, **kwargs)
         self._weight = torch.randn(self.num_embeddings, self.embedding_dim, device='cpu', dtype=dtype)
 
-    def preprocess(self, chunk_size: int, cuda_chunk_num: int, ids_freq_mapping: Optional[List[int]] = None, use_warmup = True):
+    def preprocess(self,
+                   chunk_size: int,
+                   cuda_chunk_num: int,
+                   ids_freq_mapping: Optional[List[int]] = None,
+                   warmup_ratio=0.7):
         """
         Called after initialized. 
         Reorder the weight rows according to the ids_freq_mapping.
@@ -23,9 +27,10 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
             chunk_size (int): chunk size
             cuda_chunk_num (int): number of chunk can be hosted in CUDA memory
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq
+            warmup_ratio (float): the amount of chunks preloaded in cuda cache
         """
         self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num)
-        self.chunk_weight_mgr.reorder(ids_freq_mapping, use_warmup)
+        self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
         with torch.no_grad():
