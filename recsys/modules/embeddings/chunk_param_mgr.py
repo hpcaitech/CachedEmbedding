@@ -253,7 +253,7 @@ class ChunkParamMgr(object):
                 weight_size = tmp_cpu_chunks.numel()
             self._cuda_to_cpu_elapse += timer.elapsed
             self._cuda_to_cpu_numel += weight_size
-            print(f"evict embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
+            # print(f"evict embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
 
         with Timer() as timer:
             slots = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)[:chunk_ids.numel()]
@@ -268,7 +268,7 @@ class ChunkParamMgr(object):
         self._cpu_to_cuda_elpase += timer.elapsed
         weight_size = chunks.numel()
         self._cpu_to_cuda_numel += weight_size
-        print(f"admit embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
+        # print(f"admit embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
 
     def _evict(self) -> int:
         """

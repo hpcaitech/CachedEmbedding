@@ -8,6 +8,7 @@ import torchmetrics as metrics
 
 from recsys.utils import get_default_parser, get_mem_info
 from recsys.datasets import criteo
+from recsys.datasets.feature_counter import get_criteo_id_freq_map
 from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, DISTMGR as dist_manager, DISTLogger as
                     dist_logger)
 from recsys.models.dlrm import HybridParallelDLRM
@@ -122,9 +123,11 @@ def parse_args():
     parser.add_argument(
         "--cache_lines",
         type=int,
-        default=1,
+        default=4,
         help="Number of cache lines in each cache set. Similar to the N-way set associate mechanism in cache."
         "Not implemented yet. Increasing this would scale up the cache capacity")
+    parser.add_argument("--use_freq", action='store_true')
+    parser.add_argument("--warmup_ratio", type=float, default=0.7)
 
     # Training
     parser.add_argument(
@@ -322,6 +325,10 @@ def main():
             f"test batches: {len(test_dataloader)}",
             ranks=[0])
 
+    id_freq_map = None
+    if args.use_freq:
+        id_freq_map = get_criteo_id_freq_map(args.in_memory_binary_criteo_path)
+
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device
     model = HybridParallelDLRM(
@@ -339,7 +346,8 @@ def main():
         use_cache=args.use_cache,
         cache_sets=args.cache_sets,
         cache_lines=args.cache_lines,
-    )
+        id_freq_map=id_freq_map,
+        warmup_ratio=args.warmup_ratio)
     dist_logger.info(f"{model.model_stats('DLRM')}", ranks=[0])
     dist_logger.info(f"{get_mem_info('After model init:  ')}", ranks=[0])
     for name, param in model.named_parameters():

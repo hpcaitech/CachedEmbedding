@@ -14,7 +14,8 @@ import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
 
 from recsys.modules.embeddings import CachedEmbeddingBag, FreqAwareEmbeddingBag
-from data_utils import get_dataloader, get_id_freq_map, NUM_EMBED
+from recsys.datasets.feature_counter import get_criteo_id_freq_map
+from data_utils import get_dataloader, NUM_EMBED, CRITEO_PATH
 
 
 def benchmark_cache_embedding(batch_size,
@@ -93,12 +94,12 @@ def benchmark_cache_embedding(batch_size,
 
 if __name__ == "__main__":
     with Timer() as timer:
-        id_freq_map = get_id_freq_map()
+        id_freq_map = get_criteo_id_freq_map(CRITEO_PATH)
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
-    batch_size = [16384]
+    batch_size = [2048]
     embed_dim = 32
-    cache_ratio = [1, 0.1]
+    cache_ratio = [0.5]
     # chunk size
     cache_lines = [1]
 
