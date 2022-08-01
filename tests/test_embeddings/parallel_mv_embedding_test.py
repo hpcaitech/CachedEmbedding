@@ -25,7 +25,7 @@ def _print_rank_0(*msg):
         print(*msg)
         
   
-def check_multi_block_embeddingbag(mode, do_fair):
+def check_multi_block_embeddingbag():
     device = get_current_device()
     world_size = DISTMGR.get_world_size()
     rank = DISTMGR.get_rank()
@@ -43,7 +43,7 @@ def check_multi_block_embeddingbag(mode, do_fair):
                                 weights,
                                 EMBEDDING_DIM,
                                 device=device,
-                                mode=mode)
+                                mode='sum')
     
     # example random input
     _A = []
@@ -57,7 +57,7 @@ def check_multi_block_embeddingbag(mode, do_fair):
     lbmgr = LoadBalanceManager(
         NUM_EMBEDDINGS_PER_FEATURE,
         world_size,EMBEDDING_DIM,
-        do_fair=do_fair,device=device)
+        do_fair=True,device=device)
     
     shard_weights = [lbmgr.shard_weights(weights[0],rank),weights[1]]
     num_embeddings_this_rank = lbmgr.get_num_embeddings_on_rank(rank)
@@ -74,15 +74,15 @@ def check_multi_block_embeddingbag(mode, do_fair):
     shard_embed = BlockEmbeddingBag.from_pretrained(shard_weights,
                                                     EMBEDDING_DIM,
                                                     device=device,
-                                                    mode=mode)
+                                                    mode='sum')
     
     # forward test
     if rank == 0:
         A_master = A.clone() + lbmgr.get_offsets(return_all=True)
         C = embed(A_master)
-    shard_A = lbmgr.shard_tensor(A, rank, use_deprecated=True)
+    shard_A = lbmgr.shard_tensor(A, rank)
     shard_C = shard_embed(shard_A)
-    test_C = reduce_forward(shard_C, parallel_mode=ParallelMode.DEFAULT, reduce_op=mode)
+    test_C = reduce_forward(shard_C, parallel_mode=ParallelMode.DEFAULT, reduce_op='sum')
     if rank == 0:
         print(C)
         print(test_C)
@@ -92,33 +92,11 @@ def check_multi_block_embeddingbag(mode, do_fair):
     if rank == 0:
         C.backward(A_grad.clone())
         test_C.backward(A_grad.clone())
-        
-        # debug
-        # def getBack(print, var_grad_fn):
-        #     print(var_grad_fn)
-        #     for n in var_grad_fn.next_functions:
-        #         if n[0]:
-        #             try:
-        #                 tensor = getattr(n[0], 'variable')
-        #                 print(n[0])
-        #                 print('Tensor with grad found:', tensor)
-        #                 print(' - gradient:', tensor.grad)
-        #                 print()
-        #             except AttributeError as e:
-        #                 getBack(print,n[0])
-        # getBack(print,C.grad_fn)
-        # print('-'*20)
-        # getBack(print,test_C.grad_fn)
     
         # embed layer
         embed_grad = lbmgr.shard_weights(embed.get_weights(False)[0].grad, rank)
         test_embed_grad = shard_embed.get_weights(False)[0].grad[:-1,:] # last one was padding idx
-        # debug
-        # mask = ~torch.eq(embed_grad,test_embed_grad)
-        # print(embed_grad[mask])
-        # print(test_embed_grad[mask])
         assert torch.allclose(embed_grad,test_embed_grad)
-        
 
 def check_single_block_embeddingbag(mode):
     dtype = torch.float32
@@ -178,7 +156,7 @@ def check_single_block_embeddingbag(mode):
     check_equal(blk_embed_ws[1].grad, linear.weight.grad)
     _print_rank_0('embed backward: pass')
 
-def check_mv_embeddingbag(do_fair, enable_qr, mode):
+def check_mv_embeddingbag(do_fair, mode):
     device = get_current_device()
     dtype = torch.float32
     world_size = DISTMGR.get_world_size()
@@ -190,26 +168,18 @@ def check_mv_embeddingbag(do_fair, enable_qr, mode):
 
     num_embeddings_on_rank = lbmgr.get_num_embeddings_on_rank(rank)
     block_dim = lbmgr.get_block_dim(rank)
-    qr_bucket_size = lbmgr.get_qr_bucket_size(rank)
     comm_func = reduce_forward # need all_reduce
     
-    if enable_qr:
-        pretrain_embed = QREmbeddingBag(num_embeddings_on_rank,
-                                  qr_bucket_size,
-                                  EMBEDDING_DIM)
-    else:
-        pretrain_embed = BlockEmbeddingBag(
-                        num_embeddings_on_rank,
-                        block_dim,
-                        EMBEDDING_DIM)
+    pretrain_embed = BlockEmbeddingBag(
+                    num_embeddings_on_rank,
+                    block_dim,
+                    EMBEDDING_DIM,
+                    device=device)
             
-    pretrain_embed = pretrain_embed.to(dtype).to(device)
-    
     test_embed = ParallelMixVocabEmbeddingBag.from_pretrained(
                     pretrain_embed=pretrain_embed, 
                     lbmgr=lbmgr,
-                    mode=mode,
-                    enable_qr=enable_qr)
+                    mode=mode)
 
     test_embed = test_embed.to(dtype).to(device)
     
@@ -261,26 +231,24 @@ def check_mv_embeddingbag(do_fair, enable_qr, mode):
 
     _print_rank_0('embed backward: pass')
 
-def check_layer(rank, world_size, port, do_fair, enable_qr, mode):
+def check_layer(rank, world_size, port, do_fair, mode):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
     check_single_block_embeddingbag(mode)
-    # check_multi_block_embeddingbag(mode, do_fair)
-    check_mv_embeddingbag(do_fair, enable_qr, mode)
+    check_multi_block_embeddingbag()
+    check_mv_embeddingbag(do_fair, mode)
     
     DISTMGR.destroy()
     torch.cuda.empty_cache()
 
 @pytest.mark.parametrize('do_fair', [True,False])
-@pytest.mark.parametrize('enable_qr', [True,False])
 @pytest.mark.parametrize('world_size', [1,2,4])
 @pytest.mark.parametrize('mode', ['sum','mean','max'])
 @rerun_if_address_is_in_use()
-def test_layer(world_size, do_fair, enable_qr, mode):
-    run_func = partial(check_layer, world_size=world_size, port=free_port(), do_fair=do_fair, \
-        enable_qr=enable_qr, mode=mode)
+def test_layer(world_size, do_fair, mode):
+    run_func = partial(check_layer, world_size=world_size, port=free_port(), do_fair=do_fair, mode=mode)
     mp.spawn(run_func, nprocs=world_size)
 
 if __name__ == '__main__':
-    test_layer(4, True, True, 'max')
+    test_layer(4, True, 'max')
