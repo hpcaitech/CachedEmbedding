@@ -16,28 +16,15 @@ from recsys.modules.embeddings import (LoadBalanceManager, BlockEmbeddingBag, Pa
 from common import EMBEDDING_DIM, NUM_EMBEDDINGS_PER_FEATURE, BATCH_SIZE, check_equal
 from recsys.modules.functional import reduce_forward
 
+NUM_EMBEDDINGS_PER_FEATURE = [100,2020,3204,3434302,3023,45459,123,4566]
+
 
 def _print_rank_0(*msg):
     i = DISTMGR.get_rank()
     if i == 0:
         print(*msg)
         
-def test_all_reduce():
-    device = get_current_device()
-    rank = DISTMGR.get_rank()
-    x = torch.randint(0,10,(1,2),requires_grad=True,device=device,dtype=torch.float)*(rank+1)
-    _print_rank_0(x)
-    
-    agg_x = reduce_forward(x, ParallelMode.DEFAULT, reduce_op='mean')
-    _print_rank_0(agg_x)
-    
-    sample_grad = torch.randn(x.shape).to(device)
-    dist.broadcast(sample_grad, 0)
-    _print_rank_0(sample_grad)
-    agg_x.backward(sample_grad)
-    _print_rank_0(x.grad)
-    
-        
+  
 def check_multi_block_embeddingbag(mode, do_fair):
     device = get_current_device()
     world_size = DISTMGR.get_world_size()
@@ -93,29 +80,32 @@ def check_multi_block_embeddingbag(mode, do_fair):
     if rank == 0:
         A_master = A.clone() + lbmgr.get_offsets(return_all=True)
         C = embed(A_master)
-    shard_A = lbmgr.put_tensor_on_rank(A, rank)
+    shard_A = lbmgr.shard_tensor(A, rank, use_deprecated=True)
     shard_C = shard_embed(shard_A)
     test_C = reduce_forward(shard_C, parallel_mode=ParallelMode.DEFAULT, reduce_op=mode)
     if rank == 0:
-        assert torch.allclose(C, test_C)
+        print(C)
+        print(test_C)
+        assert torch.allclose(C, test_C, atol = 1e-2)
     
     # backward test
     if rank == 0:
         C.backward(A_grad.clone())
         test_C.backward(A_grad.clone())
         
-        def getBack(print, var_grad_fn):
-            print(var_grad_fn)
-            for n in var_grad_fn.next_functions:
-                if n[0]:
-                    try:
-                        tensor = getattr(n[0], 'variable')
-                        print(n[0])
-                        print('Tensor with grad found:', tensor)
-                        print(' - gradient:', tensor.grad)
-                        print()
-                    except AttributeError as e:
-                        getBack(print,n[0])
+        # debug
+        # def getBack(print, var_grad_fn):
+        #     print(var_grad_fn)
+        #     for n in var_grad_fn.next_functions:
+        #         if n[0]:
+        #             try:
+        #                 tensor = getattr(n[0], 'variable')
+        #                 print(n[0])
+        #                 print('Tensor with grad found:', tensor)
+        #                 print(' - gradient:', tensor.grad)
+        #                 print()
+        #             except AttributeError as e:
+        #                 getBack(print,n[0])
         # getBack(print,C.grad_fn)
         # print('-'*20)
         # getBack(print,test_C.grad_fn)
@@ -123,17 +113,13 @@ def check_multi_block_embeddingbag(mode, do_fair):
         # embed layer
         embed_grad = lbmgr.shard_weights(embed.get_weights(False)[0].grad, rank)
         test_embed_grad = shard_embed.get_weights(False)[0].grad[:-1,:] # last one was padding idx
+        # debug
         # mask = ~torch.eq(embed_grad,test_embed_grad)
         # print(embed_grad[mask])
         # print(test_embed_grad[mask])
         assert torch.allclose(embed_grad,test_embed_grad)
-    
-        # linear layer
-        # print(embed.get_weights(False)[1].grad)
-        # print(shard_embed.get_weights(False)[1].grad)
-        # assert torch.allclose(embed.get_weights(False)[1].grad,
-        #                       shard_embed.get_weights(False)[1].grad)
-    
+        
+
 def check_single_block_embeddingbag(mode):
     dtype = torch.float32
     
@@ -279,10 +265,9 @@ def check_layer(rank, world_size, port, do_fair, enable_qr, mode):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
-    # check_single_block_embeddingbag(mode)
-    # test_all_reduce()
-    check_multi_block_embeddingbag(mode, do_fair)
-    # check_mv_embeddingbag(do_fair, enable_qr, mode)
+    check_single_block_embeddingbag(mode)
+    # check_multi_block_embeddingbag(mode, do_fair)
+    check_mv_embeddingbag(do_fair, enable_qr, mode)
     
     DISTMGR.destroy()
     torch.cuda.empty_cache()
@@ -298,4 +283,4 @@ def test_layer(world_size, do_fair, enable_qr, mode):
     mp.spawn(run_func, nprocs=world_size)
 
 if __name__ == '__main__':
-    test_layer(4, True, True, 'mean')
+    test_layer(4, True, True, 'max')

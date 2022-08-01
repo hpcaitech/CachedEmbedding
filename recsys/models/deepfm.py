@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 from torch.profiler import record_function
+import numpy as np
 
 from recsys import ParallelMode
 from recsys.modules.embeddings import ParallelMixVocabEmbeddingBag, BlockEmbeddingBag
@@ -13,18 +14,21 @@ class FeatureEmbedding(nn.Module):
     
     def __init__(self, field_dims, emb_dim, enable_qr):
         super().__init__()
-        self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, 
+        self.embedding = ParallelMixVocabEmbeddingBag(field_dims, emb_dim, mode='sum',
                                                           parallel_mode=ParallelMode.TENSOR_PARALLEL,
                                                           enable_qr=enable_qr, do_fair=True)
-        # # single bag:
+        # single bag:
+        # self.offsets = np.array((0,*np.cumsum(field_dims)[:-1]),dtype=np.int64)
         # self.embedding = BlockEmbeddingBag(sum(field_dims),int(math.sqrt(emb_dim)),emb_dim)
-            
+
         # print('Saved params (M)',emb_dim*(sum(field_dims) - math.ceil(math.sqrt(sum(field_dims))))//1_000_000)
 
     def forward(self,sparse_features):
-        sparse_features = sparse_features.values().reshape(-1,16384).T
-        return self.embedding(sparse_features)
-    
+        x = sparse_features.values().reshape(-1,16384).T
+        # MANUALLY ADD OFFSETS ONLY FOR SINGLE BAG EMBEDDING
+        # x = x + x.new_tensor(self.offsets).unsqueeze(0)
+        return self.embedding(x)
+
 
 class FeatureLinear(nn.Module):
 
