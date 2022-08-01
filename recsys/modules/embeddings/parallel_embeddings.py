@@ -108,7 +108,6 @@ class VocabParallelEmbedding(torch.nn.Module):
 
 class ColumnParallelEmbeddingBag(torch.nn.Module):
     """EmbeddingBag parallelized in the hidden dimension.
-
     This version tries best to evenly split the weight parameters even if the column dim is indivisible
     by the world size of the process group
     """
@@ -248,7 +247,6 @@ class FusedHybridParallelEmbeddingBag(ColumnParallelEmbeddingBag):
     """
     For the hybrid parallelism where embedding params use model parallelism
     while the subsequent dense modules use data parallelism
-
     fused_op:
         - all_to_all:
         - gather_scatter:

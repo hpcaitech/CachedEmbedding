@@ -21,8 +21,32 @@ def _reduce(x, parallel_mode, reduce_op: str):
     process_group = dist_manager.get_cpu_group(parallel_mode) \
         if x.device.type == 'cpu' else dist_manager.get_group(parallel_mode)
 
+    if reduce_op == 'max':
+        _x = x.clone()
+
     torch.distributed.all_reduce(x, op=_reduce_ops[reduce_op], group=process_group)
-    return x
+    
+    rank = dist_manager.get_rank(parallel_mode)
+    
+    if reduce_op == 'max':
+        mask = torch.eq(_x, x) * rank
+    else:
+        mask = torch.ones(x.shape) * rank
+    
+    return x, mask.to(x.device)
+
+
+def _reduce_backward(grad, parallel_mode, reduce_op: str, mask: int=None):
+    if dist_manager.get_world_size(parallel_mode) == 1:
+        return grad
+    
+    rank = dist_manager.get_rank(parallel_mode)
+    if reduce_op == 'max':
+        grad[~torch.eq(mask[rank],rank)].fill_(0)
+    elif reduce_op == 'mean':
+        grad /= dist_manager.get_world_size(parallel_mode)
+
+    return grad
 
 
 def _gather(x, parallel_mode, dim):
@@ -85,14 +109,19 @@ def _all_to_all(x, parallel_mode, scatter_dim, gather_dim):
 
 
 class _ReduceForward(torch.autograd.Function):
-
+    
     @staticmethod
     def forward(ctx, x, parallel_mode, reduce_op):
-        return _reduce(x, parallel_mode, reduce_op)
+        ctx.parallel_mode = parallel_mode
+        ctx.reduce_op = reduce_op
+        ctx.mask = dict()
+        rank = dist_manager.get_rank(parallel_mode)
+        result, ctx.mask[rank] = _reduce(x, parallel_mode, reduce_op)
+        return result
 
     @staticmethod
     def backward(ctx, grad):
-        return grad, None, None
+        return _reduce_backward(grad, ctx.parallel_mode, ctx.reduce_op, ctx.mask), None, None
 
 
 def reduce_forward(x, parallel_mode, reduce_op='sum'):
