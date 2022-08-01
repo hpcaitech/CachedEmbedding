@@ -34,6 +34,7 @@ def benchmark_cache_embedding(batch_size,
           f"cached chunks: {cuda_chunk_num}, chunk size: {cache_lines}, cached_ratio {cuda_chunk_num / chunk_num}")
     data_iter = iter(dataloader)
 
+    torch.cuda.reset_peak_memory_stats()
     device = torch.device('cuda:0')
     if embed_type == 'row':
         model = CachedEmbeddingBag(NUM_EMBED,
@@ -54,6 +55,9 @@ def benchmark_cache_embedding(batch_size,
 
     grad = None
     avg_hit_rate = None
+    print(f'after reorder max_memory_allocated {torch.cuda.max_memory_allocated()/1e9} GB, max_memory_reserved {torch.cuda.max_memory_allocated()/1e9} GB')
+    torch.cuda.reset_peak_memory_stats()
+
     with Timer() as timer:
         with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
             # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -82,13 +86,14 @@ def benchmark_cache_embedding(batch_size,
                     t.update()
                     if it == 200:
                         break
+        
     hit_hist = np.array(model.num_hits_history)
     miss_hist = np.array(model.num_miss_history)
     hist = hit_hist / (hit_hist + miss_hist)
     avg_hit_rate = np.mean(hist)
     print(f"average hit rate: {avg_hit_rate}")
     model.chunk_weight_mgr.print_comm_stats()
-
+    print(f'training max_memory_allocated {torch.cuda.max_memory_allocated()/1e9} GB, max_memory_reserved {torch.cuda.max_memory_allocated()/1e9} GB')
     print(f'overall training time {timer.elapsed:.2f}s')
 
 
