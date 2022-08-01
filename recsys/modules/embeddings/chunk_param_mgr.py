@@ -44,7 +44,7 @@ class ChunkParamMgr(object):
                 weight = torch.cat([weight, padding], dim=0)
 
         # pin memory cpu for higher CPU-GPU copy bandwidth
-        self.cpu_weight = weight.pin_memory()
+        self.cpu_weight = weight.contiguous().pin_memory()
 
         # IndexMappingTable (IMP): implemented with two lists.
         # id-> chunk_id and id -> offset_in_chunk
@@ -276,7 +276,7 @@ class ChunkParamMgr(object):
                 weight_size = evict_slot_ids.numel() * self.embedding_dim
             self._cuda_to_cpu_elapse += timer.elapsed
             self._cuda_to_cpu_numel += weight_size
-            print(f"evict embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
+            # print(f"evict embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
 
         with Timer() as timer:
             slots = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)[:chunk_ids.numel()]
@@ -291,7 +291,7 @@ class ChunkParamMgr(object):
         self._cpu_to_cuda_elpase += timer.elapsed
         weight_size = chunks.numel()
         self._cpu_to_cuda_numel += weight_size
-        print(f"admit embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
+        # print(f"admit embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
 
     def _evict(self) -> int:
         """

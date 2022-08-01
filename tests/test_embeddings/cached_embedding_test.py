@@ -9,7 +9,7 @@ from recsys import DISTMGR
 from colossalai.utils import free_port
 from colossalai.testing import rerun_if_address_is_in_use
 from recsys.modules.embeddings import CachedEmbeddingBag, ParallelCachedEmbeddingBag, CacheReplacePolicy
-from recsys.testing.utils import synthesize_1d_sparse_feature
+from recsys.testing.utils import synthesize_1d_sparse_feature, gather_tensor
 
 NUM_EMBEDDINGS, EMBEDDING_DIM = 100, 8
 BATCH_SIZE = 8
@@ -52,18 +52,6 @@ def run_cached_embedding_bag(cache_replace_policy):
     model_weight = model.weight.detach().to(device)
     ref_weight = ref_model.weight.detach()
     assert torch.allclose(model_weight, ref_weight)
-
-
-def gather_tensor(tensor):
-    gather_list = []
-    rank = DISTMGR.get_rank()
-    world_size = DISTMGR.get_world_size()
-    if rank == 0:
-        gather_list = [torch.empty_like(tensor) for _ in range(world_size)]
-
-    group = DISTMGR.get_group()
-    torch.distributed.gather(tensor, gather_list, dst=0, group=group)
-    return gather_list
 
 
 def parallel_cached_embedding_bag(cache_replace_policy):

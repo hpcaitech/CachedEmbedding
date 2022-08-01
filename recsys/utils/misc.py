@@ -6,7 +6,8 @@ from time import perf_counter
 
 
 def get_mem_info(prefix=''):
-    return f'{prefix}GPU memory usage: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, ' \
+    return f'{prefix}GPU memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, ' \
+           f'GPU memory reserved: {torch.cuda.memory_reserved() /1024**3:.2f} GB, ' \
            f'CPU memory usage: {psutil.Process().memory_info().rss / 1024**3:.2f} GB'
 
 

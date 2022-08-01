@@ -1,7 +1,6 @@
 import os
 from torch.utils.data import DataLoader
 from recsys.datasets import criteo
-from recsys.datasets.feature_counter import GlobalFeatureCounter, CriteoSparseProcessor
 
 CRITEO_PATH = "../criteo_kaggle_data"
 NUM_EMBED = 33762577
@@ -44,14 +43,3 @@ def get_dataloader(stage, batch_size):
         collate_fn=lambda x: x,
     )
     return dataloader
-
-
-def get_id_freq_map():
-    files = os.listdir(CRITEO_PATH)
-    sparse_files = list(filter(lambda s: 'sparse' in s, files))
-    sparse_files = [os.path.join(CRITEO_PATH, _f) for _f in sparse_files]
-
-    file_processor = CriteoSparseProcessor(list(map(int, criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(','))))
-    feature_count = GlobalFeatureCounter(sparse_files, file_processor)
-
-    return feature_count.id_freq_map
