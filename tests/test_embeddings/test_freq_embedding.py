@@ -181,7 +181,7 @@ def run_parallel_freq_aware_embed(rank, world_size, port, chunk_size):
         assert torch.allclose(recover_weight, ref_model.weight.detach())
 
 
-@pytest.mark.parametrize('world_size', [1, 4])
+@pytest.mark.parametrize('world_size', [1, 2])
 @pytest.mark.parametrize('chunk_size', [1, 4])
 @rerun_if_address_is_in_use()
 def test_parallel_freq_aware_embed(world_size, chunk_size):

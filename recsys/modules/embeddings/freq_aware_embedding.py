@@ -126,6 +126,10 @@ class ParallelFreqAwareEmbeddingBag(BaseEmbeddingBag):
             assert list(partition.shape) == [num_embeddings, self.embedding_dim_per_partition]
             self._weight = partition
 
+    @property
+    def weight(self):
+        return self.chunk_weight_mgr.cpu_weight
+
     def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
         yield 'weight', self.chunk_weight_mgr.cuda_partial_weight
 
