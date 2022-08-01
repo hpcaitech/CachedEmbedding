@@ -5,6 +5,7 @@ from typing import List, Optional
 from contexttimer import Timer
 from .limit_buff_index_copy import LimitBuffIndexCopyer
 
+
 class ChunkParamMgr(object):
     """
     Manage Weights in Chunk on CPU and CUDA memory.
@@ -66,10 +67,9 @@ class ChunkParamMgr(object):
 
         self.evict_backlist = torch.tensor([], device=torch.cuda.current_device())
 
-
         # index copy buffer size should less than 10% of cuda weight.
         if self.use_limit_buff:
-            self.limit_buff_index_copyer = LimitBuffIndexCopyer(self.cuda_chunk_num * 0.1)
+            self.limit_buff_index_copyer = LimitBuffIndexCopyer(int(np.ceil(self.cuda_chunk_num * 0.1)))
 
         self.num_hits_history = []
         self.num_miss_history = []
@@ -129,14 +129,15 @@ class ChunkParamMgr(object):
                 preload_slot_ids = preload_chunk_ids.cuda()
 
                 if self.use_limit_buff:
-                    self.limit_buff_index_copyer.index_copy(0, 
-                            src_index=preload_chunk_ids, 
-                            tgt_index=preload_slot_ids, 
-                            src=self.cpu_weight.view(self.chunk_num, -1), 
-                            tgt=self.cuda_partial_weight.view(self.cuda_chunk_num, -1))
+                    self.limit_buff_index_copyer.index_copy(0,
+                                                            src_index=preload_chunk_ids,
+                                                            tgt_index=preload_slot_ids,
+                                                            src=self.cpu_weight.view(self.chunk_num, -1),
+                                                            tgt=self.cuda_partial_weight.view(self.cuda_chunk_num, -1))
                 else:
                     preload_chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, preload_chunk_ids).cuda()
-                    self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, preload_slot_ids, preload_chunks)
+                    self.cuda_partial_weight.view(self.cuda_chunk_num,
+                                                  -1).index_copy_(0, preload_slot_ids, preload_chunks)
 
                 # update auxiliary info
                 slot_offsets = preload_slot_ids.unsqueeze(1) * self.chunk_size
@@ -255,20 +256,18 @@ class ChunkParamMgr(object):
 
                 evict_info = self.cached_chunk_table[evict_slot_ids]
 
-                
                 if self.use_limit_buff:
-                    self.limit_buff_index_copyer.index_copy(0, 
-                                        src_index=evict_slot_ids,
-                                        tgt_index=evict_info[:, 0].cpu(), 
-                                        src=self.cuda_partial_weight.view(self.cuda_chunk_num, -1), 
-                                        tgt=self.cpu_weight.view(self.chunk_num, -1))
+                    self.limit_buff_index_copyer.index_copy(0,
+                                                            src_index=evict_slot_ids,
+                                                            tgt_index=evict_info[:, 0].cpu(),
+                                                            src=self.cuda_partial_weight.view(self.cuda_chunk_num, -1),
+                                                            tgt=self.cpu_weight.view(self.chunk_num, -1))
                 else:
                     # allocate tmp memory on CPU and copy chunks on CUDA to CPU.
-                    tmp_cuda_chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0, evict_slot_ids)
-                    tmp_cpu_chunks = torch.empty_like(tmp_cuda_chunks, device='cpu', pin_memory=True)
-                    tmp_cpu_chunks.copy_(tmp_cuda_chunks)
-                    self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), tmp_cpu_chunks)
-            
+                    chunks = self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_select(0,
+                                                                                                 evict_slot_ids).cpu()
+                    self.cpu_weight.view(self.chunk_num, -1).index_copy_(0, evict_info[:, 0].cpu(), chunks)
+
                 self.cached_chunk_table[:, 0].index_fill_(0, evict_slot_ids, -1)
                 self.CCT.squeeze(1).index_fill_(0, evict_info[:, 0], -1)
                 self._cuda_available_chunk_num += evict_num
@@ -281,15 +280,22 @@ class ChunkParamMgr(object):
         with Timer() as timer:
             slots = torch.nonzero(self.cached_chunk_table[:, 0] == -1).squeeze(1)[:chunk_ids.numel()]
             # Here also allocate extra memory on CUDA. #chunk_ids * chunk.
-            chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, chunk_ids.cpu()).cuda()
-            self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, slots, chunks)
+            if self.use_limit_buff:
+                self.limit_buff_index_copyer.index_copy(0,
+                                                        src_index=chunk_ids.cpu(),
+                                                        tgt_index=slots,
+                                                        src=self.cpu_weight.view(self.chunk_num, -1),
+                                                        tgt=self.cuda_partial_weight.view(self.cuda_chunk_num, -1))
+            else:
+                chunks = self.cpu_weight.view(self.chunk_num, -1).index_select(0, chunk_ids.cpu()).cuda()
+                self.cuda_partial_weight.view(self.cuda_chunk_num, -1).index_copy_(0, slots, chunks)
             slot_offsets = slots * self.chunk_size
             self.cached_chunk_table[slots, 0] = chunk_ids
             self.cached_chunk_table[slots, 1] = slot_offsets
             self.CCT.squeeze(1).index_copy_(0, chunk_ids, slot_offsets)
             self._cuda_available_chunk_num -= chunk_ids.numel()
         self._cpu_to_cuda_elpase += timer.elapsed
-        weight_size = chunks.numel()
+        weight_size = chunk_ids.numel() * self.embedding_dim
         self._cpu_to_cuda_numel += weight_size
         # print(f"admit embedding weight: {weight_size*self.elem_size_in_byte/1e6:.2f} MB")
 

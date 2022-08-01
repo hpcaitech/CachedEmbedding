@@ -1,6 +1,7 @@
 import torch
 from torch import LongTensor
 
+
 class LimitBuffIndexCopyer(object):
     """LimitBuffIndexCopyer 
     Index Copy using limited temp buffer on CUDA.
@@ -8,11 +9,12 @@ class LimitBuffIndexCopyer(object):
     Args:
         size (int): buffer size
     """
-    def __init__(self, size : int) -> None:
-        self._buff_size = int(size)
+
+    def __init__(self, size: int) -> None:
+        self._buff_size = size
 
     @torch.no_grad()
-    def index_copy(self, dim : int, src_index : LongTensor, tgt_index : LongTensor, src : torch.Tensor, tgt : torch.Tensor):
+    def index_copy(self, dim: int, src_index: LongTensor, tgt_index: LongTensor, src: torch.Tensor, tgt: torch.Tensor):
         """copy 
         src tensor[src_index] -(index_select)-> tmp -()-> tgt tensor [tgt_index]
         The valid part in src is continous, while in tgt is scatter.
@@ -31,7 +33,7 @@ class LimitBuffIndexCopyer(object):
         src_device = src.device
 
         assert src_index.numel() == tgt_index.numel()
-        dim_size = src_index.numel() 
+        dim_size = src_index.numel()
         src_index = src_index.to(src_device)
         for begin_pos in range(0, dim_size, self._buff_size):
             cur_len = min(self._buff_size, dim_size - begin_pos)
@@ -52,9 +54,9 @@ if __name__ == '__main__':
     dst1 = torch.empty(123, 8)
     dst2 = torch.empty(123, 8)
     assert torch.allclose(dst1, dst2), f"{dst1-dst2}"
-    idx = torch.tensor([3,1,29,8,5,7,12,17,33, 21])
+    idx = torch.tensor([3, 1, 29, 8, 5, 7, 12, 17, 33, 21])
     dst1.index_copy_(0, idx, src)
-    
+
     copyer = LimitBuffIndexCopyer(3)
     copyer.index_copy(0, idx, src, dst2)
     assert torch.allclose(dst1, dst2), f"{dst1-dst2}"
