@@ -59,22 +59,26 @@ def test_reorder_with_freq():
     id_freq_map = np.random.randint(10000, size=(num_embed,))
     sorted_idx = np.flipud(np.argsort(id_freq_map)).tolist()
     chunkid, offset_in_chunk = [], []
-    for i in range(100):
+    for i in range(num_embed):
         idx = sorted_idx.index(i)
         chunkid.append(idx // chunk_size)
         offset_in_chunk.append(idx % chunk_size)
 
-    chunkid = torch.tensor(chunkid, dtype=torch.long, device=torch.cuda.current_device()).unsqueeze(1)
-    offset_in_chunk = torch.tensor(offset_in_chunk, dtype=torch.long, device=torch.cuda.current_device()).unsqueeze(1)
+    chunkid = torch.tensor(chunkid, dtype=torch.long, device=torch.cuda.current_device())
+    offset_in_chunk = torch.tensor(offset_in_chunk, dtype=torch.long, device=torch.cuda.current_device())
 
     weight = torch.rand(num_embed, 2)
     mgr = ChunkParamMgr(weight, chunk_size, num_chunk)
 
     mgr.reorder(id_freq_map)
 
-    assert torch.allclose(chunkid, mgr.IMP_chunkid), f"chunk id: {chunkid}, mgr: {mgr.IMP_chunkid}"
-    assert torch.allclose(offset_in_chunk, mgr.IMP_offsetinchunk), \
-        f"offset in chunk: {offset_in_chunk}, mgr: {mgr.IMP_offsetinchunk}"
+    indices = mgr.id_freq_map.index_select(
+        0, torch.arange(num_embed, dtype=torch.long, device=torch.cuda.current_device()))
+    mgr_chunk_id = torch.div(indices, chunk_size, rounding_mode='floor')
+    mgr_offsets = torch.remainder(indices, chunk_size)
+    assert torch.allclose(chunkid, mgr_chunk_id), f"chunk id: {chunkid}, mgr: {mgr_chunk_id}"
+    assert torch.allclose(offset_in_chunk, mgr_offsets), \
+        f"offset in chunk: {offset_in_chunk}, mgr: {mgr_offsets}"
 
 
 @pytest.mark.parametrize('chunk_size', [1, 2, 4])
@@ -194,4 +198,4 @@ if __name__ == '__main__':
     # test_chunkmgr_admit()
     # test_freq_aware_embed(2)
     # test_reorder_with_freq()
-    test_parallel_freq_aware_embed(4, 4)
+    test_parallel_freq_aware_embed(2, 1)
