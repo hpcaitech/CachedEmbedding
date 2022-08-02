@@ -54,7 +54,7 @@ class Net_2(torch.nn.Module):
         self.linear = DDP(torch.nn.Linear(embedding_dim, 5).cuda(), device_ids=[rank], process_group=group)
 
     def forward(self, sparse_features, offsets, send_shape):
-        x = self.embed(sparse_features, offsets, send_shape=send_shape)
+        x = self.embed(sparse_features, offsets, shape_hook=lambda x: x.view(*send_shape))
         return self.linear(x)
 
 

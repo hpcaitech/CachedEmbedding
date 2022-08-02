@@ -42,14 +42,14 @@ class Timer:
 
     @property
     def current_time(self) -> float:
-        synchronize()
+        torch.cuda.synchronize()
         return time.time()
 
     def start(self):
         """Firstly synchronize cuda, reset the clock and then start the timer.
         """
         self._elapsed = 0
-        synchronize()
+        torch.cuda.synchronize()
         self._start_time = time.time()
         self._started = True
 
@@ -67,7 +67,7 @@ class Timer:
         Returns:
             int: Start-stop interval.
         """
-        synchronize()
+        torch.cuda.synchronize()
         end_time = time.time()
         elapsed = end_time - self._start_time
         if keep_in_history:
