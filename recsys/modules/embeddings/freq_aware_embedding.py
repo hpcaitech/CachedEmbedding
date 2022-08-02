@@ -21,7 +21,8 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
                    chunk_size: int,
                    cuda_chunk_num: int,
                    ids_freq_mapping: Optional[List[int]] = None,
-                   warmup_ratio=0.7):
+                   warmup_ratio=0.7,
+                   use_limit_buf=True):
         """
         Called after initialized. 
         Reorder the weight rows according to the ids_freq_mapping.
@@ -32,7 +33,7 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq
             warmup_ratio (float): the amount of chunks preloaded in cuda cache
         """
-        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num)
+        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num, use_limit_buf)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
