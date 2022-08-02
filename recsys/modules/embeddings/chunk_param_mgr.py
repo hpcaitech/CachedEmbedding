@@ -118,7 +118,7 @@ class ChunkParamMgr(torch.nn.Module):
         # TODO() The following code will allocate extra CUDA memory. preload_chunk_num * chunks.
         # As cuda_partial_weight is very big. You may not have that much available memory!
         # Warmup the cuda cache by moving high freq chunks (lowest chunk id) to cuda
-        preload_chunk_num = int(np.ceil(self.cuda_chunk_num * warmup_ratio))
+        preload_chunk_num = min(int(np.ceil(self.cuda_chunk_num * warmup_ratio)), self.chunk_num)
         if preload_chunk_num > 0:
             with Timer() as timer:
                 # extract chunks from cpu weight
