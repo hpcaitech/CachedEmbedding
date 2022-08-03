@@ -24,8 +24,11 @@ def _print_rank_0(*msg):
     if i == 0:
         print(*msg)
         
+def test_all_reduce(mode):
+    device = get_current_device()
+    rank = DISTMGR.get_rank()
   
-def check_multi_block_embeddingbag():
+def check_multi_block_embeddingbag(mode):
     device = get_current_device()
     world_size = DISTMGR.get_world_size()
     rank = DISTMGR.get_rank()
@@ -43,7 +46,7 @@ def check_multi_block_embeddingbag():
                                 weights,
                                 EMBEDDING_DIM,
                                 device=device,
-                                mode='sum')
+                                mode=mode)
     
     # example random input
     _A = []
@@ -59,7 +62,7 @@ def check_multi_block_embeddingbag():
         world_size,EMBEDDING_DIM,
         do_fair=True,device=device)
     
-    shard_weights = [lbmgr.shard_weights(weights[0],rank),weights[1]]
+    shard_weights = [lbmgr.shard_weights(weights[0],rank).clone(),weights[1].clone()]
     num_embeddings_this_rank = lbmgr.get_num_embeddings_on_rank(rank)
     
     # test weight sharding correctness
@@ -74,7 +77,7 @@ def check_multi_block_embeddingbag():
     shard_embed = BlockEmbeddingBag.from_pretrained(shard_weights,
                                                     EMBEDDING_DIM,
                                                     device=device,
-                                                    mode='sum')
+                                                    mode=mode)
     
     # forward test
     if rank == 0:
@@ -82,7 +85,7 @@ def check_multi_block_embeddingbag():
         C = embed(A_master)
     shard_A = lbmgr.shard_tensor(A, rank)
     shard_C = shard_embed(shard_A)
-    test_C = reduce_forward(shard_C, parallel_mode=ParallelMode.DEFAULT, reduce_op='sum')
+    test_C = reduce_forward(shard_C, parallel_mode=ParallelMode.DEFAULT, reduce_op=mode)
     if rank == 0:
         print(C)
         print(test_C)
@@ -92,7 +95,6 @@ def check_multi_block_embeddingbag():
     if rank == 0:
         C.backward(A_grad.clone())
         test_C.backward(A_grad.clone())
-    
         # embed layer
         embed_grad = lbmgr.shard_weights(embed.get_weights(False)[0].grad, rank)
         test_embed_grad = shard_embed.get_weights(False)[0].grad[:-1,:] # last one was padding idx
@@ -235,9 +237,9 @@ def check_layer(rank, world_size, port, do_fair, mode):
     disable_existing_loggers()
     launch(rank=rank, world_size=world_size, host='localhost', port=port, backend='nccl')
     
-    check_single_block_embeddingbag(mode)
-    check_multi_block_embeddingbag()
-    check_mv_embeddingbag(do_fair, mode)
+    # check_single_block_embeddingbag(mode)
+    check_multi_block_embeddingbag(mode)
+    # check_mv_embeddingbag(do_fair, mode)
     
     DISTMGR.destroy()
     torch.cuda.empty_cache()
@@ -251,4 +253,4 @@ def test_layer(world_size, do_fair, mode):
     mp.spawn(run_func, nprocs=world_size)
 
 if __name__ == '__main__':
-    test_layer(4, True, 'max')
+    test_layer(4, True, 'mean')
