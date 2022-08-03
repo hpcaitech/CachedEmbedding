@@ -231,7 +231,7 @@ if __name__ == '__main__':
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
     launch_from_torch(backend='nccl', seed=args.seed)
-    dist_manager.new_process_group(2, ParallelMode.TENSOR_PARALLEL)
+    dist_manager.new_process_group(4, ParallelMode.TENSOR_PARALLEL)
     print(dist_manager.get_distributed_info())
     
     dist_logger.info(f'Number of embeddings per feature: {args.num_embeddings_per_feature}',ranks=[0])
