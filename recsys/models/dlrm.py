@@ -133,7 +133,8 @@ class FusedSparseModules(nn.Module):
                  cache_sets=500_000,
                  cache_lines=1,
                  id_freq_map=None,
-                 warmup_ratio=0.7):
+                 warmup_ratio=0.7,
+                 use_buffer=True):
         super(FusedSparseModules, self).__init__()
         if use_cache:
             # self.embed = ParallelCachedEmbeddingBag(sum(num_embeddings_per_feature),
@@ -150,7 +151,7 @@ class FusedSparseModules(nn.Module):
                                                        mode=reduction_mode,
                                                        include_last_offset=True,
                                                        parallel_mode=parallel_mode)
-            self.embed.preprocess(cache_lines, cache_sets, id_freq_map, warmup_ratio)
+            self.embed.preprocess(cache_lines, cache_sets, id_freq_map, warmup_ratio, use_buffer=use_buffer)
         else:
             self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
                                                          embedding_dim,
@@ -218,7 +219,8 @@ class HybridParallelDLRM(nn.Module):
                  cache_sets=500_000,
                  cache_lines=1,
                  id_freq_map=None,
-                 warmup_ratio=0.7):
+                 warmup_ratio=0.7,
+                 use_buffer=True):
 
         super(HybridParallelDLRM, self).__init__()
         if use_cache and sparse_device.type != dense_device.type:
@@ -238,7 +240,8 @@ class HybridParallelDLRM(nn.Module):
                                                  cache_sets=cache_sets,
                                                  cache_lines=cache_lines,
                                                  id_freq_map=id_freq_map,
-                                                 warmup_ratio=warmup_ratio).to(sparse_device)
+                                                 warmup_ratio=warmup_ratio,
+                                                 use_buffer=use_buffer).to(sparse_device)
         self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                           dense_arch_layer_sizes,
                                                           over_arch_layer_sizes).to(dense_device),

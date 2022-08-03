@@ -147,8 +147,9 @@ class ParallelFreqAwareEmbeddingBag(BaseEmbeddingBag):
                    chunk_size: int,
                    cuda_chunk_num: int,
                    ids_freq_mapping: Optional[List[int]] = None,
-                   warmup_ratio: float = 0.7):
-        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num)
+                   warmup_ratio: float = 0.7,
+                   use_buffer: bool = True):
+        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num, use_limit_buff=use_buffer)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
