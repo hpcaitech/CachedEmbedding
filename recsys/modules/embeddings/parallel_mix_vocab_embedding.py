@@ -331,6 +331,7 @@ def determine_freq_blocks(word_frequencies: Tensor,
         
     return num_embeddings_per_block, id_group_map, block_embedding_dims
 
+
 class MultiBlockEmbeddingBag(nn.Module):
     def __init__(self,
                  word_frequencies: Tensor,
@@ -342,8 +343,9 @@ class MultiBlockEmbeddingBag(nn.Module):
                  *args,
                  **kwargs):
         super().__init__()
-        self.num_embeddings_per_block , self.num_blocks, self.block_embedding_dims = \
-                determine_freq_blocks(word_frequencies,num_embeddings,num_blocks,base_embedding_dim)
+        self.num_blocks = num_blocks
+        self.num_embeddings_per_block , self.id_group_map, self.block_embedding_dims = \
+                determine_freq_blocks(word_frequencies,num_embeddings,self.num_blocks,base_embedding_dim)
         self.base_embedding_dim = base_embedding_dim
         self._sanity_check()
         self.block_embeds = [BlockEmbeddingBag(
@@ -357,6 +359,11 @@ class MultiBlockEmbeddingBag(nn.Module):
                              for i in range(self.num_blocks)]
         self.mode = mode
         self.device = device
+        
+    def _sanity_check(self):
+        assert self.num_blocks>=1 and self.num_blocks == len(self.num_embeddings_per_block)
+        assert self.num_blocks == len(self.block_embedding_dims)
+        assert self.base_embedding_dim >= max(self.block_embedding_dims)
         
     def _sanity_check(self):
         assert self.num_blocks>=1 and self.num_blocks == len(self.num_embeddings_per_block)
