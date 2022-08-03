@@ -128,7 +128,7 @@ def parse_args():
         "Not implemented yet. Increasing this would scale up the cache capacity")
     parser.add_argument("--use_freq", action='store_true')
     parser.add_argument("--warmup_ratio", type=float, default=0.7)
-    parser.add_argument("--use_buffer", action='store_true')
+    parser.add_argument("--buffer_size", type=int, default=50_000)
 
     # Training
     parser.add_argument(
@@ -349,7 +349,7 @@ def main():
         cache_lines=args.cache_lines,
         id_freq_map=id_freq_map,
         warmup_ratio=args.warmup_ratio,
-        use_buffer=args.use_buffer)
+        buffer_size=args.buffer_size)
     dist_logger.info(f"{model.model_stats('DLRM')}", ranks=[0])
     dist_logger.info(f"{get_mem_info('After model init:  ')}", ranks=[0])
     for name, param in model.named_parameters():
