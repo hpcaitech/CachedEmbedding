@@ -286,7 +286,7 @@ def train_val_test(
     train_val_test_results = TrainValTestResults()
     with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
+            schedule=schedule(wait=0, warmup=200, active=2, repeat=1),
             profile_memory=True,
             on_trace_ready=tensorboard_trace_handler(args.profile_dir),
     ) as prof:
