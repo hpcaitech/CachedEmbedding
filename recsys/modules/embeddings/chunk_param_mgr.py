@@ -17,9 +17,9 @@ class ChunkParamMgr(torch.nn.Module):
                  weight: torch.Tensor,
                  chunk_size: int = 16 * 1024 * 1024,
                  cuda_chunk_num: int = 0,
-                 use_limit_buff: bool = True) -> None:
+                 buffer_size: int = 50_000) -> None:
         super(ChunkParamMgr, self).__init__()
-        self.use_limit_buff = use_limit_buff
+        self.buffer_size = buffer_size
         self.chunk_size = chunk_size
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_chunk_num = cuda_chunk_num
@@ -72,8 +72,8 @@ class ChunkParamMgr(torch.nn.Module):
         self.evict_backlist = torch.tensor([], device=torch.cuda.current_device())
 
         # index copy buffer size should less than 10% of cuda weight.
-        if self.use_limit_buff:
-            self.limit_buff_index_copyer = LimitBuffIndexCopyer(int(np.ceil(self.cuda_chunk_num * 0.1)))
+        if self.buffer_size > 0:
+            self.limit_buff_index_copyer = LimitBuffIndexCopyer(self.buffer_size)
 
         self.num_hits_history = []
         self.num_miss_history = []
@@ -125,7 +125,7 @@ class ChunkParamMgr(torch.nn.Module):
                 preload_chunk_ids = torch.arange(preload_chunk_num)
                 preload_slot_ids = preload_chunk_ids.cuda()
 
-                if self.use_limit_buff:
+                if self.buffer_size > 0:
                     self.limit_buff_index_copyer.index_copy(0,
                                                             src_index=preload_chunk_ids,
                                                             tgt_index=preload_slot_ids,
@@ -253,7 +253,7 @@ class ChunkParamMgr(torch.nn.Module):
 
                 evict_info = self.cached_chunk_table[evict_slot_ids]
 
-                if self.use_limit_buff:
+                if self.buffer_size > 0:
                     self.limit_buff_index_copyer.index_copy(0,
                                                             src_index=evict_slot_ids,
                                                             tgt_index=evict_info.cpu(),
@@ -277,7 +277,7 @@ class ChunkParamMgr(torch.nn.Module):
         with Timer() as timer:
             slots = torch.nonzero(self.cached_chunk_table == -1).squeeze(1)[:chunk_ids.numel()]
             # Here also allocate extra memory on CUDA. #chunk_ids * chunk.
-            if self.use_limit_buff:
+            if self.buffer_size > 0:
                 self.limit_buff_index_copyer.index_copy(0,
                                                         src_index=chunk_ids.cpu(),
                                                         tgt_index=slots,

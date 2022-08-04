@@ -22,7 +22,7 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
                    cuda_chunk_num: int,
                    ids_freq_mapping: Optional[List[int]] = None,
                    warmup_ratio=0.7,
-                   use_limit_buf=True):
+                   buffer_size=50_000):
         """
         Called after initialized. 
         Reorder the weight rows according to the ids_freq_mapping.
@@ -33,7 +33,7 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq
             warmup_ratio (float): the amount of chunks preloaded in cuda cache
         """
-        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num, use_limit_buf)
+        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num, buffer_size)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
@@ -147,8 +147,9 @@ class ParallelFreqAwareEmbeddingBag(BaseEmbeddingBag):
                    chunk_size: int,
                    cuda_chunk_num: int,
                    ids_freq_mapping: Optional[List[int]] = None,
-                   warmup_ratio: float = 0.7):
-        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num)
+                   warmup_ratio: float = 0.7,
+                   buffer_size: int = 50_000):
+        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num, buffer_size=buffer_size)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
