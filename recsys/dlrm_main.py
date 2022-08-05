@@ -199,13 +199,13 @@ def parse_args():
 
 def put_data_in_device(batch, dense_device, sparse_device, is_dist=False, rank=0, world_size=1):
     if is_dist:
+        return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(
+            dense_device)
+    else:
         dense_features = torch.tensor_split(batch.dense_features.to(dense_device), world_size, dim=0)[rank]
         labels = torch.tensor_split(batch.labels.to(dense_device), world_size, dim=0)[rank]
         sparse_features = batch.sparse_features.to(sparse_device)
         return dense_features, sparse_features, labels
-    else:
-        return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(
-            dense_device)
 
 
 @dataclass
@@ -342,7 +342,7 @@ def main():
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
 
     data_parallel_mode = ParallelMode.DEFAULT
-    if args.use_distributed_dataloader:
+    if not args.use_distributed_dataloader:
         dist_manager.new_process_group(1, ParallelMode.DATA)
         data_parallel_mode = ParallelMode.DATA
 
