@@ -53,8 +53,8 @@ def main():
             labels.append(row_label)
 
         sparse_np = np.array(sparse, dtype=np.int32)
-        labels_np = np.array(labels, dtype=np.int32)
         del sparse
+        labels_np = np.array(labels, dtype=np.int32).reshape(-1, 1)
         del labels
 
         for f_path, arr in [(sparse_output_file_path, sparse_np), (label_output_file_path, labels_np)]:

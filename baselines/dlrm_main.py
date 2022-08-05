@@ -35,7 +35,7 @@ from fbgemm_gpu.split_embedding_configs import EmbOptimType as OptimType
 from torchrec.distributed.planner import EmbeddingShardingPlanner, Topology
 from torchrec.distributed.types import ShardingEnv, ShardingType
 from torchrec.distributed.planner.types import ParameterConstraints
-
+from torchrec.distributed.embedding_types import EmbeddingComputeKernel
 from torch.profiler import profile, record_function, ProfilerActivity, schedule, tensorboard_trace_handler
 
 # OSS import
@@ -58,7 +58,8 @@ try:
 except ImportError:
     pass
 
-from colo_recsys.utils import TrainValTestResults, get_mem_info, count_parameters
+from colo_recsys.utils import TrainValTestResults, count_parameters
+from recsys.utils import get_mem_info
 
 TRAIN_PIPELINE_STAGES = 3    # Number of stages in TrainPipelineSparseDist.
 
@@ -479,6 +480,7 @@ def main(argv: List[str]) -> None:
 
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
+        print(f"set memory to {int(args.memory_fraction * 80)} GB")
     if args.num_embeddings_per_feature is not None:
         args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
         args.num_embeddings = None
@@ -532,33 +534,31 @@ def main(argv: List[str]) -> None:
         print(count_parameters(train_model, "DLRM"))
 
     # Torchrec Planner
-    # env = ShardingEnv.from_process_group(dist.GroupMember.WORLD)
-    # topology = Topology(
-    #     world_size=env.world_size,
-    #     compute_device="cuda",
-    #     hbm_cap=70 * 1024**3,    # GPU mem
-    #     ddr_cap=300 * 1024 * 3,    # CPU mem
-    #     intra_host_bw=1000 * 1024**3 / 1000,    # Device to Device bandwidth
-    # # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
-    #     batch_size=args.batch_size)
+    hbm_cap = int(args.memory_fraction * 80) if args.memory_fraction else 70
+    env = ShardingEnv.from_process_group(dist.GroupMember.WORLD)
+    topology = Topology(
+        world_size=env.world_size,
+        compute_device="cuda",
+        hbm_cap=hbm_cap * 1024**3,    # GPU mem
+        ddr_cap=300 * 1024 * 3,    # CPU mem
+        intra_host_bw=1000 * 1024**3 / 1000,    # Device to Device bandwidth
+    # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
+        batch_size=args.batch_size)
     # constraints = {
     #     f"t_{feature_name}":
-    #     ParameterConstraints(sharding_types=[ShardingType.TABLE_WISE.value
-    #                                         ]    # if num_embeddings < 1e5 else ShardingType.ROW_WISE.value],
-    #                         )
+    #     ParameterConstraints(compute_kernels=[EmbeddingComputeKernel.BATCHED_FUSED_UVM.value])
     #     for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, DEFAULT_CAT_NAMES)
     # }
-    # planner = EmbeddingShardingPlanner(
-    #     topology=topology,
-    #     constraints=constraints,
-    # )
-    # plan = planner.collective_plan(train_model, sharders, env.process_group)
+    planner = EmbeddingShardingPlanner(topology=topology,
+    # constraints=constraints,
+                                      )
+    plan = planner.collective_plan(train_model, sharders, env.process_group)
     model = DistributedModelParallel(
         module=train_model,
         device=device,
         sharders=cast(List[ModuleSharder[nn.Module]], sharders),
-    )
-    # plan=plan)
+    # )
+        plan=plan)
 
     print(f"{get_mem_info('After model parallel:  ')}")
     if dist.get_rank() == 0:

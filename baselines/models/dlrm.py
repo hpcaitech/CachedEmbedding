@@ -172,11 +172,14 @@ class InteractionArch(nn.Module):
         concat_dense = inter_arch(dense_features, sparse_features)
     """
 
-    def __init__(self, num_sparse_features: int) -> None:
+    def __init__(self, num_sparse_features: int, num_dense_features: int = 1) -> None:
         super().__init__()
         self.F: int = num_sparse_features
-        self.register_buffer('triu_indices',
-                             torch.triu_indices(self.F + 1, self.F + 1, offset=1).requires_grad_(False), False)
+        self.num_dense_features = num_dense_features
+        self.register_buffer(
+            'triu_indices',
+            torch.triu_indices(self.F + self.num_dense_features, self.F + self.num_dense_features,
+                               offset=1).requires_grad_(False), False)
 
     def forward(self, dense_features: torch.Tensor, sparse_features: torch.Tensor) -> torch.Tensor:
         """

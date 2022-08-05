@@ -22,6 +22,8 @@ from .. import ParallelMode, DISTMGR
 
 STAGES = ["train", "val", "test"]
 
+NUM_EMBEDDINGS_PER_FEATURE = None
+
 KAGGLE_NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
                                            '27,14992,5461306,10,5652,2173,4,7046547,18,15,286181,105,142572'
 KAGGLE_TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 days for criteo kaggle, 45840617 samples in total

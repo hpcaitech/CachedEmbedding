@@ -1,11 +1,15 @@
+import os
+
 import numpy as np
 
 import torch
 import torch.utils.data.datapipes as dp
-from torch.utils.data import IterDataPipe, IterableDataset
+from torch.utils.data import IterDataPipe, IterableDataset, DataLoader
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torchrec.datasets.utils import LoadFiles, ReadLinesFromCSV, PATH_MANAGER_KEY, Batch
 from torchrec.datasets.criteo import BinaryCriteoUtils
+
+from .. import ParallelMode, DISTMGR
 
 CAT_FEATURE_COUNT = 21
 DAYS = 10
@@ -15,6 +19,7 @@ DEFAULT_CAT_NAMES = [
     'device_ip', 'device_model', 'device_type', 'device_conn_type', 'C14', 'C15', 'C16', 'C17', 'C18', 'C19', 'C20',
     'C21'
 ]
+DEFAULT_INT_NAMES = []
 NUM_EMBEDDINGS_PER_FEATURE = '7,7,4737,7745,26,8552,559,36,2686408,6729486,8251,5,4,2626,8,9,435,4,68,172,60'
 TOTAL_TRAINING_SAMPLES = 36_386_071    # 90% sample in train, 40428967 in total
 
@@ -76,7 +81,7 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
             1, -1) if hashes is not None else None
 
         self._load_data()
-        self.num_rows_per_file = [a.shape[0] for a in self.dense_arrs]
+        self.num_rows_per_file = [a.shape[0] for a in self.sparse_arrs]
         self.num_batches: int = sum(self.num_rows_per_file) // batch_size
 
         self._num_ids_in_batch: int = CAT_FEATURE_COUNT * batch_size
@@ -89,10 +94,12 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
         self.index_per_key = {key: i for (i, key) in enumerate(self.keys)}
 
     def _load_data(self):
-        file_idx_to_row_range = BinaryCriteoUtils.get_file_idx_to_row_range(
-            lengths=[BinaryCriteoUtils.get_shape_from_npy(self.sparse_paths, self.path_manager_key)[0]],
-            rank=self.rank,
-            world_size=self.world_size)
+        file_idx_to_row_range = BinaryCriteoUtils.get_file_idx_to_row_range(lengths=[
+            BinaryCriteoUtils.get_shape_from_npy(path, path_manager_key=self.path_manager_key)[0]
+            for path in self.sparse_paths
+        ],
+                                                                            rank=self.rank,
+                                                                            world_size=self.world_size)
         self.sparse_arrs, self.labels_arrs = [], []
         for _dtype, arrs, paths in zip([np.int64, np.int32], [self.sparse_arrs, self.labels_arrs],
                                        [self.sparse_paths, self.label_paths]):
@@ -180,3 +187,41 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
 
     def __len__(self) -> int:
         return self.num_batches
+
+
+def get_dataloader(args, stage, parallel_mode=ParallelMode.DEFAULT):
+    stage = stage.lower()
+
+    args.pin_memory = (args.backend == "nccl") if not hasattr(args, "pin_memory") else args.pin_memory
+
+    files = os.listdir(args.in_memory_binary_criteo_path)
+    rank = DISTMGR.get_rank(parallel_mode)
+    world_size = DISTMGR.get_world_size(parallel_mode)
+
+    if stage == 'train':
+        files = list(filter(lambda s: 'train' in s, files))
+    else:
+        files = list(filter(lambda s: 'train' not in s, files))
+        rank = rank if stage == "val" else (rank + world_size)
+        world_size = world_size * 2
+
+    stage_files = [
+        sorted(map(
+            lambda s: os.path.join(args.in_memory_binary_criteo_path, s),
+            filter(lambda _f: kind in _f, files),
+        )) for kind in ["sparse", "label"]
+    ]
+
+    dataloader = DataLoader(
+        InMemoryAvazuIterDataPipe(*stage_files,
+                                  batch_size=args.batch_size,
+                                  rank=rank,
+                                  world_size=world_size,
+                                  shuffle_batches=args.shuffle_batches,
+                                  hashes=args.num_embeddings_per_feature),
+        batch_size=None,
+        pin_memory=args.pin_memory,
+        collate_fn=lambda x: x,
+    )
+
+    return dataloader

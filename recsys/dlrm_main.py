@@ -7,7 +7,7 @@ from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trac
 import torchmetrics as metrics
 
 from recsys.utils import get_default_parser, get_mem_info
-from recsys.datasets import criteo
+from recsys.datasets import criteo, avazu
 from recsys.datasets.feature_counter import get_criteo_id_freq_map
 from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, DISTMGR as dist_manager, DISTLogger as
                     dist_logger)
@@ -184,8 +184,13 @@ def parse_args():
 
     args = parser.parse_args()
 
-    if args.kaggle:
-        setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+    if 'criteo' in args.in_memory_binary_criteo_path:
+        if args.kaggle:
+            setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+        else:
+            setattr(args, 'num_embeddings_per_feature', criteo.NUM_EMBEDDINGS_PER_FEATURE)
+    elif 'avazu' in args.in_memory_binary_criteo_path:
+        setattr(args, 'num_embeddings_per_feature', avazu.NUM_EMBEDDINGS_PER_FEATURE)
     if args.num_embeddings_per_feature is not None:
         args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
     if args.in_memory_binary_criteo_path is None:
@@ -349,9 +354,17 @@ def main():
     dist_logger.info(f"launch rank: {dist_manager.get_rank()}, {dist_manager.get_distributed_info()}")
     dist_logger.info(f"config: {args}", ranks=[0])
 
-    train_dataloader = criteo.get_dataloader(args, 'train', data_parallel_mode)
-    val_dataloader = criteo.get_dataloader(args, "val", data_parallel_mode)
-    test_dataloader = criteo.get_dataloader(args, "test", data_parallel_mode)
+    if 'criteo' in args.in_memory_binary_criteo_path:
+        data_module = criteo
+    elif 'avazu' in args.in_memory_binary_criteo_path:
+        data_module = avazu
+    else:
+        data_module = None    # TODO: random data interface
+
+    train_dataloader = data_module.get_dataloader(args, 'train', data_parallel_mode)
+    val_dataloader = data_module.get_dataloader(args, "val", data_parallel_mode)
+    test_dataloader = data_module.get_dataloader(args, "test", data_parallel_mode)
+
     if args.in_memory_binary_criteo_path is not None:
         dist_logger.info(
             f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
@@ -364,25 +377,24 @@ def main():
 
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device
-    model = HybridParallelDLRM(
-        [args.num_embeddings] *
-        len(criteo.DEFAULT_CAT_NAMES) if args.in_memory_binary_criteo_path is None else args.num_embeddings_per_feature,
-        args.embedding_dim,
-        len(criteo.DEFAULT_CAT_NAMES),
-        len(criteo.DEFAULT_INT_NAMES),
-        list(map(int, args.dense_arch_layer_sizes.split(","))),
-        list(map(int, args.over_arch_layer_sizes.split(","))),
-        device,
-        sparse_device,
-        sparse=args.use_sparse_embed_grad,
-        fused_op=args.fused_op,
-        use_cache=args.use_cache,
-        cache_sets=args.cache_sets,
-        cache_lines=args.cache_lines,
-        id_freq_map=id_freq_map,
-        warmup_ratio=args.warmup_ratio,
-        buffer_size=args.buffer_size,
-        is_dist_dataloader=args.use_distributed_dataloader)
+    model = HybridParallelDLRM([args.num_embeddings] * len(data_module.DEFAULT_CAT_NAMES)
+                               if args.in_memory_binary_criteo_path is None else args.num_embeddings_per_feature,
+                               args.embedding_dim,
+                               len(data_module.DEFAULT_CAT_NAMES),
+                               len(data_module.DEFAULT_INT_NAMES),
+                               list(map(int, args.dense_arch_layer_sizes.split(","))),
+                               list(map(int, args.over_arch_layer_sizes.split(","))),
+                               device,
+                               sparse_device,
+                               sparse=args.use_sparse_embed_grad,
+                               fused_op=args.fused_op,
+                               use_cache=args.use_cache,
+                               cache_sets=args.cache_sets,
+                               cache_lines=args.cache_lines,
+                               id_freq_map=id_freq_map,
+                               warmup_ratio=args.warmup_ratio,
+                               buffer_size=args.buffer_size,
+                               is_dist_dataloader=args.use_distributed_dataloader)
     dist_logger.info(f"{model.model_stats('DLRM')}", ranks=[0])
     dist_logger.info(f"{get_mem_info('After model init:  ')}", ranks=[0])
     for name, param in model.named_parameters():
