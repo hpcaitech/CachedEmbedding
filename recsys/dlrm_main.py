@@ -173,6 +173,7 @@ def parse_args():
         help="Flag to determine if adagrad optimizer should be used.",
     )
     parser.add_argument("--use_overlap", action="store_true")
+    parser.add_argument("--use_distributed_dataloader", action="store_true")
 
     parser.set_defaults(
         pin_memory=None,
@@ -196,8 +197,15 @@ def parse_args():
     return args
 
 
-def put_data_in_device(batch, dense_device, sparse_device):
-    return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(dense_device)
+def put_data_in_device(batch, dense_device, sparse_device, is_dist=False, rank=0, world_size=1):
+    if is_dist:
+        dense_features = torch.tensor_split(batch.dense_features.to(dense_device), world_size, dim=0)[rank]
+        labels = torch.tensor_split(batch.labels.to(dense_device), world_size, dim=0)[rank]
+        sparse_features = batch.sparse_features.to(sparse_device)
+        return dense_features, sparse_features, labels
+    else:
+        return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(
+            dense_device)
 
 
 @dataclass
@@ -218,8 +226,11 @@ def _train(model,
            lr_change_point,
            lr_after_change_point,
            prof=None,
-           use_overlap=True):
+           use_overlap=True,
+           use_distributed_dataloader=True):
     model.train()
+    rank = dist_manager.get_rank()
+    world_size = dist_manager.get_world_size()
     if use_overlap:
         data_iter = FiniteDataIter(data_loader)
     else:
@@ -227,7 +238,8 @@ def _train(model,
     samples_per_trainer = criteo.KAGGLE_TOTAL_TRAINING_SAMPLES / dist_manager.get_world_size() * epochs
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
-            dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device)
+            dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
+                                                       use_distributed_dataloader, rank, world_size)
             with record_function("(zhg)forward pass"):
                 logits = model(dense, sparse).squeeze()
 
@@ -255,8 +267,10 @@ def _train(model,
             break
 
 
-def _evaluate(model, data_loader, stage, use_overlap):
+def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader):
     model.eval()
+    rank = dist_manager.get_rank()
+    world_size = dist_manager.get_world_size()
     auroc = metrics.AUROC(compute_on_step=False).cuda()
     accuracy = metrics.Accuracy(compute_on_step=False).cuda()
 
@@ -268,7 +282,8 @@ def _evaluate(model, data_loader, stage, use_overlap):
     with torch.no_grad():
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
             try:
-                dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device)
+                dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
+                                                           use_distributed_dataloader, rank, world_size)
                 logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
                 auroc(preds, labels)
@@ -291,7 +306,6 @@ def train_val_test(
     train_dataloader,
     val_dataloader,
     test_dataloader,
-    use_overlap,
 ):
     train_val_test_results = TrainValTestResults()
     with profile(
@@ -302,14 +316,17 @@ def train_val_test(
     ) as prof:
         for epoch in range(args.epochs):
             _train(model, optimizer, criterion, train_dataloader, epoch, args.epochs, args.change_lr,
-                   args.lr_change_point, args.lr_after_change_point, prof, use_overlap)
+                   args.lr_change_point, args.lr_after_change_point, prof, args.use_overlap,
+                   args.use_distributed_dataloader)
 
-            val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val", use_overlap)
+            val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val", args.use_overlap,
+                                                args.use_distributed_dataloader)
 
             train_val_test_results.val_accuracies.append(val_accuracy)
             train_val_test_results.val_aurocs.append(val_auroc)
 
-        test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test", use_overlap)
+        test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test", args.use_overlap,
+                                              args.use_distributed_dataloader)
         train_val_test_results.test_accuracy = test_accuracy
         train_val_test_results.test_auroc = test_auroc
 
@@ -324,12 +341,17 @@ def main():
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
 
+    data_parallel_mode = ParallelMode.DEFAULT
+    if args.use_distributed_dataloader:
+        dist_manager.new_process_group(1, ParallelMode.DATA)
+        data_parallel_mode = ParallelMode.DATA
+
     dist_logger.info(f"launch rank: {dist_manager.get_rank()}, {dist_manager.get_distributed_info()}")
     dist_logger.info(f"config: {args}", ranks=[0])
 
-    train_dataloader = criteo.get_dataloader(args, 'train')
-    val_dataloader = criteo.get_dataloader(args, "val")
-    test_dataloader = criteo.get_dataloader(args, "test")
+    train_dataloader = criteo.get_dataloader(args, 'train', data_parallel_mode)
+    val_dataloader = criteo.get_dataloader(args, "val", data_parallel_mode)
+    test_dataloader = criteo.get_dataloader(args, "test", data_parallel_mode)
     if args.in_memory_binary_criteo_path is not None:
         dist_logger.info(
             f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
@@ -359,7 +381,8 @@ def main():
         cache_lines=args.cache_lines,
         id_freq_map=id_freq_map,
         warmup_ratio=args.warmup_ratio,
-        buffer_size=args.buffer_size)
+        buffer_size=args.buffer_size,
+        is_dist_dataloader=args.use_distributed_dataloader)
     dist_logger.info(f"{model.model_stats('DLRM')}", ranks=[0])
     dist_logger.info(f"{get_mem_info('After model init:  ')}", ranks=[0])
     for name, param in model.named_parameters():
@@ -404,8 +427,7 @@ def main():
                 optimizer.step()
         exit(0)
 
-    train_val_test(args, model, optimizer, criterion, train_dataloader, val_dataloader, test_dataloader,
-                   args.use_overlap)
+    train_val_test(args, model, optimizer, criterion, train_dataloader, val_dataloader, test_dataloader)
 
 
 if __name__ == "__main__":
