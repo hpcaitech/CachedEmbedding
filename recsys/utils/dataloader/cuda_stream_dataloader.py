@@ -210,7 +210,7 @@ class FiniteDataIter(BaseStreamDataIter):
             self.batch_data = next(self.iter)
 
             with torch.cuda.stream(self.stream):
-                self.batch_data = self.batch_data.to(torch.cuda.current_device())
+                self.batch_data = self.batch_data.to(torch.cuda.current_device(), non_blocking=True)
 
         except StopIteration:
             self.batch_data = None
