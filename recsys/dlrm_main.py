@@ -12,6 +12,7 @@ from recsys.datasets.feature_counter import get_criteo_id_freq_map
 from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, DISTMGR as dist_manager, DISTLogger as
                     dist_logger)
 from recsys.models.dlrm import HybridParallelDLRM
+from recsys.utils import FiniteDataIter
 
 
 def parse_args():
@@ -171,6 +172,7 @@ def parse_args():
         action="store_true",
         help="Flag to determine if adagrad optimizer should be used.",
     )
+    parser.add_argument("--use_overlap", action="store_true")
 
     parser.set_defaults(
         pin_memory=None,
@@ -215,9 +217,13 @@ def _train(model,
            change_lr,
            lr_change_point,
            lr_after_change_point,
-           prof=None):
+           prof=None,
+           use_overlap=True):
     model.train()
-    data_iter = iter(data_loader)
+    if use_overlap:
+        data_iter = FiniteDataIter(data_loader)
+    else:
+        data_iter = iter(data_loader)
     samples_per_trainer = criteo.KAGGLE_TOTAL_TRAINING_SAMPLES / dist_manager.get_world_size() * epochs
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
@@ -249,12 +255,15 @@ def _train(model,
             break
 
 
-def _evaluate(model, data_loader, stage):
+def _evaluate(model, data_loader, stage, use_overlap):
     model.eval()
     auroc = metrics.AUROC(compute_on_step=False).cuda()
     accuracy = metrics.Accuracy(compute_on_step=False).cuda()
 
-    data_iter = iter(data_loader)
+    if use_overlap:
+        data_iter = FiniteDataIter(data_loader)
+    else:
+        data_iter = iter(data_loader)
 
     with torch.no_grad():
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
@@ -282,6 +291,7 @@ def train_val_test(
     train_dataloader,
     val_dataloader,
     test_dataloader,
+    use_overlap,
 ):
     train_val_test_results = TrainValTestResults()
     with profile(
@@ -292,14 +302,14 @@ def train_val_test(
     ) as prof:
         for epoch in range(args.epochs):
             _train(model, optimizer, criterion, train_dataloader, epoch, args.epochs, args.change_lr,
-                   args.lr_change_point, args.lr_after_change_point, prof)
+                   args.lr_change_point, args.lr_after_change_point, prof, use_overlap)
 
-            val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val")
+            val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val", use_overlap)
 
             train_val_test_results.val_accuracies.append(val_accuracy)
             train_val_test_results.val_aurocs.append(val_auroc)
 
-        test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test")
+        test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test", use_overlap)
         train_val_test_results.test_accuracy = test_accuracy
         train_val_test_results.test_auroc = test_auroc
 
@@ -392,10 +402,10 @@ def main():
 
             with get_time_elapsed(dist_logger, f"{i}-th optimization"):
                 optimizer.step()
-
         exit(0)
 
-    train_val_test(args, model, optimizer, criterion, train_dataloader, val_dataloader, test_dataloader)
+    train_val_test(args, model, optimizer, criterion, train_dataloader, val_dataloader, test_dataloader,
+                   args.use_overlap)
 
 
 if __name__ == "__main__":
