@@ -248,7 +248,7 @@ def _train(model,
                 logits = model(dense, sparse).squeeze()
 
             loss = criterion(logits, labels.float())
-            # dist_logger.info(f"loss: {loss.item()}")
+            dist_logger.info(f"loss: {loss.item()}")
 
             optimizer.zero_grad()
             with record_function("(zhg)backward pass"):
@@ -290,6 +290,7 @@ def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader
                                                            use_distributed_dataloader, rank, world_size)
                 logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
+                dist_logger.info(f"pred: {preds.max(), preds.min()}")
                 auroc(preds, labels)
                 accuracy(preds, labels)
             except StopIteration:
@@ -417,25 +418,30 @@ def main():
 
         data_iter = iter(train_dataloader)
 
-        for i in range(5):
-            batch = next(data_iter)
+        for i in range(200):
+            try:
+                batch = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_dataloader)
+                batch = next(data_iter)
+
             optimizer.zero_grad()
 
-            with get_time_elapsed(dist_logger, f"{i}-th data movement"):
-                dense_features, sparse_features, labels = put_data_in_device(batch, device, sparse_device)
+            # with get_time_elapsed(dist_logger, f"{i}-th data movement"):
+            dense_features, sparse_features, labels = put_data_in_device(batch, device, sparse_device)
             # dist_logger.info(f"{i}-th sparse_features: {sparse_features.values()[:10]}")
 
-            with get_time_elapsed(dist_logger, f"{i}-th forward pass"):
-                logits = model(dense_features, sparse_features, inspect_time=True).squeeze()
+            # with get_time_elapsed(dist_logger, f"{i}-th forward pass"):
+            logits = model(dense_features, sparse_features, inspect_time=False).squeeze()
 
             loss = criterion(logits, labels.float())
-            dist_logger.info(f"{i}-th loss: {loss}")
+            dist_logger.info(f"{i}-th loss: {loss}, logits: {logits}, labels: {labels}")
 
-            with get_time_elapsed(dist_logger, f"{i}-th backward pass"):
-                loss.backward()
+            # with get_time_elapsed(dist_logger, f"{i}-th backward pass"):
+            loss.backward()
 
-            with get_time_elapsed(dist_logger, f"{i}-th optimization"):
-                optimizer.step()
+            # with get_time_elapsed(dist_logger, f"{i}-th optimization"):
+            optimizer.step()
         exit(0)
 
     train_val_test(args, model, optimizer, criterion, train_dataloader, val_dataloader, test_dataloader)

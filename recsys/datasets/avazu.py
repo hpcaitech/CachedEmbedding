@@ -11,17 +11,29 @@ from torchrec.datasets.criteo import BinaryCriteoUtils
 
 from .. import ParallelMode, DISTMGR
 from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
+from .criteo import InMemoryBinaryCriteoIterDataPipe
 
-CAT_FEATURE_COUNT = 21
+CAT_FEATURE_COUNT = 13
+INT_FEATURE_COUNT = 8
 DAYS = 10
-DEFAULT_LABEL_NAME = "label"
+DEFAULT_LABEL_NAME = "click"
 DEFAULT_CAT_NAMES = [
-    'C1', 'banner_pos', 'site_id', 'site_domain', 'site_category', 'app_id', 'app_domain', 'app_category', 'device_id',
-    'device_ip', 'device_model', 'device_type', 'device_conn_type', 'C14', 'C15', 'C16', 'C17', 'C18', 'C19', 'C20',
-    'C21'
+    'C1',
+    'banner_pos',
+    'site_id',
+    'site_domain',
+    'site_category',
+    'app_id',
+    'app_domain',
+    'app_category',
+    'device_id',
+    'device_ip',
+    'device_model',
+    'device_type',
+    'device_conn_type',
 ]
-DEFAULT_INT_NAMES = []
-NUM_EMBEDDINGS_PER_FEATURE = '7,7,4737,7745,26,8552,559,36,2686408,6729486,8251,5,4,2626,8,9,435,4,68,172,60'
+DEFAULT_INT_NAMES = ['C14', 'C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21']
+NUM_EMBEDDINGS_PER_FEATURE = '7,7,4737,7745,26,8552,559,36,2686408,6729486,8251,5,4'
 TOTAL_TRAINING_SAMPLES = 36_386_071    # 90% sample in train, 40428967 in total
 
 
@@ -59,6 +71,7 @@ class AvazuIterDataPipe(IterDataPipe):
 class InMemoryAvazuIterDataPipe(IterableDataset):
 
     def __init__(self,
+                 dense_paths,
                  sparse_paths,
                  label_paths,
                  batch_size,
@@ -68,6 +81,7 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
                  mmap_mode=False,
                  hashes=None,
                  path_manager_key=PATH_MANAGER_KEY):
+        self.dense_paths = dense_paths
         self.sparse_paths = sparse_paths
         self.label_paths = label_paths
         self.batch_size = batch_size
@@ -82,7 +96,7 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
             1, -1) if hashes is not None else None
 
         self._load_data()
-        self.num_rows_per_file = [a.shape[0] for a in self.sparse_arrs]
+        self.num_rows_per_file = [a.shape[0] for a in self.dense_arrs]
         self.num_batches: int = sum(self.num_rows_per_file) // batch_size
 
         self._num_ids_in_batch: int = CAT_FEATURE_COUNT * batch_size
@@ -101,9 +115,10 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
         ],
                                                                             rank=self.rank,
                                                                             world_size=self.world_size)
-        self.sparse_arrs, self.labels_arrs = [], []
-        for _dtype, arrs, paths in zip([np.int64, np.int32], [self.sparse_arrs, self.labels_arrs],
-                                       [self.sparse_paths, self.label_paths]):
+        self.dense_arrs, self.sparse_arrs, self.labels_arrs = [], [], []
+        for _dtype, arrs, paths in zip([np.float32, np.int64, np.int32],
+                                       [self.dense_arrs, self.sparse_arrs, self.labels_arrs],
+                                       [self.dense_paths, self.sparse_paths, self.label_paths]):
             for idx, (range_left, range_right) in file_idx_to_row_range.items():
                 arrs.append(
                     BinaryCriteoUtils.load_npy_range(paths[idx],
@@ -119,12 +134,12 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
     def __iter__(self):
         buffer = None
 
-        def append_to_buffer(sparse: np.ndarray, labels: np.ndarray) -> None:
+        def append_to_buffer(dense: np.ndarray, sparse: np.ndarray, labels: np.ndarray) -> None:
             nonlocal buffer
             if buffer is None:
-                buffer = [sparse, labels]
+                buffer = [dense, sparse, labels]
             else:
-                for idx, arr in enumerate([sparse, labels]):
+                for idx, arr in enumerate([dense, sparse, labels]):
                     buffer[idx] = np.concatenate((buffer[idx], arr))
 
         # Maintain a buffer that can contain up to batch_size rows. Fill buffer as
@@ -146,6 +161,7 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
                 )
                 slice_ = slice(row_idx, row_idx + rows_to_get)
 
+                dense_inputs = self.dense_arrs[file_idx][slice_, :]
                 sparse_inputs = self.sparse_arrs[file_idx][slice_, :]
                 target_labels = self.labels_arrs[file_idx][slice_, :]
 
@@ -154,6 +170,7 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
                     sparse_inputs += self.sparse_offsets
 
                 append_to_buffer(
+                    dense_inputs,
                     sparse_inputs,
                     target_labels,
                 )
@@ -163,15 +180,16 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
                     file_idx += 1
                     row_idx = 0
 
-    def _np_arrays_to_batch(self, sparse: np.ndarray, labels: np.ndarray) -> Batch:
+    def _np_arrays_to_batch(self, dense: np.ndarray, sparse: np.ndarray, labels: np.ndarray) -> Batch:
         if self.shuffle_batches:
             # Shuffle all 3 in unison
             shuffler = np.random.permutation(sparse.shape[0])
+            dense = dense[shuffler]
             sparse = sparse[shuffler]
             labels = labels[shuffler]
 
         return Batch(
-            dense_features=torch.tensor([], dtype=torch.float32),
+            dense_features=torch.from_numpy(dense),
             sparse_features=KeyedJaggedTensor(
                 keys=self.keys,
         # transpose + reshape(-1) incurs an additional copy.
@@ -210,7 +228,7 @@ def get_dataloader(args, stage, parallel_mode=ParallelMode.DEFAULT):
         sorted(map(
             lambda s: os.path.join(args.in_memory_binary_criteo_path, s),
             filter(lambda _f: kind in _f, files),
-        )) for kind in ["sparse", "label"]
+        )) for kind in ["dense", "sparse", "label"]
     ]
 
     dataloader = DataLoader(
@@ -230,7 +248,7 @@ def get_dataloader(args, stage, parallel_mode=ParallelMode.DEFAULT):
 
 def get_id_freq_map(path):
     files = os.listdir(path)
-    files = list(filter(lambda s: "sparse" in s and "train" in s, files))
+    files = list(filter(lambda s: "sparse" in s, files))
     files = [os.path.join(path, _f) for _f in files]
 
     file_processor = CriteoSparseProcessor(list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))))
