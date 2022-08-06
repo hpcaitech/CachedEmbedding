@@ -11,7 +11,6 @@ from torchrec.datasets.criteo import BinaryCriteoUtils
 
 from .. import ParallelMode, DISTMGR
 from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
-from .criteo import InMemoryBinaryCriteoIterDataPipe
 
 CAT_FEATURE_COUNT = 13
 INT_FEATURE_COUNT = 8
@@ -33,7 +32,7 @@ DEFAULT_CAT_NAMES = [
     'device_conn_type',
 ]
 DEFAULT_INT_NAMES = ['C14', 'C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21']
-NUM_EMBEDDINGS_PER_FEATURE = '7,7,4737,7745,26,8552,559,36,2686408,6729486,8251,5,4'
+NUM_EMBEDDINGS_PER_FEATURE = '7,7,4737,7745,26,8552,559,36,2686408,6729486,8251,5,4'    # 9445823 in total
 TOTAL_TRAINING_SAMPLES = 36_386_071    # 90% sample in train, 40428967 in total
 
 

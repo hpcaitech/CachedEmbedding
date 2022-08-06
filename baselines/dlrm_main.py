@@ -17,11 +17,7 @@ from pyre_extensions import none_throws
 from torch import nn, distributed as dist
 from torch.utils.data import DataLoader
 from torchrec import EmbeddingBagCollection
-from torchrec.datasets.criteo import (
-    DEFAULT_CAT_NAMES,
-    DEFAULT_INT_NAMES,
-    TOTAL_TRAINING_SAMPLES,
-)
+from torchrec.datasets import criteo
 from torchrec.datasets.utils import Batch
 from torchrec.distributed import TrainPipelineSparseDist
 from torchrec.distributed.embeddingbag import EmbeddingBagCollectionSharder
@@ -43,7 +39,7 @@ try:
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/data:dlrm_dataloader
     from data.dlrm_dataloader import get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE
-
+    from data import avazu
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
     from modules.dlrm_train import DLRMTrain
@@ -54,6 +50,7 @@ except ImportError:
 try:
     from .data.dlrm_dataloader import (    # noqa F811
         get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+    from .data import avazu
     from .modules.dlrm_train import DLRMTrain    # noqa F811
 except ImportError:
     pass
@@ -461,10 +458,21 @@ def main(argv: List[str]) -> None:
         None.
     """
     args = parse_args(argv)
-    if args.kaggle:
-        global TOTAL_TRAINING_SAMPLES
-        TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 for criteo kaggle
-        setattr(args, 'num_embeddings_per_feature', KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+
+    global TOTAL_TRAINING_SAMPLES
+    if 'criteo' in args.in_memory_binary_criteo_path:
+        if args.kaggle:
+            TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 for criteo kaggle
+            setattr(args, 'num_embeddings_per_feature', KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+        else:
+            raise NotImplementedError("The criteo 1TB dataset is building")
+        data_module = criteo
+    elif 'avazu' in args.in_memory_binary_criteo_path:
+        TOTAL_TRAINING_SAMPLES = avazu.TOTAL_TRAINING_SAMPLES
+        setattr(args, 'num_embeddings_per_feature', avazu.NUM_EMBEDDINGS_PER_FEATURE)
+        data_module = avazu
+    else:
+        raise NotImplementedError()
 
     rank = int(os.environ["LOCAL_RANK"])
     if torch.cuda.is_available():
@@ -508,7 +516,7 @@ def main(argv: List[str]) -> None:
             num_embeddings=none_throws(args.num_embeddings_per_feature)[feature_idx]
             if args.num_embeddings is None else args.num_embeddings,
             feature_names=[feature_name],
-        ) for feature_idx, feature_name in enumerate(DEFAULT_CAT_NAMES)
+        ) for feature_idx, feature_name in enumerate(data_module.DEFAULT_CAT_NAMES)
     ]
     sharded_module_kwargs = {}
     if args.over_arch_layer_sizes is not None:
@@ -516,7 +524,7 @@ def main(argv: List[str]) -> None:
 
     train_model = DLRMTrain(
         embedding_bag_collection=EmbeddingBagCollection(tables=eb_configs, device=torch.device("meta")),
-        dense_in_features=len(DEFAULT_INT_NAMES),
+        dense_in_features=len(data_module.DEFAULT_INT_NAMES),
         dense_arch_layer_sizes=list(map(int, args.dense_arch_layer_sizes.split(","))),
         over_arch_layer_sizes=list(map(int, args.over_arch_layer_sizes.split(","))),
         dense_device=device,

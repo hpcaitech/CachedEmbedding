@@ -24,6 +24,9 @@ def parse_args():
 
 
 def main():
+    # Note: this scripts is broken, to align with our experiments,
+    # please refer to https://www.kaggle.com/code/leejunseok97/deepfm-deepctr-torch
+    # Basically, the C14-C21 column of the resulting sparse files should be further split to the dense files.
     args = parse_args()
 
     if args.is_split:

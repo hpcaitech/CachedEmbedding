@@ -19,6 +19,7 @@ from torchrec.datasets.criteo import (
     InMemoryBinaryCriteoIterDataPipe,
 )
 from torchrec.datasets.random import RandomRecDataset
+from .avazu import AvazuIterDataPipe
 
 STAGES = ["train", "val", "test"]
 KAGGLE_NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,27,14992,' \
@@ -87,6 +88,44 @@ def _get_in_memory_dataloader(
     return dataloader
 
 
+def get_avazu_data_loader(args, stage):
+    files = os.listdir(args.in_memory_binary_criteo_path)
+
+    if stage == "train":
+        files = list(filter(lambda s: "train" in s, files))
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+    else:
+        # Validation set gets the first half of the final day's samples. Test set get
+        # the other half.
+        files = list(filter(lambda s: "train" not in s, files))
+        rank = (dist.get_rank() if stage == "val" else dist.get_rank() + dist.get_world_size())
+        world_size = dist.get_world_size() * 2
+
+    stage_files: List[List[str]] = [
+        sorted(map(
+            lambda x: os.path.join(args.in_memory_binary_criteo_path, x),
+            filter(lambda s: kind in s, files),
+        )) for kind in ["dense", "sparse", "label"]
+    ]
+
+    dataloader = DataLoader(
+        AvazuIterDataPipe(
+            *stage_files,    # pyre-ignore[6]
+            batch_size=args.batch_size,
+            rank=rank,
+            world_size=world_size,
+            shuffle_batches=args.shuffle_batches,
+            hashes=args.num_embeddings_per_feature if args.num_embeddings is None else
+            ([args.num_embeddings] * CAT_FEATURE_COUNT),
+        ),
+        batch_size=None,
+        pin_memory=args.pin_memory,
+        collate_fn=lambda x: x,
+    )
+    return dataloader
+
+
 def get_dataloader(args: argparse.Namespace, backend: str, stage: str) -> DataLoader:
     """
     Gets desired dataloader from dlrm_main command line options. Currently, this
@@ -111,8 +150,10 @@ def get_dataloader(args: argparse.Namespace, backend: str, stage: str) -> DataLo
 
     if (not hasattr(args, "in_memory_binary_criteo_path") or args.in_memory_binary_criteo_path is None):
         return _get_random_dataloader(args)
-    else:
+    elif "criteo" in args.in_memory_binary_criteo_path:
         return _get_in_memory_dataloader(args, stage)
+    elif "avazu" in args.in_memory_binary_criteo_path:
+        return get_avazu_data_loader(args, stage)
 
 
 # ============== Customize for Persia ===================
