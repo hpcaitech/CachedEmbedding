@@ -192,10 +192,12 @@ class InteractionArch(nn.Module):
         """
         if self.F <= 0:
             return dense_features
-        (B, D) = dense_features.shape
 
-        # b f+1 d
-        combined_values = torch.cat((dense_features.unsqueeze(1), sparse_features), dim=1)
+        if self.num_dense_features <= 0:
+            combined_values = sparse_features
+        else:
+            # b f+1 d
+            combined_values = torch.cat((dense_features.unsqueeze(1), sparse_features), dim=1)
 
         # dense/sparse + sparse/sparse interaction
         # size B X (F + F choose 2)

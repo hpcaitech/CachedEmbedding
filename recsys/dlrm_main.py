@@ -8,7 +8,6 @@ import torchmetrics as metrics
 
 from recsys.utils import get_default_parser, get_mem_info
 from recsys.datasets import criteo, avazu
-from recsys.datasets.feature_counter import get_criteo_id_freq_map
 from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, DISTMGR as dist_manager, DISTLogger as
                     dist_logger)
 from recsys.models.dlrm import HybridParallelDLRM
@@ -359,7 +358,7 @@ def main():
     elif 'avazu' in args.in_memory_binary_criteo_path:
         data_module = avazu
     else:
-        data_module = None    # TODO: random data interface
+        raise NotImplementedError()    # TODO: random data interface
 
     train_dataloader = data_module.get_dataloader(args, 'train', data_parallel_mode)
     val_dataloader = data_module.get_dataloader(args, "val", data_parallel_mode)
@@ -373,7 +372,7 @@ def main():
 
     id_freq_map = None
     if args.use_freq:
-        id_freq_map = get_criteo_id_freq_map(args.in_memory_binary_criteo_path)
+        id_freq_map = data_module.get_id_freq_map(args.in_memory_binary_criteo_path)
 
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device

@@ -192,13 +192,14 @@ class FusedDenseModules(nn.Module):
         super(FusedDenseModules, self).__init__()
         if dense_in_features <= 0:
             self.dense_arch = nn.Identity()
-            dense_part = 0
+            over_in_features = choose(num_sparse_features, 2)
+            num_dense = 0
         else:
             self.dense_arch = DenseArch(in_features=dense_in_features, layer_sizes=dense_arch_layer_sizes)
-            dense_part = embedding_dim
+            over_in_features = (embedding_dim + choose(num_sparse_features, 2) + num_sparse_features)
+            num_dense = 1
 
-        self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features)
-        over_in_features = (dense_part + choose(num_sparse_features, 2) + num_sparse_features)
+        self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features, num_dense_features=num_dense)
         self.over_arch = OverArch(in_features=over_in_features, layer_sizes=over_arch_layer_sizes)
 
     def forward(self, dense_features, embedded_sparse_features):

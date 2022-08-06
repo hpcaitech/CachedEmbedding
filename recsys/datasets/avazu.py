@@ -10,6 +10,7 @@ from torchrec.datasets.utils import LoadFiles, ReadLinesFromCSV, PATH_MANAGER_KE
 from torchrec.datasets.criteo import BinaryCriteoUtils
 
 from .. import ParallelMode, DISTMGR
+from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
 
 CAT_FEATURE_COUNT = 21
 DAYS = 10
@@ -225,3 +226,13 @@ def get_dataloader(args, stage, parallel_mode=ParallelMode.DEFAULT):
     )
 
     return dataloader
+
+
+def get_id_freq_map(path):
+    files = os.listdir(path)
+    files = list(filter(lambda s: "sparse" in s and "train" in s, files))
+    files = [os.path.join(path, _f) for _f in files]
+
+    file_processor = CriteoSparseProcessor(list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))))
+    feature_count = GlobalFeatureCounter(files, file_processor)
+    return feature_count.id_freq_map
