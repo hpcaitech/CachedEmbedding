@@ -248,7 +248,7 @@ def _train(model,
                 logits = model(dense, sparse).squeeze()
 
             loss = criterion(logits, labels.float())
-            dist_logger.info(f"loss: {loss.item()}")
+            # dist_logger.info(f"loss: {loss.item()}")
 
             optimizer.zero_grad()
             with record_function("(zhg)backward pass"):
@@ -290,7 +290,7 @@ def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader
                                                            use_distributed_dataloader, rank, world_size)
                 logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
-                dist_logger.info(f"pred: {preds.max(), preds.min()}")
+                # dist_logger.info(f"pred: {preds.max(), preds.min()}")
                 auroc(preds, labels)
                 accuracy(preds, labels)
             except StopIteration:
