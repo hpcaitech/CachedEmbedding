@@ -7,11 +7,11 @@ from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trac
 import torchmetrics as metrics
 
 from recsys.utils import get_default_parser, get_mem_info
-from recsys.datasets import criteo
-from recsys.datasets.feature_counter import get_criteo_id_freq_map
+from recsys.datasets import criteo, avazu
 from recsys import (disable_existing_loggers, launch_from_torch, ParallelMode, DISTMGR as dist_manager, DISTLogger as
                     dist_logger)
 from recsys.models.dlrm import HybridParallelDLRM
+from recsys.utils import FiniteDataIter
 
 
 def parse_args():
@@ -171,6 +171,8 @@ def parse_args():
         action="store_true",
         help="Flag to determine if adagrad optimizer should be used.",
     )
+    parser.add_argument("--use_overlap", action="store_true")
+    parser.add_argument("--use_distributed_dataloader", action="store_true")
 
     parser.set_defaults(
         pin_memory=None,
@@ -181,8 +183,13 @@ def parse_args():
 
     args = parser.parse_args()
 
-    if args.kaggle:
-        setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+    if 'criteo' in args.in_memory_binary_criteo_path:
+        if args.kaggle:
+            setattr(args, 'num_embeddings_per_feature', criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+        else:
+            setattr(args, 'num_embeddings_per_feature', criteo.NUM_EMBEDDINGS_PER_FEATURE)
+    elif 'avazu' in args.in_memory_binary_criteo_path:
+        setattr(args, 'num_embeddings_per_feature', avazu.NUM_EMBEDDINGS_PER_FEATURE)
     if args.num_embeddings_per_feature is not None:
         args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
     if args.in_memory_binary_criteo_path is None:
@@ -194,8 +201,15 @@ def parse_args():
     return args
 
 
-def put_data_in_device(batch, dense_device, sparse_device):
-    return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(dense_device)
+def put_data_in_device(batch, dense_device, sparse_device, is_dist=False, rank=0, world_size=1):
+    if is_dist:
+        return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(
+            dense_device)
+    else:
+        dense_features = torch.tensor_split(batch.dense_features.to(dense_device), world_size, dim=0)[rank]
+        labels = torch.tensor_split(batch.labels.to(dense_device), world_size, dim=0)[rank]
+        sparse_features = batch.sparse_features.to(sparse_device)
+        return dense_features, sparse_features, labels
 
 
 @dataclass
@@ -215,13 +229,21 @@ def _train(model,
            change_lr,
            lr_change_point,
            lr_after_change_point,
-           prof=None):
+           prof=None,
+           use_overlap=True,
+           use_distributed_dataloader=True):
     model.train()
-    data_iter = iter(data_loader)
+    rank = dist_manager.get_rank()
+    world_size = dist_manager.get_world_size()
+    if use_overlap:
+        data_iter = FiniteDataIter(data_loader)
+    else:
+        data_iter = iter(data_loader)
     samples_per_trainer = criteo.KAGGLE_TOTAL_TRAINING_SAMPLES / dist_manager.get_world_size() * epochs
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
-            dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device)
+            dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
+                                                       use_distributed_dataloader, rank, world_size)
             with record_function("(zhg)forward pass"):
                 logits = model(dense, sparse).squeeze()
 
@@ -249,19 +271,26 @@ def _train(model,
             break
 
 
-def _evaluate(model, data_loader, stage):
+def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader):
     model.eval()
+    rank = dist_manager.get_rank()
+    world_size = dist_manager.get_world_size()
     auroc = metrics.AUROC(compute_on_step=False).cuda()
     accuracy = metrics.Accuracy(compute_on_step=False).cuda()
 
-    data_iter = iter(data_loader)
+    if use_overlap:
+        data_iter = FiniteDataIter(data_loader)
+    else:
+        data_iter = iter(data_loader)
 
     with torch.no_grad():
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
             try:
-                dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device)
+                dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
+                                                           use_distributed_dataloader, rank, world_size)
                 logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
+                # dist_logger.info(f"pred: {preds.max(), preds.min()}")
                 auroc(preds, labels)
                 accuracy(preds, labels)
             except StopIteration:
@@ -292,14 +321,17 @@ def train_val_test(
     ) as prof:
         for epoch in range(args.epochs):
             _train(model, optimizer, criterion, train_dataloader, epoch, args.epochs, args.change_lr,
-                   args.lr_change_point, args.lr_after_change_point, prof)
+                   args.lr_change_point, args.lr_after_change_point, prof, args.use_overlap,
+                   args.use_distributed_dataloader)
 
-            val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val")
+            val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val", args.use_overlap,
+                                                args.use_distributed_dataloader)
 
             train_val_test_results.val_accuracies.append(val_accuracy)
             train_val_test_results.val_aurocs.append(val_auroc)
 
-        test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test")
+        test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test", args.use_overlap,
+                                              args.use_distributed_dataloader)
         train_val_test_results.test_accuracy = test_accuracy
         train_val_test_results.test_auroc = test_auroc
 
@@ -314,12 +346,25 @@ def main():
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
 
+    data_parallel_mode = ParallelMode.DEFAULT
+    if not args.use_distributed_dataloader:
+        dist_manager.new_process_group(1, ParallelMode.DATA)
+        data_parallel_mode = ParallelMode.DATA
+
     dist_logger.info(f"launch rank: {dist_manager.get_rank()}, {dist_manager.get_distributed_info()}")
     dist_logger.info(f"config: {args}", ranks=[0])
 
-    train_dataloader = criteo.get_dataloader(args, 'train')
-    val_dataloader = criteo.get_dataloader(args, "val")
-    test_dataloader = criteo.get_dataloader(args, "test")
+    if 'criteo' in args.in_memory_binary_criteo_path:
+        data_module = criteo
+    elif 'avazu' in args.in_memory_binary_criteo_path:
+        data_module = avazu
+    else:
+        raise NotImplementedError()    # TODO: random data interface
+
+    train_dataloader = data_module.get_dataloader(args, 'train', data_parallel_mode)
+    val_dataloader = data_module.get_dataloader(args, "val", data_parallel_mode)
+    test_dataloader = data_module.get_dataloader(args, "test", data_parallel_mode)
+
     if args.in_memory_binary_criteo_path is not None:
         dist_logger.info(
             f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
@@ -328,28 +373,28 @@ def main():
 
     id_freq_map = None
     if args.use_freq:
-        id_freq_map = get_criteo_id_freq_map(args.in_memory_binary_criteo_path)
+        id_freq_map = data_module.get_id_freq_map(args.in_memory_binary_criteo_path)
 
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device
-    model = HybridParallelDLRM(
-        [args.num_embeddings] *
-        len(criteo.DEFAULT_CAT_NAMES) if args.in_memory_binary_criteo_path is None else args.num_embeddings_per_feature,
-        args.embedding_dim,
-        len(criteo.DEFAULT_CAT_NAMES),
-        len(criteo.DEFAULT_INT_NAMES),
-        list(map(int, args.dense_arch_layer_sizes.split(","))),
-        list(map(int, args.over_arch_layer_sizes.split(","))),
-        device,
-        sparse_device,
-        sparse=args.use_sparse_embed_grad,
-        fused_op=args.fused_op,
-        use_cache=args.use_cache,
-        cache_sets=args.cache_sets,
-        cache_lines=args.cache_lines,
-        id_freq_map=id_freq_map,
-        warmup_ratio=args.warmup_ratio,
-        buffer_size=args.buffer_size)
+    model = HybridParallelDLRM([args.num_embeddings] * len(data_module.DEFAULT_CAT_NAMES)
+                               if args.in_memory_binary_criteo_path is None else args.num_embeddings_per_feature,
+                               args.embedding_dim,
+                               len(data_module.DEFAULT_CAT_NAMES),
+                               len(data_module.DEFAULT_INT_NAMES),
+                               list(map(int, args.dense_arch_layer_sizes.split(","))),
+                               list(map(int, args.over_arch_layer_sizes.split(","))),
+                               device,
+                               sparse_device,
+                               sparse=args.use_sparse_embed_grad,
+                               fused_op=args.fused_op,
+                               use_cache=args.use_cache,
+                               cache_sets=args.cache_sets,
+                               cache_lines=args.cache_lines,
+                               id_freq_map=id_freq_map,
+                               warmup_ratio=args.warmup_ratio,
+                               buffer_size=args.buffer_size,
+                               is_dist_dataloader=args.use_distributed_dataloader)
     dist_logger.info(f"{model.model_stats('DLRM')}", ranks=[0])
     dist_logger.info(f"{get_mem_info('After model init:  ')}", ranks=[0])
     for name, param in model.named_parameters():
@@ -373,26 +418,30 @@ def main():
 
         data_iter = iter(train_dataloader)
 
-        for i in range(5):
-            batch = next(data_iter)
+        for i in range(200):
+            try:
+                batch = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_dataloader)
+                batch = next(data_iter)
+
             optimizer.zero_grad()
 
-            with get_time_elapsed(dist_logger, f"{i}-th data movement"):
-                dense_features, sparse_features, labels = put_data_in_device(batch, device, sparse_device)
+            # with get_time_elapsed(dist_logger, f"{i}-th data movement"):
+            dense_features, sparse_features, labels = put_data_in_device(batch, device, sparse_device)
             # dist_logger.info(f"{i}-th sparse_features: {sparse_features.values()[:10]}")
 
-            with get_time_elapsed(dist_logger, f"{i}-th forward pass"):
-                logits = model(dense_features, sparse_features, inspect_time=True).squeeze()
+            # with get_time_elapsed(dist_logger, f"{i}-th forward pass"):
+            logits = model(dense_features, sparse_features, inspect_time=False).squeeze()
 
             loss = criterion(logits, labels.float())
-            dist_logger.info(f"{i}-th loss: {loss}")
+            dist_logger.info(f"{i}-th loss: {loss}, logits: {logits}, labels: {labels}")
 
-            with get_time_elapsed(dist_logger, f"{i}-th backward pass"):
-                loss.backward()
+            # with get_time_elapsed(dist_logger, f"{i}-th backward pass"):
+            loss.backward()
 
-            with get_time_elapsed(dist_logger, f"{i}-th optimization"):
-                optimizer.step()
-
+            # with get_time_elapsed(dist_logger, f"{i}-th optimization"):
+            optimizer.step()
         exit(0)
 
     train_val_test(args, model, optimizer, criterion, train_dataloader, val_dataloader, test_dataloader)

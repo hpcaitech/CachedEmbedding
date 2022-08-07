@@ -1,18 +1,5 @@
 import abc
 import numpy as np
-import os
-from . import criteo
-
-
-def get_criteo_id_freq_map(path):
-    files = os.listdir(path)
-    sparse_files = list(filter(lambda s: 'sparse' in s, files))
-    sparse_files = [os.path.join(path, _f) for _f in sparse_files]
-
-    file_processor = CriteoSparseProcessor(list(map(int, criteo.KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(','))))
-    feature_count = GlobalFeatureCounter(sparse_files, file_processor)
-
-    return feature_count.id_freq_map
 
 
 class CriteoSparseProcessor:

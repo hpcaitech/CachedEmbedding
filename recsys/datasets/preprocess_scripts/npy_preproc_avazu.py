@@ -24,6 +24,9 @@ def parse_args():
 
 
 def main():
+    # Note: this scripts is broken, to align with our experiments,
+    # please refer to https://www.kaggle.com/code/leejunseok97/deepfm-deepctr-torch
+    # Basically, the C14-C21 column of the resulting sparse files should be further split to the dense files.
     args = parse_args()
 
     if args.is_split:
@@ -53,8 +56,8 @@ def main():
             labels.append(row_label)
 
         sparse_np = np.array(sparse, dtype=np.int32)
-        labels_np = np.array(labels, dtype=np.int32)
         del sparse
+        labels_np = np.array(labels, dtype=np.int32).reshape(-1, 1)
         del labels
 
         for f_path, arr in [(sparse_output_file_path, sparse_np), (label_output_file_path, labels_np)]:

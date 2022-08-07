@@ -134,7 +134,8 @@ class FusedSparseModules(nn.Module):
                  cache_lines=1,
                  id_freq_map=None,
                  warmup_ratio=0.7,
-                 buffer_size=50_000):
+                 buffer_size=50_000,
+                 is_dist_dataloader=True):
         super(FusedSparseModules, self).__init__()
         if use_cache:
             # self.embed = ParallelCachedEmbeddingBag(sum(num_embeddings_per_feature),
@@ -162,11 +163,15 @@ class FusedSparseModules(nn.Module):
                                                          include_last_offset=True,
                                                          output_device_type=output_device_type)
         self.world_size = dist_manager.get_world_size(parallel_mode)
-        self.kjt_collector = KJTAllToAll(dist_manager.get_group(parallel_mode))
+        if is_dist_dataloader:
+            self.kjt_collector = KJTAllToAll(dist_manager.get_group(parallel_mode))
+        else:
+            self.kjt_collector = None
 
     def forward(self, sparse_features):
-        with record_function("(zhg)KJT AllToAll collective"):
-            sparse_features = self.kjt_collector.all_to_all(sparse_features)
+        if self.kjt_collector:
+            with record_function("(zhg)KJT AllToAll collective"):
+                sparse_features = self.kjt_collector.all_to_all(sparse_features)
 
         keys, batch_size = sparse_features.keys(), sparse_features.stride()
 
@@ -185,9 +190,16 @@ class FusedDenseModules(nn.Module):
     def __init__(self, embedding_dim, num_sparse_features, dense_in_features, dense_arch_layer_sizes,
                  over_arch_layer_sizes):
         super(FusedDenseModules, self).__init__()
-        self.dense_arch = DenseArch(in_features=dense_in_features, layer_sizes=dense_arch_layer_sizes)
-        self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features)
-        over_in_features = (embedding_dim + choose(num_sparse_features, 2) + num_sparse_features)
+        if dense_in_features <= 0:
+            self.dense_arch = nn.Identity()
+            over_in_features = choose(num_sparse_features, 2)
+            num_dense = 0
+        else:
+            self.dense_arch = DenseArch(in_features=dense_in_features, layer_sizes=dense_arch_layer_sizes)
+            over_in_features = (embedding_dim + choose(num_sparse_features, 2) + num_sparse_features)
+            num_dense = 1
+
+        self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features, num_dense_features=num_dense)
         self.over_arch = OverArch(in_features=over_in_features, layer_sizes=over_arch_layer_sizes)
 
     def forward(self, dense_features, embedded_sparse_features):
@@ -220,7 +232,8 @@ class HybridParallelDLRM(nn.Module):
                  cache_lines=1,
                  id_freq_map=None,
                  warmup_ratio=0.7,
-                 buffer_size=50_000):
+                 buffer_size=50_000,
+                 is_dist_dataloader=True):
 
         super(HybridParallelDLRM, self).__init__()
         if use_cache and sparse_device.type != dense_device.type:
@@ -241,7 +254,8 @@ class HybridParallelDLRM(nn.Module):
                                                  cache_lines=cache_lines,
                                                  id_freq_map=id_freq_map,
                                                  warmup_ratio=warmup_ratio,
-                                                 buffer_size=buffer_size).to(sparse_device)
+                                                 buffer_size=buffer_size,
+                                                 is_dist_dataloader=is_dist_dataloader).to(sparse_device)
         self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                           dense_arch_layer_sizes,
                                                           over_arch_layer_sizes).to(dense_device),

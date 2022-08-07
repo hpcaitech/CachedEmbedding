@@ -19,8 +19,11 @@ import torch
 from torch.utils.data import DataLoader, IterableDataset
 
 from .. import ParallelMode, DISTMGR
+from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
 
 STAGES = ["train", "val", "test"]
+
+NUM_EMBEDDINGS_PER_FEATURE = None
 
 KAGGLE_NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
                                            '27,14992,5461306,10,5652,2173,4,7046547,18,15,286181,105,142572'
@@ -281,3 +284,14 @@ def get_dataloader(args, stage, parallel_mode: ParallelMode = ParallelMode.DEFAU
         collate_fn=lambda x: x,
     )
     return dataloader
+
+
+def get_id_freq_map(path):
+    files = os.listdir(path)
+    sparse_files = list(filter(lambda s: 'sparse' in s, files))
+    sparse_files = [os.path.join(path, _f) for _f in sparse_files]
+
+    file_processor = CriteoSparseProcessor(list(map(int, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(','))))
+    feature_count = GlobalFeatureCounter(sparse_files, file_processor)
+
+    return feature_count.id_freq_map
