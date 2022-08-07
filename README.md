@@ -1,23 +1,26 @@
-# Exploration of TorchRec
+# FreqCacheEmbedding
 
-This repo is derived from the official implementation of 
-[DLRM](https://github.com/facebookresearch/dlrm/tree/main/torchrec_dlrm).
+This repo contains the implementation of FreqCacheEmbedding, which extends the vanilla
+[PyTorch EmbeddingBag](https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html#torch.nn.EmbeddingBag) 
+with cache mechanism to enable heterogeneous training for large scale recommendation models.
 
-However, we make several modifications.
-### Diff
-1. Dataset  
-During the time this repo is built, the [Criteo 1TB](https://ailab.criteo.com/download-criteo-1tb-click-logs-dataset/) 
+### Dataset  
+1. [Criteo Kaggle](https://www.kaggle.com/c/avazu-ctr-prediction/data)
+2. [Avazu](https://www.kaggle.com/c/avazu-ctr-prediction/data)
+
+Basically, the preprocessing processes are derived from 
+[Torchrec's utilities](https://github.com/pytorch/torchrec/blob/main/torchrec/datasets/scripts/npy_preproc_criteo.py) 
+and [Avazu kaggle community](https://www.kaggle.com/code/leejunseok97/deepfm-deepctr-torch)
+Please refer to `recsys/datasets/preprocess_scripts` dir to see the details.
+
+During the time this repo was built, another commonly adopted dataset, 
+[Criteo 1TB](https://ailab.criteo.com/download-criteo-1tb-click-logs-dataset/) 
 is unavailable (see this [issue](https://github.com/pytorch/torchrec/issues/245)).
-So, I adapted the preprocessing steps so that the [Criteo kaggle](https://ailab.criteo.com/ressources/) dataset can be loaded.  
-Please refer to `criteo_kaggle` dir to see the details.
-   
+We will append its preprocessing & running scripts very soon.
 
-2. Command  
-I added an option `--kaggle` in the ArgumentParser and altered a few lines of code, so that the model would construct corresponding embedding tables for 
-   the sparse features in this dataset, and the 7-day dataset can be correctly split into train/val/test parts.
-   
-
-3. Model  
-Currently, this repo only contains DLRM. 
-   Actually, the model can be directly imported from torchrec.models.dlrm.  
-   I copied it into `models` dir, because there may be some future work to be done with the model.
+### Command  
+All the commands to run the FreqCacheEmbedding enabled recommendations models are presented in `run.sh`
+ 
+### Model  
+Currently, this repo only contains DLRM & DeepFM models, 
+and we are working on testing more recommendation models.
