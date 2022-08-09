@@ -19,7 +19,7 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
 
     def preprocess(self,
                    chunk_size: int,
-                   cuda_chunk_num: int,
+                   cuda_row_num: int,
                    ids_freq_mapping: Optional[List[int]] = None,
                    warmup_ratio=0.7,
                    buffer_size=50_000):
@@ -29,18 +29,18 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
         Then, let the weights of the Module be managed by a ChunkParamMgr.
         Args:
             chunk_size (int): chunk size
-            cuda_chunk_num (int): number of chunk can be hosted in CUDA memory
+            cuda_row_num (int): number of rows can be hosted in CUDA memory
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq
-            warmup_ratio (float): the amount of chunks preloaded in cuda cache
+            warmup_ratio (float): the amount of rows preloaded in cuda cache
         """
-        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num, buffer_size)
+        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_row_num, buffer_size)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
         with torch.no_grad():
             reorder_ids = self.chunk_weight_mgr.prepare_ids(indices)
 
-        embeddings = F.embedding_bag(reorder_ids, self.chunk_weight_mgr.cuda_partial_weight, offsets, self.max_norm,
+        embeddings = F.embedding_bag(reorder_ids, self.chunk_weight_mgr.cuda_cached_weight, offsets, self.max_norm,
                                      self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
                                      per_sample_weights, self.include_last_offset, self.padding_idx)
 
@@ -52,10 +52,10 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
         return self.chunk_weight_mgr.cpu_weight.narrow(0, 0, self.num_embeddings)
 
     def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
-        yield 'weight', self.chunk_weight_mgr.cuda_partial_weight
+        yield 'weight', self.chunk_weight_mgr.cuda_cached_weight
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
-        yield self.chunk_weight_mgr.cuda_partial_weight
+        yield self.chunk_weight_mgr.cuda_cached_weight
 
     @property
     def num_hits_history(self):
@@ -132,10 +132,10 @@ class ParallelFreqAwareEmbeddingBag(BaseEmbeddingBag):
         return self.chunk_weight_mgr.cpu_weight
 
     def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
-        yield 'weight', self.chunk_weight_mgr.cuda_partial_weight
+        yield 'weight', self.chunk_weight_mgr.cuda_cached_weight
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
-        yield self.chunk_weight_mgr.cuda_partial_weight
+        yield self.chunk_weight_mgr.cuda_cached_weight
 
     @torch.no_grad()
     def init_parameters(self):
@@ -145,18 +145,18 @@ class ParallelFreqAwareEmbeddingBag(BaseEmbeddingBag):
 
     def preprocess(self,
                    chunk_size: int,
-                   cuda_chunk_num: int,
+                   cuda_row_num: int,
                    ids_freq_mapping: Optional[List[int]] = None,
                    warmup_ratio: float = 0.7,
                    buffer_size: int = 50_000):
-        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_chunk_num, buffer_size=buffer_size)
+        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_row_num, buffer_size=buffer_size)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):
         with torch.no_grad():
             reorder_ids = self.chunk_weight_mgr.prepare_ids(indices)
 
-        output_shard = F.embedding_bag(reorder_ids, self.chunk_weight_mgr.cuda_partial_weight, offsets, self.max_norm,
+        output_shard = F.embedding_bag(reorder_ids, self.chunk_weight_mgr.cuda_cached_weight, offsets, self.max_norm,
                                        self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
                                        per_sample_weights, self.include_last_offset, self.padding_idx)
 
@@ -180,12 +180,12 @@ class ParallelFreqAwareEmbeddingBag(BaseEmbeddingBag):
                         parallel_mode: ParallelMode = ParallelMode.DEFAULT,
                         debug: bool = True,
                         chunk_size: int = 16,
-                        cuda_chunk_num: int = 100_000,
+                        cuda_row_num: int = 100_000,
                         ids_freq_mapping: Optional[List[int]] = None,
                         warmup_ratio: float = 0.7) -> 'ParallelFreqAwareEmbeddingBag':
         rows, cols = embedding.shape
         embedding_bag = cls(rows, cols, padding_idx, max_norm, norm_type, scale_grad_by_freq, sparse, embedding.cpu(),
                             mode, include_last_offset, parallel_mode, debug)
-        embedding_bag.preprocess(chunk_size, cuda_chunk_num, ids_freq_mapping, warmup_ratio)
-        embedding_bag.chunk_weight_mgr.cuda_partial_weight.requires_grad_ = not freeze
+        embedding_bag.preprocess(chunk_size, cuda_row_num, ids_freq_mapping, warmup_ratio)
+        embedding_bag.chunk_weight_mgr.cuda_cached_weight.requires_grad_ = not freeze
         return embedding_bag

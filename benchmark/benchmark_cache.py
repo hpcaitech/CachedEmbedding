@@ -28,23 +28,23 @@ def benchmark_cache_embedding(batch_size,
                               use_limit_buf=True):
     dataloader = get_dataloader('train', batch_size)
     chunk_num = (NUM_EMBED + cache_lines - 1) // cache_lines
-    cuda_chunk_num = int(cache_ratio * chunk_num)
+    cuda_row_num = int(cache_ratio * chunk_num)
     print(f"batch size: {batch_size}, "
           f"num of batches: {len(dataloader)}, "
           f"overall chunk num: {chunk_num}, "
-          f"cached chunks: {cuda_chunk_num}, chunk size: {cache_lines}, cached_ratio {cuda_chunk_num / chunk_num}")
+          f"cached chunks: {cuda_row_num}, chunk size: {cache_lines}, cached_ratio {cuda_row_num / chunk_num}")
     data_iter = iter(dataloader)
 
     buf_size = 0
     if use_limit_buf:
-        buf_size = int(np.ceil(cuda_chunk_num * 0.1))
+        buf_size = int(np.ceil(cuda_row_num * 0.1))
 
     torch.cuda.reset_peak_memory_stats()
     device = torch.device('cuda:0')
     if embed_type == 'row':
         model = CachedEmbeddingBag(NUM_EMBED,
                                    embedding_dim,
-                                   cuda_chunk_num,
+                                   cuda_row_num,
                                    cache_lines=cache_lines,
                                    sparse=True,
                                    include_last_offset=True).to(device)
@@ -53,7 +53,7 @@ def benchmark_cache_embedding(batch_size,
             model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True).to(device)
         print(f"model init: {timer.elapsed:.2f}s")
         with Timer() as timer:
-            model.preprocess(cache_lines, cuda_chunk_num, id_freq_map, warmup_ratio=warmup_ratio, buffer_size=buf_size)
+            model.preprocess(cache_lines, cuda_row_num, id_freq_map, warmup_ratio=warmup_ratio, buffer_size=buf_size)
         print(f"reorder: {timer.elapsed:.2f}s")
     else:
         raise RuntimeError(f"Unknown EB type: {embed_type}")
@@ -71,7 +71,7 @@ def benchmark_cache_embedding(batch_size,
             #              schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
             #              profile_memory=True,
             #              on_trace_ready=tensorboard_trace_handler(
-            #                  f"log/b{batch_size}-e{embedding_dim}-num_chunk{cuda_chunk_num}-chunk_size{cache_lines}")) as prof:
+            #                  f"log/b{batch_size}-e{embedding_dim}-num_chunk{cuda_row_num}-chunk_size{cache_lines}")) as prof:
             with nullcontext():
                 for it in itertools.count():
                     batch = next(data_iter)
@@ -119,8 +119,8 @@ if __name__ == "__main__":
 
     # # row-wise cache
     # for bs in batch_size:
-    #     for cs in cuda_chunk_num:
-    #         main(bs, embed_dim, cuda_chunk_num=cs, cache_lines=1, embed_type='row')
+    #     for cs in cuda_row_num:
+    #         main(bs, embed_dim, cuda_row_num=cs, cache_lines=1, embed_type='row')
 
     # chunk-wise cache
     for bs in batch_size:
