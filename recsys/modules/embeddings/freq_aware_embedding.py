@@ -4,7 +4,7 @@ import numpy as np
 from typing import List, Optional, Iterator, Tuple
 
 from .base_embeddings import BaseEmbeddingBag
-from .chunk_param_mgr import ChunkParamMgr
+from .chunk_param_mgr import CachedParamMgr
 from torch.nn.parameter import Parameter
 from recsys import ParallelMode, DISTMGR, DISTLogger as logger
 from recsys.utils import get_partition
@@ -26,14 +26,14 @@ class FreqAwareEmbeddingBag(BaseEmbeddingBag):
         """
         Called after initialized. 
         Reorder the weight rows according to the ids_freq_mapping.
-        Then, let the weights of the Module be managed by a ChunkParamMgr.
+        Then, let the weights of the Module be managed by a CachedParamMgr.
         Args:
             chunk_size (int): chunk size
             cuda_row_num (int): number of rows can be hosted in CUDA memory
             ids_freq_mapping (List[int]): a list, idx is id number, value is freq
             warmup_ratio (float): the amount of rows preloaded in cuda cache
         """
-        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_row_num, buffer_size)
+        self.chunk_weight_mgr = CachedParamMgr(self._weight, cuda_row_num, buffer_size)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None):
@@ -149,7 +149,7 @@ class ParallelFreqAwareEmbeddingBag(BaseEmbeddingBag):
                    ids_freq_mapping: Optional[List[int]] = None,
                    warmup_ratio: float = 0.7,
                    buffer_size: int = 50_000):
-        self.chunk_weight_mgr = ChunkParamMgr(self._weight, chunk_size, cuda_row_num, buffer_size=buffer_size)
+        self.chunk_weight_mgr = CachedParamMgr(self._weight, cuda_row_num, buffer_size=buffer_size)
         self.chunk_weight_mgr.reorder(ids_freq_mapping, warmup_ratio)
 
     def forward(self, indices, offsets=None, per_sample_weights=None, shape_hook=None, scatter_dim=0, gather_dim=-1):

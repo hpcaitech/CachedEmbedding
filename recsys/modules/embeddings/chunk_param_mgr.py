@@ -6,19 +6,19 @@ from contexttimer import Timer
 from .limit_buff_index_copy import LimitBuffIndexCopyer
 
 
-class ChunkParamMgr(torch.nn.Module):
+class CachedParamMgr(torch.nn.Module):
     """
-    Manage Weights in Chunk on CPU and CUDA memory.
-    CPU maintains a replica of the original weight. CUDA maintains a subset of weight chunks used in the comming computation.
-    During training, GPU needs to admit/evict chunks.
+    Manage Embedding Weights in Cache on CPU and CUDA memory.
+    CPU maintains entire original weight. 
+    CUDA maintains a fraction of weights used in the upcomming computation.
+    During training, GPU needs to transmit rows between CPU and GPU.
     """
 
     def __init__(self,
                  weight: torch.Tensor,
-                 chunk_size: int = 1,
                  cuda_row_num: int = 0,
                  buffer_size: int = 50_000) -> None:
-        super(ChunkParamMgr, self).__init__()
+        super(CachedParamMgr, self).__init__()
         self.buffer_size = buffer_size
         self.num_embeddings, self.embedding_dim = weight.shape
         self.cuda_row_num = cuda_row_num
@@ -47,7 +47,7 @@ class ChunkParamMgr(torch.nn.Module):
             persistent=False,
         )
 
-        # CachedChunkTable: gpu_row_idx -> cpu_row_idx
+        # cached_idx_map: gpu_row_idx -> cpu_row_idx
         self.register_buffer("cached_idx_map",
                              torch.empty(self.cuda_row_num, device=torch.cuda.current_device(),
                                          dtype=torch.long).fill_(-1),
@@ -72,7 +72,7 @@ class ChunkParamMgr(torch.nn.Module):
         self.input_id_percent_in_load_chunk = []
         self._reset_comm_stats()
 
-    def cpu_weight_chunk(self, chunk_id: int) -> torch.Tensor:
+    def cpu_weight_data(self, chunk_id: int) -> torch.Tensor:
         """
         access a chunk of CPU weight.
 
@@ -204,7 +204,7 @@ class ChunkParamMgr(torch.nn.Module):
 
         # move sure the cuda chunk will not be evicted!
         with record_function("(zhg) cache update"):
-            self._prepare_chunks_on_cuda(comm_cpu_row_idxs)
+            self._prepare_rows_on_cuda(comm_cpu_row_idxs)
 
         self.evict_backlist = torch.tensor([], device=cpu_row_idxs.device, dtype=cpu_row_idxs.dtype)
         # new ids chunk_offset + offset_in_chunk
@@ -222,7 +222,7 @@ class ChunkParamMgr(torch.nn.Module):
         return self.inverted_cached_idx[chunk_id] != -1
 
     @torch.no_grad()
-    def _prepare_chunks_on_cuda(self, cpu_row_idxs: torch.Tensor) -> None:
+    def _prepare_rows_on_cuda(self, cpu_row_idxs: torch.Tensor) -> None:
         """prepare rows in cpu_row_idxs on CUDA memory
         Args:
             cpu_row_idxs (torch.Tensor): the chunks to be placed on CUDA
@@ -292,66 +292,64 @@ class ChunkParamMgr(torch.nn.Module):
         buf = self.cached_idx_map[mask].clone()
         idx = torch.nonzero(mask).squeeze(1)
         self.cached_idx_map.index_fill_(0, idx, -1)
-        max_row, max_slot_id = torch.max(self.cached_idx_map, dim=0)
-        # print(f"evict: {max_slot_id}")
-        max_chunk_id = self.cached_idx_map[max_slot_id]
+        max_row, max_cpu_row_idx = torch.max(self.cached_idx_map, dim=0)
+        max_gpu_row_idx = self.cached_idx_map[max_cpu_row_idx]
 
-        if max_chunk_id == -1:
-            raise RuntimeError("Can not evict a chunk")
+        if max_gpu_row_idx == -1:
+            raise RuntimeError("Can not evict a row")
 
-        max_chunk_id = max_chunk_id.item()
-        max_offset = self.inverted_cached_idx[max_chunk_id]
+        max_gpu_row_idx = max_gpu_row_idx.item()
+        max_offset = self.inverted_cached_idx[max_gpu_row_idx]
         # recover
         self.cached_idx_map.index_copy_(0, idx, buf)
 
         with Timer() as timer:
             cuda_tensor = torch.narrow(self.cuda_cached_weight.view(-1), 0, max_offset * self.embedding_dim,
                                        self.embedding_dim).view(1, self.embedding_dim)
-            self.cpu_weight_chunk(max_chunk_id).data.copy_(cuda_tensor)
+            self.cpu_weight_data(max_gpu_row_idx).data.copy_(cuda_tensor)
 
         # update inverted_cached_idx, min_slot_id is evicted from cuda
-        self.cached_idx_map[max_slot_id] = -1
+        self.cached_idx_map[max_cpu_row_idx] = -1
 
-        self.inverted_cached_idx[max_chunk_id] = -1
+        self.inverted_cached_idx[max_gpu_row_idx] = -1
 
         self._cuda_available_row_num += 1
 
         self._cuda_to_cpu_numel += self.embedding_dim
         self._cuda_to_cpu_elapse += timer.elapsed
         # self.num_write_back_history[-1] += 1
-        return max_slot_id
+        return max_cpu_row_idx
 
-    def _find_free_cuda_slot(self) -> int:
+    def _find_free_cuda_row(self) -> int:
         if self._cuda_available_row_num == 0:
             return -1
         candidates = torch.nonzero(self.cached_idx_map == -1).squeeze(1)
         return candidates[0].item()
 
     @torch.no_grad()
-    def _admit(self, chunk_id: int):
+    def _admit(self, row_id: int):
         """
-        move in chunk_id to CUDA
+        move in row_id to CUDA
 
         Args:
-            chunk_id (int): the id of chunk to be moved in
+            row_id (int): the id of row to be moved in
         """
         # find a free slot in partial cuda weight
-        slot_id = self._find_free_cuda_slot()
+        slot_id = self._find_free_cuda_row()
 
         if slot_id == -1:
-            # evict one chunk
+            # evict one row
             slot_id = self._evict()
-        # print(f'admit to {slot_id}, id: {chunk_id}')
         slot_offset = slot_id
         # copy payload from cpu to cuda
         with Timer() as timer:
             cuda_tensor = torch.narrow(self.cuda_cached_weight.view(-1), 0, slot_offset * self.embedding_dim,
                                        self.embedding_dim).view(1, self.embedding_dim)
-            cuda_tensor.data.copy_(self.cpu_weight_chunk(chunk_id))
+            cuda_tensor.data.copy_(self.cpu_weight_data(row_id))
 
         # update the inverted_cached_idx
-        self.cached_idx_map[slot_id] = chunk_id
-        self.inverted_cached_idx[chunk_id] = slot_offset
+        self.cached_idx_map[slot_id] = row_id
+        self.inverted_cached_idx[row_id] = slot_offset
 
         self._cuda_available_row_num -= 1
 

@@ -7,7 +7,7 @@ import numpy as np
 from colossalai.utils import free_port
 from colossalai.testing import rerun_if_address_is_in_use
 
-from recsys.modules.embeddings import ChunkParamMgr, FreqAwareEmbeddingBag, ParallelFreqAwareEmbeddingBag
+from recsys.modules.embeddings import CachedParamMgr, FreqAwareEmbeddingBag, ParallelFreqAwareEmbeddingBag
 from recsys import launch, disable_existing_loggers
 from recsys import DISTMGR
 from recsys.testing.utils import synthesize_1d_sparse_feature, gather_tensor
@@ -16,17 +16,10 @@ NUM_EMBED, EMBED_DIM = 100, 8
 BATCH_SIZE = 8
 
 
-@pytest.mark.parametrize('chunk_size', [1])
-def test_uneven_weight(chunk_size):
-    weight = torch.randn(11, 5)
-    mgr = ChunkParamMgr(weight, chunk_size, 10)
-    assert mgr.cpu_weight.shape[0] % chunk_size == 0
-
-
 def test_chunkmgr_admit():
     model = torch.nn.EmbeddingBag(10000, 128)
     # 10 chunks, 5 in cuda
-    mgr = ChunkParamMgr(model.weight, 1000, 5)
+    mgr = CachedParamMgr(model.weight, 5)
     assert mgr.cuda_row_num == 5
 
     mgr._admit(1)
@@ -42,8 +35,8 @@ def test_chunkmgr_admit():
     mgr._evict()
     assert mgr.cuda_available_chunk_num == 4
 
-    mgr._prepare_chunks_on_cuda(torch.tensor([9, 6, 5], dtype=torch.long, device=0))
-    mgr._prepare_chunks_on_cuda(torch.tensor([3, 4, 5], dtype=torch.long, device=0))
+    mgr._prepare_rows_on_cuda(torch.tensor([9, 6, 5], dtype=torch.long, device=0))
+    mgr._prepare_rows_on_cuda(torch.tensor([3, 4, 5], dtype=torch.long, device=0))
     # print(mgr.cached_chunk_table)
     # mgr.print_comm_stats()
 
@@ -68,7 +61,7 @@ def test_reorder_with_freq():
     offset_in_chunk = torch.tensor(offset_in_chunk, dtype=torch.long, device=torch.cuda.current_device())
 
     weight = torch.rand(num_embed, 2)
-    mgr = ChunkParamMgr(weight, chunk_size, num_chunk)
+    mgr = CachedParamMgr(weight, num_chunk)
 
     mgr.reorder(idx_map)
 
