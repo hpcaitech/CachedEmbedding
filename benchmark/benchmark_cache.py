@@ -14,7 +14,7 @@ import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
 
 from recsys.modules.embeddings import CachedEmbeddingBag, FreqAwareEmbeddingBag
-from recsys.datasets.feature_counter import get_criteo_id_freq_map
+from recsys.datasets.criteo import get_id_freq_map
 from data_utils import get_dataloader, NUM_EMBED, CRITEO_PATH
 
 
@@ -35,6 +35,10 @@ def benchmark_cache_embedding(batch_size,
           f"cached chunks: {cuda_chunk_num}, chunk size: {cache_lines}, cached_ratio {cuda_chunk_num / chunk_num}")
     data_iter = iter(dataloader)
 
+    buf_size = 0
+    if use_limit_buf:
+        buf_size = int(np.ceil(cuda_chunk_num * 0.1))
+
     torch.cuda.reset_peak_memory_stats()
     device = torch.device('cuda:0')
     if embed_type == 'row':
@@ -49,11 +53,7 @@ def benchmark_cache_embedding(batch_size,
             model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True).to(device)
         print(f"model init: {timer.elapsed:.2f}s")
         with Timer() as timer:
-            model.preprocess(cache_lines,
-                             cuda_chunk_num,
-                             id_freq_map,
-                             warmup_ratio=warmup_ratio,
-                             use_limit_buf=use_limit_buf)
+            model.preprocess(cache_lines, cuda_chunk_num, id_freq_map, warmup_ratio=warmup_ratio, buffer_size=buf_size)
         print(f"reorder: {timer.elapsed:.2f}s")
     else:
         raise RuntimeError(f"Unknown EB type: {embed_type}")
@@ -108,7 +108,7 @@ def benchmark_cache_embedding(batch_size,
 
 if __name__ == "__main__":
     with Timer() as timer:
-        id_freq_map = get_criteo_id_freq_map(CRITEO_PATH)
+        id_freq_map = get_id_freq_map(CRITEO_PATH)
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
     batch_size = [2048]
