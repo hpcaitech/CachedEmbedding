@@ -2,7 +2,7 @@
 
 This repo contains the implementation of FreqCacheEmbedding, which extends the vanilla
 [PyTorch EmbeddingBag](https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html#torch.nn.EmbeddingBag) 
-with cache mechanism to enable heterogeneous training for large scale recommendation models.
+with **Freqency-Aware Cache Embedding** from [ColossalAI](https://github.com/hpcaitech/ColossalAI) to enable heterogeneous training for large scale recommendation models.
 
 ### Dataset  
 1. [Criteo Kaggle](https://www.kaggle.com/c/avazu-ctr-prediction/data)
