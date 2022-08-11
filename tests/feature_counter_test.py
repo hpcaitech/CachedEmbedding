@@ -6,7 +6,7 @@ from recsys.datasets.criteo import KAGGLE_NUM_EMBEDDINGS_PER_FEATURE
 from recsys.datasets.feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
 
 
-@pytest.mark.skip("Only for local env in which the dataset_dir exists")
+@pytest.mark.skipif("DATA" not in os.environ, reason="Only for local env in which the dataset_dir exists")
 def test_feature_counter(dataset_dir):
     files = os.listdir(dataset_dir)
     sparse_files = list(filter(lambda s: 'sparse' in s, files))
