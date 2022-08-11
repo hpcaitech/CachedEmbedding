@@ -1,5 +1,5 @@
-from .deepfm import DeepFactorizationMachine
+from .dlrm import HybridParallelDLRM
 
 __all__ = [
-    'DeepFactorizationMachine',
+    'HybridParallelDLRM',
 ]

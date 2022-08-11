@@ -14,7 +14,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import record_function
 
 from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
-from ..modules.embeddings import FusedHybridParallelEmbeddingBag
 from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 
@@ -50,20 +49,12 @@ class FusedSparseModules(nn.Module):
         if use_cache:
             self.embed = ParallelFreqAwareEmbeddingBag(sum(num_embeddings_per_feature),
                                                        embedding_dim,
-                                                       sparse=True,
+                                                       sparse=sparse,
                                                        mode=reduction_mode,
                                                        include_last_offset=True)
             self.embed.preprocess(cache_sets, id_freq_map, warmup_ratio, buffer_size=buffer_size)
         else:
-            raise NotImplementedError()
-            self.embed = FusedHybridParallelEmbeddingBag(
-                sum(num_embeddings_per_feature),
-                embedding_dim,
-                fused_op=fused_op,
-                mode=reduction_mode,
-                sparse=sparse,
-                include_last_offset=True,
-                output_device_type=output_device_type)
+            raise NotImplementedError("Other EmbeddingBags are under development")
 
         if is_dist_dataloader:
             self.kjt_collector = KJTAllToAll(gpc.get_group(ParallelMode.GLOBAL))

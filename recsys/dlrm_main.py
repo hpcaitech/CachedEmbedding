@@ -1,15 +1,12 @@
-from dataclasses import dataclass, field
-from typing import List, Optional
 from tqdm import tqdm
 import itertools
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler, record_function
 import torchmetrics as metrics
 
-from recsys.utils import get_mem_info
 from recsys.datasets import criteo, avazu
 from recsys.models.dlrm import HybridParallelDLRM
-from recsys.utils import FiniteDataIter
+from recsys.utils import get_mem_info, FiniteDataIter, TrainValTestResults
 
 import colossalai
 
@@ -188,14 +185,6 @@ def put_data_in_device(batch, dense_device, sparse_device, is_dist=False, rank=0
         return dense_features, sparse_features, labels
 
 
-@dataclass
-class TrainValTestResults:
-    val_accuracies: List[float] = field(default_factory=list)
-    val_aurocs: List[float] = field(default_factory=list)
-    test_accuracy: Optional[float] = None
-    test_auroc: Optional[float] = None
-
-
 def _train(model,
            optimizer,
            criterion,
@@ -207,7 +196,7 @@ def _train(model,
     model.train()
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
-    
+
     if use_overlap:
         data_iter = FiniteDataIter(data_loader)
     else:
@@ -312,7 +301,6 @@ def main():
 
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
-
 
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
