@@ -11,14 +11,12 @@ import numpy as np
 
 from torchrec.datasets.criteo import (CAT_FEATURE_COUNT, DEFAULT_CAT_NAMES, DEFAULT_INT_NAMES, DAYS, BinaryCriteoUtils)
 from torchrec.datasets.utils import PATH_MANAGER_KEY, Batch
-from torchrec.datasets.random import RandomRecDataset
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from iopath.common.file_io import PathManager, PathManagerFactory
 from pyre_extensions import none_throws
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
-from .. import ParallelMode, DISTMGR
 from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
 
 STAGES = ["train", "val", "test"]
@@ -223,37 +221,16 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         return self.num_batches
 
 
-def get_dataloader(args, stage, parallel_mode: ParallelMode = ParallelMode.DEFAULT):
+def get_dataloader(args, stage, rank, world_size):
     stage = stage.lower()
     if stage not in STAGES:
         raise ValueError(f"Supplied stage was {stage}. Must be one of {STAGES}.")
 
-    args.pin_memory = (args.backend == "nccl") if not hasattr(args, "pin_memory") else args.pin_memory
-
-    if args.in_memory_binary_criteo_path is None:
-        return DataLoader(
-            RandomRecDataset(
-                keys=DEFAULT_CAT_NAMES,
-                batch_size=args.batch_size,
-                hash_size=args.num_embeddings,
-                hash_sizes=args.num_embeddings_per_feature if hasattr(args, "num_embeddings_per_feature") else None,
-                manual_seed=args.seed if hasattr(args, "seed") else None,
-                ids_per_feature=1,
-                num_dense=len(DEFAULT_INT_NAMES),
-                num_batches=getattr(args, f"limit_{stage}_batches")),
-            batch_size=None,
-            batch_sampler=None,
-            pin_memory=args.pin_memory,
-            num_workers=0,
-        )
-
-    files = os.listdir(args.in_memory_binary_criteo_path)
+    files = os.listdir(args.dataset_dir)
 
     def is_final_day(s: str) -> bool:
-        return f"day_{(7 if args.kaggle else DAYS) - 1}" in s
+        return f"day_{(7 if 'kaggle' in args.dataset_dir else DAYS) - 1}" in s
 
-    rank = DISTMGR.get_rank(parallel_mode)
-    world_size = DISTMGR.get_world_size(parallel_mode)
     if stage == "train":
         # Train set gets all data except from the final day.
         files = list(filter(lambda s: not is_final_day(s), files))
@@ -266,7 +243,7 @@ def get_dataloader(args, stage, parallel_mode: ParallelMode = ParallelMode.DEFAU
 
     stage_files = [
         sorted(map(
-            lambda x: os.path.join(args.in_memory_binary_criteo_path, x),
+            lambda x: os.path.join(args.dataset_dir, x),
             filter(lambda s: kind in s, files),
         )) for kind in ["dense", "sparse", "labels"]
     ]
@@ -287,6 +264,9 @@ def get_dataloader(args, stage, parallel_mode: ParallelMode = ParallelMode.DEFAU
 
 
 def get_id_freq_map(path):
+    if 'kaggle' not in path:
+        raise NotImplementedError()
+
     files = os.listdir(path)
     sparse_files = list(filter(lambda s: 'sparse' in s, files))
     sparse_files = [os.path.join(path, _f) for _f in sparse_files]

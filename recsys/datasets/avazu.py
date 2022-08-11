@@ -207,14 +207,10 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
         return self.num_batches
 
 
-def get_dataloader(args, stage, parallel_mode=ParallelMode.DEFAULT):
+def get_dataloader(args, stage, rank, world_size):
     stage = stage.lower()
 
-    args.pin_memory = (args.backend == "nccl") if not hasattr(args, "pin_memory") else args.pin_memory
-
-    files = os.listdir(args.in_memory_binary_criteo_path)
-    rank = DISTMGR.get_rank(parallel_mode)
-    world_size = DISTMGR.get_world_size(parallel_mode)
+    files = os.listdir(args.dataset_dir)
 
     if stage == 'train':
         files = list(filter(lambda s: 'train' in s, files))

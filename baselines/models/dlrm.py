@@ -68,10 +68,10 @@ class SparseArch(nn.Module):
     def __init__(self, embedding_bag_collection: EmbeddingBagCollection) -> None:
         super().__init__()
         self.embedding_bag_collection: EmbeddingBagCollection = embedding_bag_collection
-        assert self.embedding_bag_collection.embedding_bag_configs, "Embedding bag collection cannot be empty!"
-        self.D: int = self.embedding_bag_collection.embedding_bag_configs[0].embedding_dim
+        assert self.embedding_bag_collection.embedding_bag_configs(), "Embedding bag collection cannot be empty!"
+        self.D: int = self.embedding_bag_collection.embedding_bag_configs()[0].embedding_dim
         self._sparse_feature_names: List[str] = [
-            name for conf in embedding_bag_collection.embedding_bag_configs for name in conf.feature_names
+            name for conf in embedding_bag_collection.embedding_bag_configs() for name in conf.feature_names
         ]
 
         self.F: int = len(self._sparse_feature_names)
@@ -335,13 +335,13 @@ class DLRM(nn.Module):
         dense_device: Optional[torch.device] = None,
     ) -> None:
         super().__init__()
-        assert (len(embedding_bag_collection.embedding_bag_configs) > 0), "At least one embedding bag is required"
-        for i in range(1, len(embedding_bag_collection.embedding_bag_configs)):
-            conf_prev = embedding_bag_collection.embedding_bag_configs[i - 1]
-            conf = embedding_bag_collection.embedding_bag_configs[i]
+        assert (len(embedding_bag_collection.embedding_bag_configs()) > 0), "At least one embedding bag is required"
+        for i in range(1, len(embedding_bag_collection.embedding_bag_configs())):
+            conf_prev = embedding_bag_collection.embedding_bag_configs()[i - 1]
+            conf = embedding_bag_collection.embedding_bag_configs()[i]
             assert (
                 conf_prev.embedding_dim == conf.embedding_dim), "All EmbeddingBagConfigs must have the same dimension"
-        embedding_dim: int = embedding_bag_collection.embedding_bag_configs[0].embedding_dim
+        embedding_dim: int = embedding_bag_collection.embedding_bag_configs()[0].embedding_dim
         if dense_arch_layer_sizes[-1] != embedding_dim:
             raise ValueError(f"embedding_bag_collection dimension ({embedding_dim}) and final dense "
                              "arch layer size ({dense_arch_layer_sizes[-1]}) must match.")
