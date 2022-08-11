@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
 
-from colossalai.nn._ops.cache_embedding import FreqAwareEmbeddingBag
+from colossalai.nn.parallel.layers import FreqAwareEmbeddingBag
 from recsys.datasets.criteo import get_id_freq_map
 from data_utils import get_dataloader, NUM_EMBED, CRITEO_PATH
 
