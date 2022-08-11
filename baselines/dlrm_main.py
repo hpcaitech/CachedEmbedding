@@ -549,9 +549,10 @@ def main(argv: List[str]) -> None:
         compute_device="cuda",
         hbm_cap=hbm_cap * 1024**3,    # GPU mem
         ddr_cap=300 * 1024 * 3,    # CPU mem
-        intra_host_bw=1000 * 1024**3 / 1000,    # Device to Device bandwidth
+        intra_host_bw=1000 * 1024**3 / 1000,
+    )    # Device to Device bandwidth
     # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
-        batch_size=args.batch_size)
+    #     batch_size=args.batch_size)
     # constraints = {
     #     f"t_{feature_name}":
     #     ParameterConstraints(compute_kernels=[EmbeddingComputeKernel.BATCHED_FUSED_UVM.value])

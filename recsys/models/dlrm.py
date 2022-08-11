@@ -17,102 +17,16 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import record_function
 
 from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
-from ..modules.embeddings import ColumnParallelEmbeddingBag, FusedHybridParallelEmbeddingBag, \
-    ParallelCachedEmbeddingBag, ParallelFreqAwareEmbeddingBag
-from .. import ParallelMode, DISTLogger, DISTMGR as dist_manager
+from ..modules.embeddings import FusedHybridParallelEmbeddingBag
 from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 
+import colossalai
+from colossalai.nn._ops.cache_embedding import ParallelFreqAwareEmbeddingBag
+from colossalai.core import global_context as gpc
+from colossalai.context.parallel_mode import ParallelMode
 
-class SparseArch(nn.Module):
-
-    def __init__(self,
-                 num_embeddings_per_feature,
-                 embedding_dim,
-                 reduction_mode='sum',
-                 parallel_mode=ParallelMode.DEFAULT,
-                 sparse=False,
-                 output_device_type=None):
-        super(SparseArch, self).__init__()
-
-        self.embed = ColumnParallelEmbeddingBag(sum(num_embeddings_per_feature),
-                                                embedding_dim,
-                                                sparse=sparse,
-                                                mode=reduction_mode,
-                                                parallel_mode=parallel_mode,
-                                                include_last_offset=True,
-                                                output_device_type=output_device_type)
-
-        offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)[:-1]])
-        self.register_buffer('offsets', torch.from_numpy(offsets).requires_grad_(False), False)
-
-    def forward(self, sparse_features):
-        keys = sparse_features.keys()
-        assert len(keys) == len(self.offsets), f"keys len: {len(keys)}, offsets len: {len(self.offsets)}"
-
-        sparse_dict = sparse_features.to_dict()
-        flattened_sparse_features = torch.cat(
-            [sparse_dict[key].values() + offset for key, offset in zip(keys, self.offsets)])
-        batch_offsets = sparse_features.offsets()
-
-        batch_size = len(sparse_features.lengths()) // len(keys)
-        flattened_sparse_embeddings = self.embed(flattened_sparse_features, batch_offsets)
-
-        if self.offsets.device.type == 'cpu':
-            flattened_sparse_embeddings = flattened_sparse_embeddings.cuda()
-        return flattened_sparse_embeddings.view(batch_size, len(keys), -1)
-
-
-class DLRM(nn.Module):
-
-    def __init__(
-        self,
-        num_embeddings_per_feature,
-        embedding_dim,
-        num_sparse_features,
-        dense_in_features,
-        dense_arch_layer_sizes,
-        over_arch_layer_sizes,
-        dense_device,
-        sparse_device,
-        parallel_mode=ParallelMode.DEFAULT,
-        sparse=False,
-    ):
-        super(DLRM, self).__init__()
-        self.dense_device = dense_device
-        self.sparse_device = sparse_device
-
-        self.sparse_arch = SparseArch(num_embeddings_per_feature,
-                                      embedding_dim,
-                                      parallel_mode=parallel_mode,
-                                      sparse=sparse,
-                                      output_device_type=dense_device.type).to(sparse_device)
-        self.dense_arch = DenseArch(in_features=dense_in_features, layer_sizes=dense_arch_layer_sizes).to(dense_device)
-        self.inter_arch = InteractionArch(num_sparse_features=num_sparse_features).to(dense_device)
-        over_in_features = (embedding_dim + choose(num_sparse_features, 2) + num_sparse_features)
-        self.over_arch = OverArch(
-            in_features=over_in_features,
-            layer_sizes=over_arch_layer_sizes,
-        ).to(dense_device)
-
-    def forward(self, dense_features, sparse_features, inspect_time=False):
-        ctx1 = get_time_elapsed(DISTLogger, "embedding lookup in forward pass") \
-            if inspect_time else nullcontext()
-        with ctx1:
-            with record_function("Embedding lookup:"):
-                embedded_sparse = self.sparse_arch(sparse_features)
-
-        ctx2 = get_time_elapsed(DISTLogger, "dense operations in forward pass") \
-            if inspect_time else nullcontext()
-        with ctx2:
-            with record_function("Dense MLP:"):
-                embedded_dense = self.dense_arch(dense_features)
-
-            with record_function("Feature interaction:"):
-                concat_dense = self.inter_arch(dense_features=embedded_dense, sparse_features=embedded_sparse)
-            with record_function("Output MLP:"):
-                logits = self.over_arch(concat_dense)
-        return logits
+dist_logger = colossalai.logging.get_dist_logger()
 
 
 def sparse_embedding_shape_hook(embeddings, feature_size, batch_size):
@@ -126,7 +40,6 @@ class FusedSparseModules(nn.Module):
                  embedding_dim,
                  fused_op='all_to_all',
                  reduction_mode='sum',
-                 parallel_mode=ParallelMode.DEFAULT,
                  sparse=False,
                  output_device_type=None,
                  use_cache=False,
@@ -138,33 +51,26 @@ class FusedSparseModules(nn.Module):
                  is_dist_dataloader=True):
         super(FusedSparseModules, self).__init__()
         if use_cache:
-            # self.embed = ParallelCachedEmbeddingBag(sum(num_embeddings_per_feature),
-            #                                         embedding_dim,
-            #                                         cache_sets=cache_sets,
-            #                                         cache_lines=cache_lines,
-            #                                         sparse=sparse,
-            #                                         mode=reduction_mode,
-            #                                         include_last_offset=True,
-            #                                         parallel_mode=parallel_mode)
             self.embed = ParallelFreqAwareEmbeddingBag(sum(num_embeddings_per_feature),
                                                        embedding_dim,
                                                        sparse=True,
                                                        mode=reduction_mode,
-                                                       include_last_offset=True,
-                                                       parallel_mode=parallel_mode)
+                                                       include_last_offset=True)
             self.embed.preprocess(cache_lines, cache_sets, id_freq_map, warmup_ratio, buffer_size=buffer_size)
         else:
-            self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
-                                                         embedding_dim,
-                                                         fused_op=fused_op,
-                                                         mode=reduction_mode,
-                                                         parallel_mode=parallel_mode,
-                                                         sparse=sparse,
-                                                         include_last_offset=True,
-                                                         output_device_type=output_device_type)
-        self.world_size = dist_manager.get_world_size(parallel_mode)
+            self.embed = FusedHybridParallelEmbeddingBag(
+                sum(num_embeddings_per_feature),
+                embedding_dim,
+                fused_op=fused_op,
+                mode=reduction_mode,
+            # parallel_mode=parallel_mode,
+                sparse=sparse,
+                include_last_offset=True,
+                output_device_type=output_device_type)
+            raise NotImplementedError()
+
         if is_dist_dataloader:
-            self.kjt_collector = KJTAllToAll(dist_manager.get_group(parallel_mode))
+            self.kjt_collector = KJTAllToAll(gpc.get_group(ParallelMode.GLOBAL))
         else:
             self.kjt_collector = None
 
@@ -224,7 +130,6 @@ class HybridParallelDLRM(nn.Module):
                  over_arch_layer_sizes,
                  dense_device,
                  sparse_device,
-                 parallel_mode=ParallelMode.DEFAULT,
                  sparse=False,
                  fused_op='all_to_all',
                  use_cache=False,
@@ -246,7 +151,6 @@ class HybridParallelDLRM(nn.Module):
         self.sparse_modules = FusedSparseModules(num_embeddings_per_feature,
                                                  embedding_dim,
                                                  fused_op=fused_op,
-                                                 parallel_mode=parallel_mode,
                                                  sparse=sparse,
                                                  output_device_type=dense_device.type,
                                                  use_cache=use_cache,
@@ -259,8 +163,8 @@ class HybridParallelDLRM(nn.Module):
         self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                           dense_arch_layer_sizes,
                                                           over_arch_layer_sizes).to(dense_device),
-                                 device_ids=[dist_manager.get_rank(parallel_mode)],
-                                 process_group=dist_manager.get_group(parallel_mode),
+                                 device_ids=[gpc.get_global_rank()],
+                                 process_group=gpc.get_group(ParallelMode.GLOBAL),
                                  gradient_as_bucket_view=True,
                                  broadcast_buffers=False,
                                  static_graph=True)
@@ -280,14 +184,14 @@ class HybridParallelDLRM(nn.Module):
         self.stat_str = stat_str
 
     def forward(self, dense_features, sparse_features, inspect_time=False):
-        ctx1 = get_time_elapsed(DISTLogger, "embedding lookup in forward pass") \
+        ctx1 = get_time_elapsed(dist_logger, "embedding lookup in forward pass") \
             if inspect_time else nullcontext()
         with ctx1:
             with record_function("Embedding lookup:"):
                 # B // world size, sparse feature dim, embedding dim
                 embedded_sparse = self.sparse_modules(sparse_features)
 
-        ctx2 = get_time_elapsed(DISTLogger, "dense operations in forward pass") \
+        ctx2 = get_time_elapsed(dist_logger, "dense operations in forward pass") \
             if inspect_time else nullcontext()
         with ctx2:
             with record_function("Dense operations:"):
