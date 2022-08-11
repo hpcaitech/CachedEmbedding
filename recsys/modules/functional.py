@@ -5,10 +5,12 @@ from recsys import DISTLogger, DISTMGR as dist_manager
 try:
     from torch.distributed import ReduceOp
 except ImportError:
+
     class ReduceOp:
         SUM = None
         MAX = None
         AVG = None
+
     DISTLogger.warning("Unsupported `ReduceOp` for distributed computing", ranks=[0])
 
 _reduce_ops = dict(sum=ReduceOp.SUM, max=ReduceOp.MAX, mean=ReduceOp.AVG)
@@ -16,7 +18,7 @@ _reduce_ops = dict(sum=ReduceOp.SUM, max=ReduceOp.MAX, mean=ReduceOp.AVG)
 
 def _reduce(x, parallel_mode, reduce_op: str):
     if dist_manager.get_world_size(parallel_mode) == 1:
-        return x
+        return x, None
 
     process_group = dist_manager.get_cpu_group(parallel_mode) \
         if x.device.type == 'cpu' else dist_manager.get_group(parallel_mode)
@@ -25,24 +27,24 @@ def _reduce(x, parallel_mode, reduce_op: str):
         _x = x.clone()
 
     torch.distributed.all_reduce(x, op=_reduce_ops[reduce_op], group=process_group)
-    
+
     rank = dist_manager.get_rank(parallel_mode)
-    
+
     if reduce_op == 'max':
         mask = torch.eq(_x, x) * rank
     else:
         mask = torch.ones(x.shape) * rank
-    
+
     return x, mask.to(x.device)
 
 
-def _reduce_backward(grad, parallel_mode, reduce_op: str, mask: int=None):
+def _reduce_backward(grad, parallel_mode, reduce_op: str, mask: dict = None):
     if dist_manager.get_world_size(parallel_mode) == 1:
         return grad
-    
+
     rank = dist_manager.get_rank(parallel_mode)
     if reduce_op == 'max':
-        grad[~torch.eq(mask[rank],rank)].fill_(0)
+        grad[~torch.eq(mask[rank], rank)].fill_(0)
     elif reduce_op == 'mean':
         grad /= dist_manager.get_world_size(parallel_mode)
 
@@ -109,7 +111,7 @@ def _all_to_all(x, parallel_mode, scatter_dim, gather_dim):
 
 
 class _ReduceForward(torch.autograd.Function):
-    
+
     @staticmethod
     def forward(ctx, x, parallel_mode, reduce_op):
         ctx.parallel_mode = parallel_mode

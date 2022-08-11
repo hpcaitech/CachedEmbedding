@@ -21,26 +21,25 @@ from torchvision import transforms
 from colo_recsys.modules.dataloader import get_cuda_stream_dataloader
 
 
-CONFIG = Config(
-    dict(
-        train_data=dict(
-            dataset=dict(
-                type='CIFAR10',
-                root=Path(os.environ['DATA']),
-                train=True,
-                download=True,
-            ),
-            dataloader=dict(num_workers=2, batch_size=2, shuffle=True),
-        ),
-        parallel=dict(
-            pipeline=dict(size=1),
-            tensor=dict(size=1, mode=None),
-        ),
-        seed=1024,
-    ))
-
-
 def run_data_sampler(rank, world_size, port):
+    CONFIG = Config(
+        dict(
+            train_data=dict(
+                dataset=dict(
+                    type='CIFAR10',
+                    root=Path(os.environ['DATA']),
+                    train=True,
+                    download=True,
+                ),
+                dataloader=dict(num_workers=2, batch_size=2, shuffle=True),
+            ),
+            parallel=dict(
+                pipeline=dict(size=1),
+                tensor=dict(size=1, mode=None),
+            ),
+            seed=1024,
+        ))
+
     dist_args = dict(config=CONFIG, rank=rank, world_size=world_size, backend='gloo', port=port, host='localhost')
     colossalai.launch(**dist_args)
 
@@ -70,6 +69,7 @@ def run_data_sampler(rank, world_size, port):
     torch.cuda.empty_cache()
 
 
+@pytest.mark.skipif("DATA" not in os.environ, reason="Only for local env in which the dataset_dir exists")
 @pytest.mark.parametrize('world_size', [1, 4])
 @rerun_if_address_is_in_use()
 def test_data_sampler(world_size):

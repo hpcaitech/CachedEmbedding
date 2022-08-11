@@ -11,14 +11,14 @@ from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 
 from recsys import launch, disable_existing_loggers
 from recsys import DISTMGR
-from recsys.testing import rerun_if_address_is_in_use, free_port
+from colossalai.utils import free_port
 from recsys.datasets.criteo import KAGGLE_NUM_EMBEDDINGS_PER_FEATURE, \
     InMemoryBinaryCriteoIterDataPipe as RecSysCriteoLoader
 from recsys.datasets.utils import KJTAllToAll
 
 BATCH_SIZE = 512
 NUM_EMBEDDINGS_PER_FEATURE = list(map(int, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(',')))
-DATASET_DIR = '../criteo_kaggle'
+DATASET_DIR = '../criteo_kaggle_data'
 
 
 def test_keyedjaggedtensor():
@@ -101,7 +101,7 @@ def _test_dataloader(stage_files):
         sparse_values = (sparse.values().view(len(sparse.keys()), -1) - offsets).view(-1)
         ref_dense, ref_sparse, ref_labels = ref_batch.dense_features, ref_batch.sparse_features, ref_batch.labels
         assert torch.allclose(dense, ref_dense) and torch.allclose(labels, ref_labels)
-        assert torch.allclose(sparse_values, ref_sparse.values()) and \
+        assert torch.allclose(sparse_values, ref_sparse.values().long()) and \
                torch.allclose(sparse.offsets(), ref_sparse.offsets())
         if cnt == 3:
             break
@@ -189,7 +189,7 @@ def _test_dist_dataloader(stage_files):
             assert torch.allclose(all_dense, ref_dense)
             assert torch.allclose(ref_labels, all_labels)
             all_sparse_values = (all_sparse.values().view(len(all_sparse.keys()), -1) - offsets).view(-1)
-            assert torch.allclose(all_sparse_values, ref_sparse.values())
+            assert torch.allclose(all_sparse_values, ref_sparse.values().long())
 
             dense_buffer.clear()
             sparse_buffer.clear()
