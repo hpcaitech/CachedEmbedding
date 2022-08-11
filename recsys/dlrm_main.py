@@ -12,8 +12,6 @@ from recsys.models.dlrm import HybridParallelDLRM
 from recsys.utils import FiniteDataIter
 
 import colossalai
-from colossalai.context.parallel_mode import ParallelMode
-from colossalai.core import global_context as gpc
 
 dist_logger = colossalai.logging.get_dist_logger()
 
@@ -207,8 +205,9 @@ def _train(model,
            use_overlap=True,
            use_distributed_dataloader=True):
     model.train()
-    rank = gpc.get_gloabl_rank()
-    world_size = gpc.get_world_size(ParallelMode.GLOBAL)
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    
     if use_overlap:
         data_iter = FiniteDataIter(data_loader)
     else:
@@ -241,8 +240,8 @@ def _train(model,
 
 def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader):
     model.eval()
-    rank = gpc.get_global_rank()
-    world_size = gpc.get_world_size(ParallelMode.GLOBAL)
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
     auroc = metrics.AUROC(compute_on_step=False).cuda()
     accuracy = metrics.Accuracy(compute_on_step=False).cuda()
 
@@ -311,15 +310,19 @@ def main():
     colossalai.logging.disable_existing_loggers()
     colossalai.launch_from_torch(config={}, seed=args.seed, verbose=False)
 
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+
+
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
 
     dataloader_factory = {"rank": 0, "world_size": 1}
     if args.use_distributed_dataloader:
-        dataloader_factory["rank"] = gpc.get_global_rank()
-        dataloader_factory["world_size"] = gpc.get_world_size(ParallelMode.GLOBAL)
+        dataloader_factory["rank"] = rank
+        dataloader_factory["world_size"] = world_size
 
-    dist_logger.info(f"launch rank: {gpc.get_global_rank()} / {gpc.get_world_size(ParallelMode.GLOBAL)}")
+    dist_logger.info(f"launch rank: {rank} / {world_size}")
     dist_logger.info(f"config: {args}", ranks=[0])
 
     if 'criteo' in args.dataset_dir:
@@ -370,9 +373,8 @@ def main():
     for name, param in model.named_parameters():
         dist_logger.info(f"{name} : shape {param.shape}, device {param.data.device}", ranks=[0])
 
-    rank = gpc.get_global_rank()
-    world_size = gpc.get_world_size(ParallelMode.GLOBAL)
-    # TODO: a more canonical interface for optimizers
+    # TODO: a more canonical interface for optimizers.
+    # currently not support ADAM
     optimizer = torch.optim.SGD([{
         "params": model.sparse_modules.parameters(),
         "lr": args.learning_rate
@@ -384,7 +386,6 @@ def main():
 
     if args.inspect_time:
         # Sanity check & iter time inspection
-        from recsys.utils import get_time_elapsed
 
         data_iter = iter(train_dataloader)
 

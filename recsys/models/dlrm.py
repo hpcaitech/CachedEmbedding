@@ -56,18 +56,17 @@ class FusedSparseModules(nn.Module):
                                                        sparse=True,
                                                        mode=reduction_mode,
                                                        include_last_offset=True)
-            self.embed.preprocess(cache_lines, cache_sets, id_freq_map, warmup_ratio, buffer_size=buffer_size)
+            self.embed.preprocess(cache_sets, id_freq_map, warmup_ratio, buffer_size=buffer_size)
         else:
+            raise NotImplementedError()
             self.embed = FusedHybridParallelEmbeddingBag(
                 sum(num_embeddings_per_feature),
                 embedding_dim,
                 fused_op=fused_op,
                 mode=reduction_mode,
-            # parallel_mode=parallel_mode,
                 sparse=sparse,
                 include_last_offset=True,
                 output_device_type=output_device_type)
-            raise NotImplementedError()
 
         if is_dist_dataloader:
             self.kjt_collector = KJTAllToAll(gpc.get_group(ParallelMode.GLOBAL))
