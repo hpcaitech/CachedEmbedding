@@ -8,10 +8,7 @@
 # The infrastructures of DLRM are mainly inspired by TorchRec:
 # https://github.com/pytorch/torchrec/blob/main/torchrec/models/dlrm.py
 
-from typing import List, Optional
 from contextlib import nullcontext
-import numpy as np
-import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import record_function
@@ -22,7 +19,7 @@ from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 
 import colossalai
-from colossalai.nn._ops.cache_embedding import ParallelFreqAwareEmbeddingBag
+from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag
 from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 
