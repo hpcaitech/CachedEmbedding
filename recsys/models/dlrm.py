@@ -18,7 +18,7 @@ from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 
 import colossalai
-from colossalai.nn._ops.cache_embedding import ParallelFreqAwareEmbeddingBag
+from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag
 from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 
