@@ -9,7 +9,6 @@ from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torchrec.datasets.utils import LoadFiles, ReadLinesFromCSV, PATH_MANAGER_KEY, Batch
 from torchrec.datasets.criteo import BinaryCriteoUtils
 
-from .. import ParallelMode, DISTMGR
 from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
 
 CAT_FEATURE_COUNT = 13
@@ -221,7 +220,7 @@ def get_dataloader(args, stage, rank, world_size):
 
     stage_files = [
         sorted(map(
-            lambda s: os.path.join(args.in_memory_binary_criteo_path, s),
+            lambda s: os.path.join(args.dataset_dir, s),
             filter(lambda _f: kind in _f, files),
         )) for kind in ["dense", "sparse", "label"]
     ]
