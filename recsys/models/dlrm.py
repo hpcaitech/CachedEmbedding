@@ -48,22 +48,26 @@ class FusedSparseModules(nn.Module):
                  is_dist_dataloader=True):
         super(FusedSparseModules, self).__init__()
         if use_cache:
-            self.embed = ParallelFreqAwareEmbeddingBag(sum(num_embeddings_per_feature),
-                                                       embedding_dim,
-                                                       sparse=True,
-                                                       mode=reduction_mode,
-                                                       include_last_offset=True)
-            self.embed.preprocess(cache_sets, id_freq_map, warmup_ratio, buffer_size=buffer_size)
-        else:
-            raise NotImplementedError()
-            self.embed = FusedHybridParallelEmbeddingBag(
+            self.embed = ParallelFreqAwareEmbeddingBag(
                 sum(num_embeddings_per_feature),
                 embedding_dim,
-                fused_op=fused_op,
-                mode=reduction_mode,
                 sparse=sparse,
+                mode=reduction_mode,
                 include_last_offset=True,
-                output_device_type=output_device_type)
+                cuda_row_num=cache_sets,
+                ids_freq_mapping=id_freq_map,
+                warmup_ratio=warmup_ratio,
+                buffer_size=buffer_size,
+            )
+        else:
+            raise NotImplementedError()
+            self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
+                                                         embedding_dim,
+                                                         fused_op=fused_op,
+                                                         mode=reduction_mode,
+                                                         sparse=sparse,
+                                                         include_last_offset=True,
+                                                         output_device_type=output_device_type)
 
         if is_dist_dataloader:
             self.kjt_collector = KJTAllToAll(gpc.get_group(ParallelMode.GLOBAL))
