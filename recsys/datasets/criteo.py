@@ -8,6 +8,7 @@
 import os
 from typing import Dict, Iterator, List, Optional
 import numpy as np
+import glob
 
 from torchrec.datasets.criteo import (CAT_FEATURE_COUNT, DEFAULT_CAT_NAMES, DEFAULT_INT_NAMES, DAYS, BinaryCriteoUtils)
 from torchrec.datasets.utils import PATH_MANAGER_KEY, Batch
@@ -16,16 +17,25 @@ from iopath.common.file_io import PathManager, PathManagerFactory
 from pyre_extensions import none_throws
 import torch
 from torch.utils.data import DataLoader, IterableDataset
+try:
+    # pyre-ignore[21]
+    import nvtabular as nvt
+    from nvtabular.loader.torch import TorchAsyncItr
+except ImportError:
+    print("Unable to import NVTabular, which indicates that you cannot load criteo 1TB dataset with our solution")
 
-from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
+from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter, NVTabularFeatureCounter
+from .utils import KJTTransform
 
 STAGES = ["train", "val", "test"]
 
-NUM_EMBEDDINGS_PER_FEATURE = None
-
+# 177,944,275 in total
+NUM_EMBEDDINGS_PER_FEATURE = "45833188,36746,17245,7413,20243,3,7114,1441,62,29275261,1572176,345138,10,2209,11267," \
+                             "128,4,974,14,48937457,11316796,40094537,452104,12606,104,35"
+# 33,762,577 in total
 KAGGLE_NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
                                            '27,14992,5461306,10,5652,2173,4,7046547,18,15,286181,105,142572'
-KAGGLE_TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 days for criteo kaggle, 45840617 samples in total
+KAGGLE_TOTAL_TRAINING_SAMPLES = 39_291_954    # 0-6 days for criteo kaggle, 45,840,617 samples in total
 
 
 class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
@@ -221,11 +231,7 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         return self.num_batches
 
 
-def get_dataloader(args, stage, rank, world_size):
-    stage = stage.lower()
-    if stage not in STAGES:
-        raise ValueError(f"Supplied stage was {stage}. Must be one of {STAGES}.")
-
+def _get_kaggle_dataloader(args, stage, rank, world_size):
     files = os.listdir(args.dataset_dir)
 
     def is_final_day(s: str) -> bool:
@@ -263,15 +269,61 @@ def get_dataloader(args, stage, rank, world_size):
     return dataloader
 
 
+def _get_terabyte_dataloader(args, stage, rank, world_size):
+    # TODO: replace the data_split with stage
+    if stage == "train":
+        data_split = "train"
+    elif stage == "val":
+        data_split = "validation"
+    else:
+        data_split = "test"
+
+    if world_size > 1:
+        raise NotImplementedError("NVTabular can not support distributed dataloader")
+
+    files = glob.glob(os.path.join(args.dataset_dir, data_split, "*.parquet"))
+
+    nv_iter = TorchAsyncItr(
+        nvt.Dataset(files, engine="parquet", part_mem_fraction=0.02),
+        batch_size=args.batch_size,
+        cats=DEFAULT_CAT_NAMES,
+        conts=DEFAULT_INT_NAMES,
+        labels=["label"],
+        global_rank=rank,
+        global_size=world_size,
+        drop_last=True,
+    )
+
+    dataloader = DataLoader(nv_iter,
+                            batch_size=None,
+                            pin_memory=False,
+                            collate_fn=KJTTransform(nv_iter).transform,
+                            num_worker=0)
+    return dataloader
+
+
+def get_dataloader(args, stage, rank, world_size):
+    stage = stage.lower()
+    if stage not in STAGES:
+        raise ValueError(f"Supplied stage was {stage}. Must be one of {STAGES}.")
+
+    if "kaggle" in args.dataset_dir:
+        return _get_kaggle_dataloader(args, stage, rank, world_size)
+    else:
+        return _get_terabyte_dataloader(args, stage, rank, world_size)
+
+
 def get_id_freq_map(path):
     if 'kaggle' not in path:
-        raise NotImplementedError()
+        files = glob.glob(os.path.join(path, "train", "*.parquet"))
+        feature_count = NVTabularFeatureCounter(files, list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))), 8192)
 
-    files = os.listdir(path)
-    sparse_files = list(filter(lambda s: 'sparse' in s, files))
-    sparse_files = [os.path.join(path, _f) for _f in sparse_files]
+    else:
+        files = os.listdir(path)
+        sparse_files = list(filter(lambda s: 'sparse' in s, files))
+        sparse_files = [os.path.join(path, _f) for _f in sparse_files]
 
-    file_processor = CriteoSparseProcessor(list(map(int, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(','))))
-    feature_count = GlobalFeatureCounter(sparse_files, file_processor)
+        file_processor = CriteoSparseProcessor(list(map(int, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(','))))
+        feature_count = GlobalFeatureCounter(sparse_files, file_processor)
 
     return feature_count.id_freq_map

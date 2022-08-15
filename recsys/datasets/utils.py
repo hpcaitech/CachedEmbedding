@@ -1,6 +1,8 @@
+import numpy as np
 import torch
 import torch.distributed as dist
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+from torchrec.datasets.utils import Batch
 
 
 class KJTAllToAll:
@@ -49,4 +51,49 @@ class KJTAllToAll:
             keys=keys,
             values=all_values,
             lengths=all_lengths,
+        )
+
+
+class KJTTransform:
+
+    def __init__(self, dataloader, hashes=None):
+        self.batch_size = dataloader.batch_size
+        self.cats = dataloader.cat_names
+        self.conts = dataloader.cont_names
+        self.labels = dataloader.label_names
+        self.sparse_offset = torch.tensor(
+            [0, *np.cumsum(hashes)[:-1]], dtype=torch.long, device=torch.cuda.current_device()).view(1, -1) \
+            if hashes is not None else None
+
+        _num_ids_in_batch = len(self.cats) * self.batch_size
+        self.lengths = torch.ones((_num_ids_in_batch,), dtype=torch.int32)
+        self.offsets = torch.arange(0, _num_ids_in_batch + 1, dtype=torch.int32)
+        self.length_per_key = len(self.cats) * [self.batch_size]
+        self.offset_per_key = [self.batch_size * i for i in range(len(self.cats) + 1)]
+        self.index_per_key = {key: i for (i, key) in enumerate(self.cats)}
+
+    def transform(self, batch):
+        sparse, dense = [], []
+        for col in self.cats:
+            sparse.append(batch[0][col])
+        sparse = torch.cat(sparse, dim=1)
+        if self.sparse_offset is not None:
+            sparse += self.sparse_offset
+        for col in self.conts:
+            dense.append(batch[0][col])
+        dense = torch.cat(dense, dim=1)
+
+        return Batch(
+            dense_features=dense,
+            sparse_features=KeyedJaggedTensor(
+                keys=self.cats,
+                values=sparse.transpose(1, 0).contiguous().view(-1),
+                lengths=self.lengths,
+                offsets=self.offsets,
+                stride=self.batch_size,
+                length_per_key=self.length_per_key,
+                offset_per_key=self.offset_per_key,
+                index_per_key=self.index_per_key,
+            ),
+            labels=batch[1],
         )
