@@ -279,9 +279,10 @@ def _get_terabyte_dataloader(args, stage, rank, world_size):
         data_split = "test"
 
     if world_size > 1:
-        raise NotImplementedError("NVTabular can not support distributed dataloader")
+        raise NotImplementedError("We do not support distributed dataloader currently.")
 
-    files = glob.glob(os.path.join(args.dataset_dir, data_split, "*.parquet"))
+    file_num = len(glob.glob(os.path.join(args.dataset_dir, data_split, "*.parquet")))
+    files = [os.path.join(args.dataset_dir, data_split, f"part_{i}.parquet") for i in range(file_num)]
 
     nv_iter = TorchAsyncItr(
         nvt.Dataset(files, engine="parquet", part_mem_fraction=0.02),
@@ -315,8 +316,13 @@ def get_dataloader(args, stage, rank, world_size):
 
 def get_id_freq_map(path):
     if 'kaggle' not in path:
-        files = glob.glob(os.path.join(path, "train", "*.parquet"))
-        feature_count = NVTabularFeatureCounter(files, list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))), 8192)
+        file_num = len(glob.glob(os.path.join(path, "train", "*.parquet")))
+        files = [os.path.join(path, "train", f"part_{i}.parquet") for i in range(file_num)]
+
+        feature_count = NVTabularFeatureCounter(files,
+                                                list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))),
+                                                16384,
+                                                sample_fraction=0.1)
 
     else:
         files = os.listdir(path)

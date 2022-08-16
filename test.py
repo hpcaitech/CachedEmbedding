@@ -1,18 +1,14 @@
 import os
-import time
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader
-import nvtabular as nvt
-from nvtabular.loader.torch import TorchAsyncItr    # , DLDataLoader
 import cupy
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torchrec.datasets.utils import Batch
 
 from recsys.datasets.criteo import get_id_freq_map
 
-INPUT_DATA_DIR = "/data/criteo_preproc/test/"
+INPUT_DATA_DIR = "/data/criteo_preproc/train/"
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 16384))
 PARTS_PER_CHUNK = int(os.environ.get("PARTS_PER_CHUNK", 2))
 CONTINUOUS_COLUMNS = ["int_" + str(x) for x in range(0, 13)]
@@ -85,59 +81,16 @@ def run(rank, world_size):
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     print(f"init rank: {rank}")
-    torch.cuda.set_device(0)
+    torch.cuda.set_device(rank)
 
-    # data = torch.rand(1, 2)
-    # print(f"rank: {rank}, data: {data}")
-    # data_list = [data if _r == rank else torch.empty_like(data) for _r in range(world_size)]
-    # dist.all_gather(data_list, data)
-    # print(data_list)
-
-    fname = "part_{}.parquet"
-    train_paths = [os.path.join(INPUT_DATA_DIR, fname.format(i)) for i in range(64)]
-    # print(train_paths)
-
-    print(f"{dist.get_rank()}/{dist.get_world_size()}: device: {torch.cuda.current_device()}")
-
-    start = time.time()
-    train_data = nvt.Dataset(train_paths, engine="parquet", part_mem_fraction=0.04 / PARTS_PER_CHUNK)
-    print(f"nvdtaset: {time.time() - start}")
-    start = time.time()
-    train_data_idrs = TorchAsyncItr(
-        train_data,
-        batch_size=BATCH_SIZE,
-        cats=CATEGORICAL_COLUMNS,
-        conts=CONTINUOUS_COLUMNS,
-        labels=LABEL_COLUMNS,
-        global_rank=0,
-        global_size=1,
-        drop_last=False,
-        parts_per_chunk=PARTS_PER_CHUNK,
-    )
-    print(f"TorchAsyncItr: {time.time() - start}, len: {len(train_data_idrs)}")
-
-    start = time.time()
-    train_dataloader = DataLoader(train_data_idrs,
-                                  collate_fn=KJTTransform(train_data_idrs).transform,
-                                  batch_size=None,
-                                  pin_memory=False,
-                                  num_workers=0)
-    print(f"dataloader: {time.time() - start}, len: {len(train_dataloader)}")
-
-    data_iter = iter(train_dataloader)
-    for idx, batch in enumerate(data_iter):
-        print(f"rank: {rank}, it: {idx}, batch: {batch.dense_features}")
-
-        if idx == 3:
-            break
-    print(f"allocate: {torch.cuda.memory_allocated()/1024**3:.2f} GB, "
-          f"reserved: {torch.cuda.memory_reserved()/1024**3:.2f} GB")
-    torch.cuda.synchronize()
-    # id_freq_map = get_id_freq_map("/data/criteo_preproc")
-    # print(id_freq_map.shape, id_freq_map.max(), id_freq_map.min())
+    id_freq_map = get_id_freq_map("/data/criteo_preproc")
+    print(
+        f"rank: {rank}, shape: {id_freq_map.shape}, max: {id_freq_map.max().item()}, min: {id_freq_map.min().item()}, "
+        f"top 10: {id_freq_map[:10].tolist()}")
 
 
 if __name__ == "__main__":
-    world_size = int(os.environ["OMPI_COMM_WORLD_SIZE"])
-    world_rank = int(os.environ["OMPI_COMM_WORLD_RANK"])
-    run(world_rank, world_size)
+    # world_size = int(os.environ["OMPI_COMM_WORLD_SIZE"])
+    # world_rank = int(os.environ["OMPI_COMM_WORLD_RANK"])
+    os.environ["LIBCUDF_CUFILE_POLICY"] = "ALWAYS"
+    run(0, 1)

@@ -1,4 +1,7 @@
 import abc
+import itertools
+from tqdm import tqdm
+
 import numpy as np
 from contexttimer import Timer
 import torch
@@ -67,19 +70,16 @@ class NVTabularFeatureCounter:
 
     def __init__(self, datafiles, hashes, batch_size, sample_fraction=0.05):
         self.datafiles = datafiles
-        self._id_freq_map = torch.zeros(sum(hashes), dtype=torch.long, device=torch.cuda.current_device())
+        self._id_freq_map = torch.zeros(sum(hashes), dtype=torch.long)
         self.batch_size = batch_size
-        self.pre_ones = torch.ones(batch_size * len(DEFAULT_CAT_NAMES),
-                                   dtype=torch.long,
-                                   device=torch.cuda.current_device())
+        self.pre_ones = torch.ones(batch_size * len(DEFAULT_CAT_NAMES), dtype=torch.long)
         self.sample_fraction = sample_fraction
         self._collect_statistics()
 
     def _collect_statistics(self):
+        data_files = sorted(self.datafiles[:int(np.ceil(len(self.datafiles) * self.sample_fraction))])
         nv_iter = TorchAsyncItr(
-            nvt.Dataset(self.datafiles[:np.ceil(len(self.datafiles) * self.sample_fraction)],
-                        engine="parquet",
-                        part_mem_fraction=0.02),
+            nvt.Dataset(data_files, engine="parquet", part_mem_fraction=0.02),
             batch_size=self.batch_size,
             cats=DEFAULT_CAT_NAMES,
             conts=DEFAULT_INT_NAMES,
@@ -87,6 +87,7 @@ class NVTabularFeatureCounter:
             global_rank=0,
             global_size=1,
             drop_last=True,
+            device='cpu',
         )
 
         dataloader = DataLoader(nv_iter,
@@ -94,13 +95,17 @@ class NVTabularFeatureCounter:
                                 pin_memory=False,
                                 collate_fn=KJTTransform(nv_iter).transform,
                                 num_workers=0)
-
+        data_iter = iter(dataloader)
         with Timer() as timer:
-            for batch in dataloader:
-                sparse = batch.sparse_features.values()
-                ones = self.pre_ones.narrow(0, start=0, length=sparse.shape[0])
-                self._id_freq_map.index_add_(dim=0, index=batch.sparse_features.values(), source=ones)
-        print(f"statistic costs: {timer.elapsed:.2f}s")
+            for it in tqdm(itertools.count()):
+                try:
+                    sparse = next(data_iter).sparse_features.values()
+                    ones = self.pre_ones.narrow(0, start=0, length=sparse.shape[0])
+                    self._id_freq_map.index_add_(dim=0, index=sparse, source=ones)
+                except StopIteration:
+                    break
+        print(f"collect statistics over files: {data_files} num batch: {len(dataloader)}, batch size: {self.batch_size}"
+              f", average time cost: {len(dataloader) / timer.elapsed:.2f} batch/s")
 
     @property
     def id_freq_map(self):
