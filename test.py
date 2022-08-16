@@ -83,8 +83,15 @@ def run(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    dist.init_process_group("gloo", rank=rank, world_size=world_size)
-    torch.cuda.set_device(rank)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    print(f"init rank: {rank}")
+    torch.cuda.set_device(0)
+
+    # data = torch.rand(1, 2)
+    # print(f"rank: {rank}, data: {data}")
+    # data_list = [data if _r == rank else torch.empty_like(data) for _r in range(world_size)]
+    # dist.all_gather(data_list, data)
+    # print(data_list)
 
     fname = "part_{}.parquet"
     train_paths = [os.path.join(INPUT_DATA_DIR, fname.format(i)) for i in range(64)]
@@ -96,17 +103,17 @@ def run(rank, world_size):
     train_data = nvt.Dataset(train_paths, engine="parquet", part_mem_fraction=0.04 / PARTS_PER_CHUNK)
     print(f"nvdtaset: {time.time() - start}")
     start = time.time()
-    train_data_idrs = TorchAsyncItr(train_data,
-                                    batch_size=BATCH_SIZE,
-                                    cats=CATEGORICAL_COLUMNS,
-                                    conts=CONTINUOUS_COLUMNS,
-                                    labels=LABEL_COLUMNS,
-                                    global_rank=rank,
-                                    global_size=world_size,
-                                    drop_last=False,
-                                    parts_per_chunk=PARTS_PER_CHUNK,
-                                    shuffle=True,
-                                    seed_fn=lambda: 1)
+    train_data_idrs = TorchAsyncItr(
+        train_data,
+        batch_size=BATCH_SIZE,
+        cats=CATEGORICAL_COLUMNS,
+        conts=CONTINUOUS_COLUMNS,
+        labels=LABEL_COLUMNS,
+        global_rank=0,
+        global_size=1,
+        drop_last=False,
+        parts_per_chunk=PARTS_PER_CHUNK,
+    )
     print(f"TorchAsyncItr: {time.time() - start}, len: {len(train_data_idrs)}")
 
     start = time.time()
@@ -121,11 +128,11 @@ def run(rank, world_size):
     for idx, batch in enumerate(data_iter):
         print(f"rank: {rank}, it: {idx}, batch: {batch.dense_features}")
 
-        if idx == 30:
+        if idx == 3:
             break
     print(f"allocate: {torch.cuda.memory_allocated()/1024**3:.2f} GB, "
           f"reserved: {torch.cuda.memory_reserved()/1024**3:.2f} GB")
-
+    torch.cuda.synchronize()
     # id_freq_map = get_id_freq_map("/data/criteo_preproc")
     # print(id_freq_map.shape, id_freq_map.max(), id_freq_map.min())
 
