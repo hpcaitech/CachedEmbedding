@@ -7,7 +7,16 @@ import numpy as np
 
 
 def minimize_groupwise_diff(lst: List[int], num_grp: int) -> List[List[int]]:
-    """This function computes optimized grouping for features"""
+    """Compute a greedy solution to group numbers into a desired number of groups
+    and minimize the maximum difference between groups. 
+
+    Args:
+        lst (List[int]): list of ungrouped numbers
+        num_grp (int): number of groups to be formed into
+
+    Returns:
+        List[List[int]]: greedily computed grouping of numbers
+    """
     if num_grp == 1:
         return [lst]
     indices = list(np.argsort(lst)[::-1])
@@ -47,8 +56,21 @@ def minimize_groupwise_diff(lst: List[int], num_grp: int) -> List[List[int]]:
     return groups[:num_grp]
 
 class LoadBalanceManager(object):
+    """A load manager that divides training loads evenly across tensor parallel 
+    embedding ranks.
+    """
     def __init__(self, embeddings_per_feat: List[int], num_groups=4, base_emb_dim=128, \
         do_fair=True, device=None, disable_random_behavior=False):
+        """initiate the manager with raw feature embeddings that have yet to be sharded.
+
+        Args:
+            embeddings_per_feat (List[int]): number of embeddings per sparse feature.
+            num_groups (int, optional): number of groups to shard into. Usually world size. Defaults to 4.
+            base_emb_dim (int, optional): desired embedding dimension for features. Defaults to 128.
+            device (_type_, optional): device where load manager is put. Defaults to None.
+            disable_random_behavior (bool, optional): set to `True` to disable feature 
+            random shuffling, only applied in table-wise sharding scenario. Defaults to False.
+        """
         assert len(embeddings_per_feat) >= num_groups, \
                 f"number of input fields {len(embeddings_per_feat)} must be larger than the world size {num_groups}"
         self.embeddings_per_feat = embeddings_per_feat
@@ -56,6 +78,7 @@ class LoadBalanceManager(object):
         self.base_emb_dim = base_emb_dim
         self.do_fair = do_fair
         self.device = device
+        # compute the offsets for all set of features 
         self.all_feat_offsets = torch.cumsum(torch.tensor([0]+self.embeddings_per_feat,
                                                           device=self.device),dim=0)
         if not self.do_fair:
@@ -64,6 +87,8 @@ class LoadBalanceManager(object):
             self._fair_initialize()
 
     def _fair_initialize(self) -> None:
+        """shards the features with ...
+        """
         self.num_embeddings_per_rank = sum(self.embeddings_per_feat) // self.num_groups
         dim_indices = np.array(range(len(self.embeddings_per_feat)))
         self.groups = []
@@ -112,6 +137,11 @@ class LoadBalanceManager(object):
         self.qr_bucket_size = math.ceil(math.sqrt(self.num_embeddings_per_rank))
 
     def _shuffle_initialize(self, disable_random_behavior=False) -> None:
+        """_summary_
+
+        Args:
+            disable_random_behavior (bool, optional): _description_. Defaults to False.
+        """
         if disable_random_behavior:
             self.groups = minimize_groupwise_diff(self.embeddings_per_feat, self.num_groups)
         else:
