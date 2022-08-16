@@ -38,11 +38,12 @@ def benchmark_cache_embedding(batch_size,
     torch.cuda.reset_peak_memory_stats()
     device = torch.device('cuda:0')
     with Timer() as timer:
-        model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True).to(device)
-        print(f"model init: {timer.elapsed:.2f}s")
-        with Timer() as timer:
-            model.preprocess(cuda_row_num, id_freq_map, warmup_ratio=warmup_ratio, buffer_size=buf_size)
-        print(f"reorder: {timer.elapsed:.2f}s")
+            model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True,
+                                        cuda_row_num=cuda_row_num,
+                                        ids_freq_mapping=id_freq_map,
+                                        warmup_ratio=warmup_ratio,
+                                        buffer_size=buf_size, ).to(device)
+            print(f"model init: {timer.elapsed:.2f}s")
 
     grad = None
     avg_hit_rate = None
@@ -53,12 +54,12 @@ def benchmark_cache_embedding(batch_size,
 
     with Timer() as timer:
         with tqdm(bar_format='{n_fmt}it {rate_fmt} {postfix}') as t:
-            # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            #              schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
-            #              profile_memory=True,
-            #              on_trace_ready=tensorboard_trace_handler(
-            #                  f"log/b{batch_size}-e{embedding_dim}-num_chunk{cuda_row_num}-chunk_size{cache_lines}")) as prof:
-            with nullcontext():
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                         schedule=schedule(wait=0, warmup=21, active=2, repeat=1),
+                         profile_memory=True,
+                         on_trace_ready=tensorboard_trace_handler(
+                             f"log/b{batch_size}-e{embedding_dim}-num_chunk{cuda_row_num}")) as prof:
+            # with nullcontext():
                 for it in itertools.count():
                     batch = next(data_iter)
                     sparse_feature = batch.sparse_features.to(device)
@@ -69,7 +70,7 @@ def benchmark_cache_embedding(batch_size,
                     res.backward(grad)
 
                     model.zero_grad()
-                    # prof.step()
+                    prof.step()
                     running_hits = model.num_hits_history[-1]    # sum(model.num_hits_history)
                     running_miss = model.num_miss_history[-1]    # sum(model.num_miss_history)
                     hit_rate = running_hits / (running_hits + running_miss)
@@ -97,8 +98,8 @@ if __name__ == "__main__":
         id_freq_map = get_id_freq_map(CRITEO_PATH)
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
-    batch_size = [2048]
-    embed_dim = 32
+    batch_size = [2048*4]
+    embed_dim = 512
     cache_ratio = [0.02]
 
     # # row-wise cache

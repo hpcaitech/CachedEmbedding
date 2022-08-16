@@ -1,6 +1,6 @@
 # Byte-compiled / optimized / DLL files
 *__pycache__
-criteo_kaggle/
+criteo_kaggle_data/
 
 # Distribution / packaging
 build/

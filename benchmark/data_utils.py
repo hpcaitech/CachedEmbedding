@@ -41,5 +41,6 @@ def get_dataloader(stage, batch_size):
         batch_size=None,
         pin_memory=True,
         collate_fn=lambda x: x,
+        num_workers=32
     )
     return dataloader
