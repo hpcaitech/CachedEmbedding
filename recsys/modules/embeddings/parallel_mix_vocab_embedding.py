@@ -18,6 +18,9 @@ REDUCE_OPS = dict(max=lambda x,dim:torch.max(x,dim=dim)[0], mean=torch.mean, sum
 
 
 class QREmbeddingBag(nn.Module):
+    """Implementation of [paper](https://arxiv.org/pdf/1909.02107.pdf). 
+    
+    """
     def __init__(self,
                  num_embeddings: int,
                  qr_bucket_size: int,
