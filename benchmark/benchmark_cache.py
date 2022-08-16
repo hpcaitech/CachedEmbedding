@@ -98,8 +98,8 @@ if __name__ == "__main__":
         id_freq_map = get_id_freq_map(CRITEO_PATH)
     print(f"Counting sparse features in dataset costs: {timer.elapsed:.2f} s")
 
-    batch_size = [2048*4]
-    embed_dim = 512
+    batch_size = [2048]
+    embed_dim = 32
     cache_ratio = [0.02]
 
     # # row-wise cache
