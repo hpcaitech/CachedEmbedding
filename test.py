@@ -91,7 +91,6 @@ def setup_dask(dask_workdir):
     return Client(cluster)
 
 
-# def run(rank, world_size):
 def run():
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
@@ -138,29 +137,15 @@ def run():
     for idx, batch in enumerate(data_iter):
         print(f"rank: {dist.get_rank()}, it: {idx}, batch: {batch.dense_features}")
 
-        if idx == 3:
+        if idx == 30:
             break
-    print(f"allocate: {torch.cuda.memory_allocated()/1024**3:.2f} GB, "
-          f"reserved: {torch.cuda.memory_reserved()/1024**3:.2f} GB")
+    print(get_mem_info())
     torch.cuda.synchronize()
     # id_freq_map = get_id_freq_map("/data/criteo_preproc")
     # print(id_freq_map.shape, id_freq_map.max(), id_freq_map.min())
 
 
 if __name__ == "__main__":
-    # world_size = int(os.environ["OMPI_COMM_WORLD_SIZE"])
-    # world_rank = int(os.environ["OMPI_COMM_WORLD_RANK"])
-
-    # rank = int(os.environ['RANK'])
-    # local_rank = int(os.environ['LOCAL_RANK'])
-    # world_size = int(os.environ['WORLD_SIZE'])
-    # host = os.environ['MASTER_ADDR']
-    # port = int(os.environ['MASTER_PORT'])
-    # print(f"rank: {rank}/{world_size}, local rank: {local_rank}, host: {host}, port: {port}")
-    # os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
-
     os.environ["LIBCUDF_CUFILE_POLICY"] = "ALWAYS"
 
-    # setup_dask("dask_dir")
-    # run(world_rank, world_size)
     run()

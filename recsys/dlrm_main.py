@@ -214,7 +214,9 @@ def _train(model,
     else:
         data_iter = iter(data_loader)
 
-    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
+    total = len(data_loader) if hasattr(data_loader, "__len__") else None
+    meter = tqdm(itertools.count(), desc=f"Epoch {epoch}", ncols=0, total=total)
+    for _ in meter:
         try:
             dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
                                                        use_distributed_dataloader, rank, world_size)
@@ -234,6 +236,13 @@ def _train(model,
             if prof:
                 prof.step()
 
+            postfix_str = f"loss={loss.item:.2f}"
+            if hasattr(model.module.sparse_modules.embed, "num_miss_history"):
+                hit_rate = model.module.sparse_modules.embed.num_hits_history[-1] / (
+                    model.module.sparse_modules.embed.num_hits_history[-1] +
+                    model.module.sparse_modules.embed.num_miss_history[-1])
+                postfix_str += f" hit rate={hit_rate:.2f}"
+            meter.set_postfix_str(postfix_str)
         except StopIteration:
             dist_logger.info(f"{get_mem_info('Training:  ')}")
             break
