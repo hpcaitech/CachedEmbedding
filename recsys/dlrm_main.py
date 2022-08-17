@@ -236,12 +236,12 @@ def _train(model,
             if prof:
                 prof.step()
 
-            postfix_str = f"loss={loss.item:.2f}"
-            if hasattr(model.module.sparse_modules.embed, "num_miss_history"):
-                hit_rate = model.module.sparse_modules.embed.num_hits_history[-1] / (
-                    model.module.sparse_modules.embed.num_hits_history[-1] +
-                    model.module.sparse_modules.embed.num_miss_history[-1])
-                postfix_str += f" hit rate={hit_rate:.2f}"
+            postfix_str = f"loss={loss.item():.4f}"
+            # if hasattr(model.sparse_modules.embed, "num_miss_history"):
+            #     hit_rate = model.sparse_modules.embed.num_hits_history[-1] / (
+            #         model.sparse_modules.embed.num_hits_history[-1] +
+            #         model.sparse_modules.embed.num_miss_history[-1])
+            #     postfix_str += f" hit rate={hit_rate*100:.2f}%"
             meter.set_postfix_str(postfix_str)
         except StopIteration:
             dist_logger.info(f"{get_mem_info('Training:  ')}")
@@ -318,10 +318,11 @@ def train_val_test(
 def dist_config(args):
     colossalai.logging.disable_existing_loggers()
 
-    mpi_world_size = int(os.environ.get("OMPI_COMM_WORLD_SIZE", None))
+    mpi_world_size = os.environ.get("OMPI_COMM_WORLD_SIZE", None)
     if mpi_world_size is not None:
         # below is just a trick for integrating NVTabular dataloader for criteo terabyte dataset
-        os.environ["OMPI_COMM_WORLD_LOCAL_RANK"] = "0"
+        if os.environ.get("NVT_TAG", None):
+            os.environ["OMPI_COMM_WORLD_LOCAL_RANK"] = "0"
         colossalai.launch_from_openmpi(
             config={},
             host=os.environ.get("MASTER_ADDR", "localhost"),
@@ -330,6 +331,8 @@ def dist_config(args):
             verbose=False,
         )
     else:
+        if os.environ.get("NVT_TAG", None):
+            os.environ["LOCAL_RANK"] = "0"
         colossalai.launch_from_torch(config={}, seed=args.seed, verbose=False)
 
 

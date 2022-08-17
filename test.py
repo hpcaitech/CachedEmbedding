@@ -92,15 +92,12 @@ def setup_dask(dask_workdir):
 
 
 def run():
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
-    os.environ["OMPI_COMM_WORLD_LOCAL_RANK"] = '0'
+    # os.environ["MASTER_ADDR"] = "localhost"
+    # os.environ["MASTER_PORT"] = "12355"
+    os.environ["LOCAL_RANK"] = '0'
 
     colossalai.logging.disable_existing_loggers()
-    colossalai.launch_from_openmpi(config={},
-                                   host=os.environ["MASTER_ADDR"],
-                                   port=os.environ["MASTER_PORT"],
-                                   verbose=False)
+    colossalai.launch_from_torch(config={}, verbose=False)
 
     fname = "part_{}.parquet"
     train_paths = [os.path.join(INPUT_DATA_DIR, fname.format(i)) for i in range(64)]

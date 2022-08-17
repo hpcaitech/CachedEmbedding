@@ -160,14 +160,14 @@ class HybridParallelDLRM(nn.Module):
                                                  warmup_ratio=warmup_ratio,
                                                  buffer_size=buffer_size,
                                                  is_dist_dataloader=is_dist_dataloader).to(sparse_device)
-        self.dense_modules = DDP(
-            module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features, dense_arch_layer_sizes,
-                                     over_arch_layer_sizes).to(dense_device),
-            device_ids=[0 if os.environ.get("OMPI_COMM_WORLD_SIZE", None) else gpc.get_global_rank()],
-            process_group=gpc.get_group(ParallelMode.GLOBAL),
-            gradient_as_bucket_view=True,
-            broadcast_buffers=False,
-            static_graph=True)
+        self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
+                                                          dense_arch_layer_sizes,
+                                                          over_arch_layer_sizes).to(dense_device),
+                                 device_ids=[0 if os.environ.get("NVT_TAG", None) else gpc.get_global_rank()],
+                                 process_group=gpc.get_group(ParallelMode.GLOBAL),
+                                 gradient_as_bucket_view=True,
+                                 broadcast_buffers=False,
+                                 static_graph=True)
 
         # precompute for parallelized embedding
         param_amount = sum(num_embeddings_per_feature) * embedding_dim

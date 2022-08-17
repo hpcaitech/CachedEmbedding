@@ -9,6 +9,8 @@
 
 # Usage:
 #   mpirun -np <num_proc> bash dist_wrapper.sh python <training script> [training args]
+#   torchrun --nnode=1 --nproc_per_node=<num_proc> --no_python bash dist_wrapper.sh python <training script> \
+#     [training args]
 #
 # hovorodrun might also work since it invokes mpirun.
 
@@ -25,5 +27,5 @@ else
     device_list=(${CUDA_VISIBLE_DEVICES//","/ })
     export CUDA_VISIBLE_DEVICES=${device_list[$LOCAL_RANK]}
 fi
-
+export NVT_TAG=1
 exec "$@"
