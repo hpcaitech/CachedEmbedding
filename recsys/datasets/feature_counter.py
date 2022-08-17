@@ -86,7 +86,7 @@ class NVTabularFeatureCounter:
             labels=["label"],
             global_rank=0,
             global_size=1,
-            drop_last=True,
+            drop_last=False,
             device='cpu',
         )
 
