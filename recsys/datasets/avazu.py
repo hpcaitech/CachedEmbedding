@@ -247,4 +247,5 @@ def get_id_freq_map(path):
 
     file_processor = CriteoSparseProcessor(list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))))
     feature_count = GlobalFeatureCounter(files, file_processor)
-    return feature_count.id_freq_map
+    id_freq_map = torch.from_numpy(feature_count.id_freq_map)
+    return id_freq_map

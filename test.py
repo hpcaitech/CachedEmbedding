@@ -1,16 +1,26 @@
 import os
+import time
+import os
+import shutil
 
+from dask.distributed import Client
+from dask_cuda import LocalCUDACluster
+from nvtabular.utils import device_mem_size
 import torch
 import torch.distributed as dist
+from torch.utils.data import DataLoader
+import nvtabular as nvt
+from nvtabular.loader.torch import TorchAsyncItr    # , DLDataLoader
 import cupy
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torchrec.datasets.utils import Batch
 
+import colossalai
 from recsys.datasets.criteo import get_id_freq_map
+from recsys.utils import get_mem_info
 
-INPUT_DATA_DIR = "/data/criteo_preproc/train/"
+INPUT_DATA_DIR = "/data/criteo_preproc/test/"
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 16384))
-PARTS_PER_CHUNK = int(os.environ.get("PARTS_PER_CHUNK", 2))
 CONTINUOUS_COLUMNS = ["int_" + str(x) for x in range(0, 13)]
 CATEGORICAL_COLUMNS = ["cat_" + str(x) for x in range(0, 26)]
 LABEL_COLUMNS = ["label"]
@@ -56,41 +66,101 @@ class KJTTransform:
         )
 
 
-def seed_fn():
-    """
-    Generate consistent dataloader shuffle seeds across workers
-    Reseeds each worker's dataloader each epoch to get fresh a shuffle
-    that's consistent across workers.
-    """
+def setup_dask(dask_workdir):
+    if os.path.exists(dask_workdir):
+        shutil.rmtree(dask_workdir)
+    os.makedirs(dask_workdir)
 
-    max_rand = torch.iinfo(torch.int).max // world_size
+    device_limit_frac = 0.05    # Spill GPU-Worker memory to host at this limit.
+    device_pool_frac = 0.04
 
-    # Generate a seed fragment
-    seed_fragment = cupy.random.randint(0, max_rand)
+    # Use total device size to calculate device limit and pool_size
+    device_size = device_mem_size(kind="total")
+    device_limit = int(device_limit_frac * device_size)
+    device_pool_size = int(device_pool_frac * device_size)
 
-    # Aggregate seed fragments from all workers
-    seed_tensor = torch.tensor(seed_fragment)    # pylint: disable=not-callable
-    dist.all_reduce(seed_tensor, op=dist.ReduceOp.SUM)
-    return seed_tensor % max_rand
+    cluster = LocalCUDACluster(
+        protocol="tcp",
+        n_workers=1,
+        CUDA_VISIBLE_DEVICES=os.environ["CUDA_VISIBLE_DEVICES"],
+        device_memory_limit=device_limit,
+        local_directory=dask_workdir,
+        rmm_pool_size=(device_pool_size // 256) * 256,
+    )
+
+    return Client(cluster)
 
 
-def run(rank, world_size):
+# def run(rank, world_size):
+def run():
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
+    os.environ["OMPI_COMM_WORLD_LOCAL_RANK"] = '0'
 
-    # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    print(f"init rank: {rank}")
-    torch.cuda.set_device(rank)
+    colossalai.logging.disable_existing_loggers()
+    colossalai.launch_from_openmpi(config={},
+                                   host=os.environ["MASTER_ADDR"],
+                                   port=os.environ["MASTER_PORT"],
+                                   verbose=False)
 
-    id_freq_map = get_id_freq_map("/data/criteo_preproc")
-    print(
-        f"rank: {rank}, shape: {id_freq_map.shape}, max: {id_freq_map.max().item()}, min: {id_freq_map.min().item()}, "
-        f"top 10: {id_freq_map[:10].tolist()}")
+    fname = "part_{}.parquet"
+    train_paths = [os.path.join(INPUT_DATA_DIR, fname.format(i)) for i in range(64)]
+
+    print(f"{dist.get_rank()}/{dist.get_world_size()}: device: {torch.cuda.current_device()}")
+
+    start = time.time()
+    train_data = nvt.Dataset(train_paths, engine="parquet", part_mem_fraction=0.02)
+    print(f"nvdtaset: {time.time() - start}")
+    start = time.time()
+    train_data_idrs = TorchAsyncItr(
+        train_data,
+        batch_size=BATCH_SIZE,
+        cats=CATEGORICAL_COLUMNS,
+        conts=CONTINUOUS_COLUMNS,
+        labels=LABEL_COLUMNS,
+        global_rank=0,
+        global_size=1,
+        drop_last=True,
+        shuffle=True,
+        seed_fn=lambda: 1,
+    )
+    print(f"TorchAsyncItr: {time.time() - start}, len: {len(train_data_idrs)}")
+
+    start = time.time()
+    train_dataloader = DataLoader(train_data_idrs,
+                                  collate_fn=KJTTransform(train_data_idrs).transform,
+                                  batch_size=None,
+                                  pin_memory=False,
+                                  num_workers=0)
+    print(f"dataloader: {time.time() - start}, len: {len(train_dataloader)}")
+
+    data_iter = iter(train_dataloader)
+    for idx, batch in enumerate(data_iter):
+        print(f"rank: {dist.get_rank()}, it: {idx}, batch: {batch.dense_features}")
+
+        if idx == 3:
+            break
+    print(f"allocate: {torch.cuda.memory_allocated()/1024**3:.2f} GB, "
+          f"reserved: {torch.cuda.memory_reserved()/1024**3:.2f} GB")
+    torch.cuda.synchronize()
+    # id_freq_map = get_id_freq_map("/data/criteo_preproc")
+    # print(id_freq_map.shape, id_freq_map.max(), id_freq_map.min())
 
 
 if __name__ == "__main__":
     # world_size = int(os.environ["OMPI_COMM_WORLD_SIZE"])
     # world_rank = int(os.environ["OMPI_COMM_WORLD_RANK"])
+
+    # rank = int(os.environ['RANK'])
+    # local_rank = int(os.environ['LOCAL_RANK'])
+    # world_size = int(os.environ['WORLD_SIZE'])
+    # host = os.environ['MASTER_ADDR']
+    # port = int(os.environ['MASTER_PORT'])
+    # print(f"rank: {rank}/{world_size}, local rank: {local_rank}, host: {host}, port: {port}")
+    # os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
+
     os.environ["LIBCUDF_CUFILE_POLICY"] = "ALWAYS"
-    run(0, 1)
+
+    # setup_dask("dask_dir")
+    # run(world_rank, world_size)
+    run()

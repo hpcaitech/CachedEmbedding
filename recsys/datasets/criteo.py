@@ -293,6 +293,8 @@ def _get_terabyte_dataloader(args, stage, rank, world_size):
         global_rank=rank,
         global_size=world_size,
         drop_last=True,
+        shuffle=stage == "train",
+        seed_fn=lambda: args.seed,
     )
 
     dataloader = DataLoader(nv_iter,
@@ -315,6 +317,11 @@ def get_dataloader(args, stage, rank, world_size):
 
 
 def get_id_freq_map(path):
+    checkpoint_path = os.path.join(path, "id_freq_map.pt")
+    if os.path.exists(checkpoint_path):
+        id_freq_map = torch.load(checkpoint_path)
+        return id_freq_map
+
     if 'kaggle' not in path:
         file_num = len(glob.glob(os.path.join(path, "train", "*.parquet")))
         files = [os.path.join(path, "train", f"part_{i}.parquet") for i in range(file_num)]
@@ -323,7 +330,7 @@ def get_id_freq_map(path):
                                                 list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))),
                                                 16384,
                                                 sample_fraction=0.1)
-
+        id_freq_map = feature_count.id_freq_map
     else:
         files = os.listdir(path)
         sparse_files = list(filter(lambda s: 'sparse' in s, files))
@@ -331,5 +338,9 @@ def get_id_freq_map(path):
 
         file_processor = CriteoSparseProcessor(list(map(int, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(','))))
         feature_count = GlobalFeatureCounter(sparse_files, file_processor)
+        id_freq_map = torch.from_numpy(feature_count.id_freq_map)
 
-    return feature_count.id_freq_map
+    if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+        torch.save(id_freq_map, checkpoint_path)
+
+    return id_freq_map

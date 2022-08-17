@@ -259,6 +259,7 @@ def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader
                 logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
                 # dist_logger.info(f"pred: {preds.max(), preds.min()}")
+                labels = labels.int()
                 auroc(preds, labels)
                 accuracy(preds, labels)
             except StopIteration:
@@ -305,16 +306,31 @@ def train_val_test(
     return train_val_test_results
 
 
+def dist_config(args):
+    colossalai.logging.disable_existing_loggers()
+
+    mpi_world_size = int(os.environ.get("OMPI_COMM_WORLD_SIZE", None))
+    if mpi_world_size is not None:
+        # below is just a trick for integrating NVTabular dataloader for criteo terabyte dataset
+        os.environ["OMPI_COMM_WORLD_LOCAL_RANK"] = "0"
+        colossalai.launch_from_openmpi(
+            config={},
+            host=os.environ.get("MASTER_ADDR", "localhost"),
+            port=os.environ.get("MASTER_PORT", "12355"),
+            seed=args.seed,
+            verbose=False,
+        )
+    else:
+        colossalai.launch_from_torch(config={}, seed=args.seed, verbose=False)
+
+
 def main():
     args = parse_args()
 
-    colossalai.logging.disable_existing_loggers()
-    colossalai.launch_from_torch(config={}, seed=args.seed, verbose=False)
+    dist_config(args)
 
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
-
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
 
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
@@ -346,11 +362,7 @@ def main():
 
     id_freq_map = None
     if args.use_freq:
-        id_freq_map = data_module.get_id_freq_map(args.dataset_dir)
-        if not isinstance(id_freq_map, torch.Tensor):
-            id_freq_map = torch.from_numpy(id_freq_map).cuda(non_blocking=True)
-        else:
-            id_freq_map = id_freq_map.cuda(non_blocking=True)
+        id_freq_map = data_module.get_id_freq_map(args.dataset_dir).cuda(non_blocking=True)
 
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device
