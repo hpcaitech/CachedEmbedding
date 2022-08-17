@@ -25,7 +25,7 @@ All the commands to run the FreqCacheEmbedding enabled recommendations models ar
 Currently, this repo only contains DLRM & DeepFM models, 
 and we are working on testing more recommendation models.
 
-### Cite use
+### Cite us
 ```
 @article{fang2022frequency,
   title={A Frequency-aware Software Cache for Large Recommendation System Embeddings},
