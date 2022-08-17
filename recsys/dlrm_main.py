@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 from tqdm import tqdm
@@ -207,7 +208,7 @@ def _train(model,
     model.train()
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
-    
+
     if use_overlap:
         data_iter = FiniteDataIter(data_loader)
     else:
@@ -313,6 +314,7 @@ def main():
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
 
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
 
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
@@ -345,6 +347,10 @@ def main():
     id_freq_map = None
     if args.use_freq:
         id_freq_map = data_module.get_id_freq_map(args.dataset_dir)
+        if not isinstance(id_freq_map, torch.Tensor):
+            id_freq_map = torch.from_numpy(id_freq_map).cuda(non_blocking=True)
+        else:
+            id_freq_map = id_freq_map.cuda(non_blocking=True)
 
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device

@@ -299,7 +299,7 @@ def _get_terabyte_dataloader(args, stage, rank, world_size):
                             batch_size=None,
                             pin_memory=False,
                             collate_fn=KJTTransform(nv_iter).transform,
-                            num_worker=0)
+                            num_workers=0)
     return dataloader
 
 
