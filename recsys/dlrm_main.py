@@ -236,13 +236,14 @@ def _train(model,
             if prof:
                 prof.step()
 
-            postfix_str = f"loss={loss.item():.4f}"
+            # Below will introduce additional overhead
+            # postfix_str = f"loss={loss.item():.4f}"
             # if hasattr(model.sparse_modules.embed, "num_miss_history"):
             #     hit_rate = model.sparse_modules.embed.num_hits_history[-1] / (
             #         model.sparse_modules.embed.num_hits_history[-1] +
             #         model.sparse_modules.embed.num_miss_history[-1])
             #     postfix_str += f" hit rate={hit_rate*100:.2f}%"
-            meter.set_postfix_str(postfix_str)
+            # meter.set_postfix_str(postfix_str)
         except StopIteration:
             dist_logger.info(f"{get_mem_info('Training:  ')}")
             break
@@ -261,7 +262,10 @@ def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader
         data_iter = iter(data_loader)
 
     with torch.no_grad():
-        for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
+        for _ in tqdm(itertools.count(),
+                      desc=f"Evaluating {stage} set",
+                      ncols=0,
+                      total=len(data_loader) if hasattr(data_loader, "__len__") else None):
             try:
                 dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
                                                            use_distributed_dataloader, rank, world_size)

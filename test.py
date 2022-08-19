@@ -2,6 +2,8 @@ import os
 import time
 import os
 import shutil
+from tqdm import tqdm
+import itertools
 
 from dask.distributed import Client
 from dask_cuda import LocalCUDACluster
@@ -18,8 +20,10 @@ from torchrec.datasets.utils import Batch
 import colossalai
 from recsys.datasets.criteo import get_id_freq_map
 from recsys.utils import get_mem_info
+from fsspec.core import get_fs_token_paths
+from merlin.core.utils import global_dask_client, _merlin_dask_client
 
-INPUT_DATA_DIR = "/data/criteo_preproc/test/"
+INPUT_DATA_DIR = "/data/criteo_preproc/train/"
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 16384))
 CONTINUOUS_COLUMNS = ["int_" + str(x) for x in range(0, 13)]
 CATEGORICAL_COLUMNS = ["cat_" + str(x) for x in range(0, 26)]
@@ -92,8 +96,6 @@ def setup_dask(dask_workdir):
 
 
 def run():
-    # os.environ["MASTER_ADDR"] = "localhost"
-    # os.environ["MASTER_PORT"] = "12355"
     os.environ["LOCAL_RANK"] = '0'
 
     colossalai.logging.disable_existing_loggers()
@@ -104,9 +106,35 @@ def run():
 
     print(f"{dist.get_rank()}/{dist.get_world_size()}: device: {torch.cuda.current_device()}")
 
+    # fs, fs_token, paths2 = get_fs_token_paths(train_paths, mode="rb", storage_options={})
+    # print(fs)
+    # print(fs_token)
+    # print(paths2)
+    #
     start = time.time()
-    train_data = nvt.Dataset(train_paths, engine="parquet", part_mem_fraction=0.02)
-    print(f"nvdtaset: {time.time() - start}")
+    train_data = nvt.Dataset(train_paths, engine="parquet", part_size="128MB")
+    print(f"nvdtaset: {time.time() - start}, is cpu: {train_data.cpu}")
+    print(f"Client: {global_dask_client()}, {_merlin_dask_client.get()}")
+    #
+    # # import pyarrow.dataset as pa_ds
+    # # dataset = pa_ds.dataset(train_paths, filesystem=fs)
+    # # print(f"frag path: {next(dataset.get_fragments()).path}")
+    #
+    # import cudf
+    # _df = cudf.io.read_parquet(train_paths[0], row_groups=1)
+    # print(f"df: {_df.shape}")
+    # print(f"take 1: {_df.take([1])}")
+    # print(f"memory usage: {_df.memory_usage(deep=True).sum()}")
+    #
+    # from pathlib import Path
+    # from merlin.schema.io.tensorflow_metadata import TensorflowMetadata
+    # schema_path = Path(train_paths[0]).parent
+    # print(f"Schema: {TensorflowMetadata.from_proto_text_file(schema_path).to_merlin_schema()}")
+    #
+    # ddf = train_data.engine.to_ddf()
+    # print(f"ddf: {ddf}")
+    # print(f"Npartition: {ddf.npartitions}, dataset partitions: {train_data.npartitions}")
+
     start = time.time()
     train_data_idrs = TorchAsyncItr(
         train_data,
@@ -122,6 +150,10 @@ def run():
     )
     print(f"TorchAsyncItr: {time.time() - start}, len: {len(train_data_idrs)}")
 
+    # import threading
+    # event = threading.Event()
+    # print(f"stop: {event.is_set()}")
+
     start = time.time()
     train_dataloader = DataLoader(train_data_idrs,
                                   collate_fn=KJTTransform(train_data_idrs).transform,
@@ -131,10 +163,13 @@ def run():
     print(f"dataloader: {time.time() - start}, len: {len(train_dataloader)}")
 
     data_iter = iter(train_dataloader)
-    for idx, batch in enumerate(data_iter):
-        print(f"rank: {dist.get_rank()}, it: {idx}, batch: {batch.dense_features}")
-
-        if idx == 30:
+    for idx in tqdm(itertools.count(),
+                    desc=f"Rank {dist.get_rank()}",
+                    ncols=0,
+                    total=len(train_dataloader) if hasattr(train_dataloader, "__len__") else None):
+        batch = next(data_iter)
+        print(f"rank: {dist.get_rank()}, ix: {idx}, dense: {batch.dense_features}")
+        if idx == 5:
             break
     print(get_mem_info())
     torch.cuda.synchronize()
@@ -144,5 +179,5 @@ def run():
 
 if __name__ == "__main__":
     os.environ["LIBCUDF_CUFILE_POLICY"] = "ALWAYS"
-
+    # torchrun --nnode=1 --nproc_per_node=2 --no_python bash dist_wrapper.sh python
     run()

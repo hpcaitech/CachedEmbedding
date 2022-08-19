@@ -79,7 +79,7 @@ class NVTabularFeatureCounter:
     def _collect_statistics(self):
         data_files = sorted(self.datafiles[:int(np.ceil(len(self.datafiles) * self.sample_fraction))])
         nv_iter = TorchAsyncItr(
-            nvt.Dataset(data_files, engine="parquet", part_mem_fraction=0.02),
+            nvt.Dataset(data_files, engine="parquet", part_size="256MB"),
             batch_size=self.batch_size,
             cats=DEFAULT_CAT_NAMES,
             conts=DEFAULT_INT_NAMES,

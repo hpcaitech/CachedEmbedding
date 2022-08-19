@@ -1,5 +1,10 @@
 #!/bin/bash
 
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMBA_NUM_THREADS=1
+
 # For TorchRec baseline
 #torchx run -s local_cwd -cfg log_dir=tmp dist.ddp -j 1x2 --script baselines/dlrm_main.py -- \
 #    --kaggle --in_memory_binary_criteo_path criteo_kaggle_data --embedding_dim 128 --pin_memory \

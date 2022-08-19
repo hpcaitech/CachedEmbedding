@@ -285,7 +285,7 @@ def _get_terabyte_dataloader(args, stage, rank, world_size):
     files = [os.path.join(args.dataset_dir, data_split, f"part_{i}.parquet") for i in range(file_num)]
 
     nv_iter = TorchAsyncItr(
-        nvt.Dataset(files, engine="parquet", part_mem_fraction=0.02),
+        nvt.Dataset(files, engine="parquet", part_size="256MB"),
         batch_size=args.batch_size,
         cats=DEFAULT_CAT_NAMES,
         conts=DEFAULT_INT_NAMES,
