@@ -251,8 +251,10 @@ def _train(model,
             #     postfix_str += f" hit rate={hit_rate*100:.2f}%"
             # meter.set_postfix_str(postfix_str)
         except StopIteration:
-            dist_logger.info(f"{get_mem_info('Training:  ')}, average throughput: {timer.get_history_mean():.2f} it/s")
+            dist_logger.info(f"{get_mem_info('Training:  ')}")
             break
+    if hasattr(data_loader, "__len__"):
+        dist_logger.info(f"average throughput: {len(data_loader) / timer.get_history_sum():.2f} it/s")
 
 
 def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader):
