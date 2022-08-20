@@ -1,4 +1,3 @@
-import os
 import time
 import os
 import shutil
@@ -13,14 +12,11 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader
 import nvtabular as nvt
 from nvtabular.loader.torch import TorchAsyncItr    # , DLDataLoader
-import cupy
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torchrec.datasets.utils import Batch
 
 import colossalai
-from recsys.datasets.criteo import get_id_freq_map
 from recsys.utils import get_mem_info
-from fsspec.core import get_fs_token_paths
 from merlin.core.utils import global_dask_client, _merlin_dask_client
 
 INPUT_DATA_DIR = "/data/criteo_preproc/train/"
@@ -87,9 +83,11 @@ def setup_dask(dask_workdir):
         protocol="tcp",
         n_workers=1,
         CUDA_VISIBLE_DEVICES=os.environ["CUDA_VISIBLE_DEVICES"],
-        device_memory_limit=device_limit,
+        device_memory_limit="1GB",
         local_directory=dask_workdir,
-        rmm_pool_size=(device_pool_size // 256) * 256,
+        shared_filesystem=True,
+        memory_limit="100GB",
+        rmm_pool_size=None    # (device_pool_size // 256) * 256,
     )
 
     return Client(cluster)
@@ -112,7 +110,7 @@ def run():
     # print(paths2)
     #
     start = time.time()
-    train_data = nvt.Dataset(train_paths, engine="parquet", part_size="128MB")
+    train_data = nvt.Dataset(train_paths, engine="parquet", part_size="256MB")
     print(f"nvdtaset: {time.time() - start}, is cpu: {train_data.cpu}")
     print(f"Client: {global_dask_client()}, {_merlin_dask_client.get()}")
     #
@@ -168,9 +166,9 @@ def run():
                     ncols=0,
                     total=len(train_dataloader) if hasattr(train_dataloader, "__len__") else None):
         batch = next(data_iter)
-        print(f"rank: {dist.get_rank()}, ix: {idx}, dense: {batch.dense_features}")
-        if idx == 5:
-            break
+        # print(f"rank: {dist.get_rank()}, ix: {idx}, dense: {batch.dense_features}")
+        # if idx == 5:
+        #     break
     print(get_mem_info())
     torch.cuda.synchronize()
     # id_freq_map = get_id_freq_map("/data/criteo_preproc")
@@ -179,5 +177,7 @@ def run():
 
 if __name__ == "__main__":
     os.environ["LIBCUDF_CUFILE_POLICY"] = "ALWAYS"
+    client = setup_dask("dask_dir")
+    print(client.dashboard_link)
     # torchrun --nnode=1 --nproc_per_node=2 --no_python bash dist_wrapper.sh python
     run()

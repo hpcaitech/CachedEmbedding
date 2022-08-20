@@ -216,9 +216,15 @@ def _train(model,
 
     total = len(data_loader) if hasattr(data_loader, "__len__") else None
     meter = tqdm(itertools.count(), desc=f"Epoch {epoch}", ncols=0, total=total)
+    timer = colossalai.utils.Timer()
     for _ in meter:
         try:
-            dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
+            # We introduce a timer as a temporary solution to exclude interference
+            # due to the bugs exists in NVTabular dataloader, please see my discussion:
+            # https://github.com/dask/dask/discussions/9405.
+            batch = next(data_iter)
+            timer.start()
+            dense, sparse, labels = put_data_in_device(batch, model.dense_device, model.sparse_device,
                                                        use_distributed_dataloader, rank, world_size)
             with record_function("(zhg)forward pass"):
                 logits = model(dense, sparse).squeeze()
@@ -232,7 +238,7 @@ def _train(model,
 
             with record_function("(zhg)optimization"):
                 optimizer.step()
-
+            timer.stop(keep_in_history=True)
             if prof:
                 prof.step()
 
@@ -245,7 +251,7 @@ def _train(model,
             #     postfix_str += f" hit rate={hit_rate*100:.2f}%"
             # meter.set_postfix_str(postfix_str)
         except StopIteration:
-            dist_logger.info(f"{get_mem_info('Training:  ')}")
+            dist_logger.info(f"{get_mem_info('Training:  ')}, average throughput: {timer.get_history_mean():.2f} it/s")
             break
 
 
