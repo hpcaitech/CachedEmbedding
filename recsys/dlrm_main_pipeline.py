@@ -179,13 +179,14 @@ def parse_args():
 # custom pipeline for freqaware embedding
 def put_data_in_device(batch, dense_device, sparse_device, is_dist=False, rank=0, world_size=1, non_blocking=True):
     if is_dist:
-        return batch.dense_features.to(dense_device), batch.sparse_features.to(sparse_device), batch.labels.to(
-            dense_device)
+        batch.dense_features = batch.dense_features.to(dense_device,non_blocking=non_blocking)
+        batch.labels = batch.labels.to(dense_device,non_blocking=non_blocking)
     else:
         batch.dense_features = torch.tensor_split(batch.dense_features.to(dense_device,non_blocking=non_blocking), world_size, dim=0)[rank]
         batch.labels = torch.tensor_split(batch.labels.to(dense_device,non_blocking=non_blocking), world_size, dim=0)[rank]
-        batch.sparse_features = batch.sparse_features.to(sparse_device,non_blocking=non_blocking)
-        return batch
+    
+    batch.sparse_features = batch.sparse_features.to(sparse_device,non_blocking=non_blocking)
+    return batch
     
 def _wait_for_batch(batch, stream: Optional[torch.cuda.streams.Stream]) -> None:
     if stream is None:
