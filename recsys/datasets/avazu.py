@@ -9,7 +9,7 @@ from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torchrec.datasets.utils import LoadFiles, ReadLinesFromCSV, PATH_MANAGER_KEY, Batch
 from torchrec.datasets.criteo import BinaryCriteoUtils
 
-from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
+from .feature_counter import GlobalFeatureCounter
 
 CAT_FEATURE_COUNT = 13
 INT_FEATURE_COUNT = 8
@@ -245,6 +245,6 @@ def get_id_freq_map(path):
     files = list(filter(lambda s: "sparse" in s, files))
     files = [os.path.join(path, _f) for _f in files]
 
-    file_processor = CriteoSparseProcessor(list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))))
-    feature_count = GlobalFeatureCounter(files, file_processor)
-    return feature_count.id_freq_map
+    feature_count = GlobalFeatureCounter(files, list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))))
+    id_freq_map = torch.from_numpy(feature_count.compute())
+    return id_freq_map
