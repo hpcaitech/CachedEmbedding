@@ -1,112 +1,54 @@
 import abc
-import itertools
+import random
 from tqdm import tqdm
 
 import numpy as np
-from contexttimer import Timer
-import torch
-from torch.utils.data import DataLoader
-try:
-    # pyre-ignore[21]
-    import nvtabular as nvt
-    from nvtabular.loader.torch import TorchAsyncItr
-except ImportError:
-    print("Unable to import NVTabular, which indicates that you cannot load criteo 1TB dataset with our solution")
-
-from .criteo import DEFAULT_CAT_NAMES, DEFAULT_INT_NAMES
-from .utils import KJTTransform
+from .criteo import DEFAULT_CAT_NAMES
+from petastorm import make_batch_reader
 
 
-class CriteoSparseProcessor:
-
-    def __init__(self, hash_sizes):
-        self.hash_sizes = np.array(hash_sizes).reshape(1, -1)
-        self.offsets = np.array([0, *np.cumsum(hash_sizes)[:-1]]).reshape(1, -1)
-
-    def __call__(self, _f):
-        arr = np.load(_f)
-        arr %= self.hash_sizes
-        arr += self.offsets
-        flattened = arr.reshape(-1)
-        bins = np.bincount(flattened, minlength=self.hash_sizes.sum())
-        return bins
-
-
-class BaseFeatureCounter(abc.ABC):
-
-    def __init__(self, datafiles):
-        self.datafiles = datafiles
-        self._id_freq_map = None
-        self._collect_statistics()
-
-    @abc.abstractmethod
-    def _collect_statistics(self):
-        pass
-
-    @property
-    def id_freq_map(self):
-        return self._id_freq_map
-
-
-class GlobalFeatureCounter(BaseFeatureCounter):
+class GlobalFeatureCounter:
     """
     compute the global statistics of the whole training set
     """
 
-    def __init__(self, datafiles, file_callback):
-        self.file_processor = file_callback
-
-        super(GlobalFeatureCounter, self).__init__(datafiles)
-
-    def _collect_statistics(self):
-        for _f in self.datafiles:
-            if self._id_freq_map is None:
-                self._id_freq_map = self.file_processor(_f)
-            else:
-                self._id_freq_map += self.file_processor(_f)
-
-
-class NVTabularFeatureCounter:
-
-    def __init__(self, datafiles, hashes, batch_size, sample_fraction=0.05):
+    def __init__(self, datafiles, hash_sizes):
         self.datafiles = datafiles
-        self._id_freq_map = torch.zeros(sum(hashes), dtype=torch.long)
-        self.batch_size = batch_size
-        self.pre_ones = torch.ones(batch_size * len(DEFAULT_CAT_NAMES), dtype=torch.long)
-        self.sample_fraction = sample_fraction
-        self._collect_statistics()
+        self.hash_sizes = np.array(hash_sizes).reshape(1, -1)
+        self.offsets = np.array([0, *np.cumsum(hash_sizes)[:-1]]).reshape(1, -1)
 
-    def _collect_statistics(self):
-        data_files = sorted(self.datafiles[:int(np.ceil(len(self.datafiles) * self.sample_fraction))])
-        nv_iter = TorchAsyncItr(
-            nvt.Dataset(data_files, engine="parquet", part_size="256MB"),
-            batch_size=self.batch_size,
-            cats=DEFAULT_CAT_NAMES,
-            conts=DEFAULT_INT_NAMES,
-            labels=["label"],
-            global_rank=0,
-            global_size=1,
-            drop_last=False,
-            device='cpu',
-        )
+    def compute(self):
+        id_freq_map = np.zeros(self.hash_sizes.sum(), dtype=np.int64)
+        for _f in self.datafiles:
+            arr = np.load(_f)
+            arr %= self.hash_sizes
+            arr += self.offsets
+            flattened = arr.reshape(-1)
+            id_freq_map += np.bincount(flattened, minlength=self.hash_sizes.sum())
+        return id_freq_map
 
-        dataloader = DataLoader(nv_iter,
-                                batch_size=None,
-                                pin_memory=False,
-                                collate_fn=KJTTransform(nv_iter).transform,
-                                num_workers=0)
-        data_iter = iter(dataloader)
-        with Timer() as timer:
-            for it in tqdm(itertools.count()):
-                try:
-                    sparse = next(data_iter).sparse_features.values()
-                    ones = self.pre_ones.narrow(0, start=0, length=sparse.shape[0])
-                    self._id_freq_map.index_add_(dim=0, index=sparse, source=ones)
-                except StopIteration:
-                    break
-        print(f"collect statistics over files: {data_files} num batch: {len(dataloader)}, batch size: {self.batch_size}"
-              f", average time cost: {len(dataloader) / timer.elapsed:.2f} batch/s")
 
-    @property
-    def id_freq_map(self):
-        return self._id_freq_map
+class PetastormCounter:
+
+    def __init__(self, datafiles, hash_sizes, subsample_fraction=0.2, seed=1024):
+        self.datafiles = datafiles
+        self.total_features = sum(hash_sizes)
+
+        self.offsets = np.array([0, *np.cumsum(hash_sizes)[:-1]]).reshape(1, -1)
+        self.subsample_fraction = subsample_fraction
+        self.seed = seed
+
+    def compute(self):
+        _id_freq_map = np.zeros(self.total_features, dtype=np.int64)
+        random.seed(self.seed)
+        files = list(map(lambda x: "file://" + x, self.datafiles))
+        random.shuffle(files)
+        if 0. < self.subsample_fraction < 1.:
+            files = files[:int(np.ceil(len(files)) * self.subsample_fraction)]
+        with make_batch_reader(files, num_epochs=1) as reader:
+            for batch in tqdm(reader, ncols=0, desc="Collecting id-freq map"):
+                sparse = np.concatenate([getattr(batch, col_name).reshape(-1, 1) for col_name in DEFAULT_CAT_NAMES],
+                                        axis=1)
+                sparse = (sparse + self.offsets).reshape(-1)
+                _id_freq_map += np.bincount(sparse, minlength=self.total_features)
+        return _id_freq_map

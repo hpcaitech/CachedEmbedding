@@ -20,13 +20,7 @@
 #    --profile_dir "tensorboard_log/cache"  --buffer_size 0 --use_overlap
 
 # criteo terabyte
-#mpirun -x LD_PRELOAD=libmpi.so --allow-run-as-root -np 2 bash dist_wrapper.sh python recsys/dlrm_main.py \
-#    --dataset_dir /data/criteo_preproc \
-#    --learning_rate 1. --batch_size 16384 --use_sparse_embed_grad --use_cache --use_freq \
-#    --profile_dir "tensorboard_log/cache"  --buffer_size 0 --use_overlap
-
-# torchrun seems better than mpirun
-torchrun --nnode=1 --nproc_per_node=2 --log_dir=tmp -t 3 --no_python bash dist_wrapper.sh \
-    python recsys/dlrm_main.py --dataset_dir /data/criteo_preproc \
+torchx run -s local_cwd -cfg log_dir=tmp dist.ddp -j 1x2 --script recsys/dlrm_main.py -- \
+    --dataset_dir /data/scratch/criteo_terabyte/criteo_preproc/ \
     --learning_rate 1. --batch_size 16384 --use_sparse_embed_grad --use_cache --use_freq \
     --profile_dir "tensorboard_log/cache"  --buffer_size 0 --use_overlap

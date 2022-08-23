@@ -1,4 +1,5 @@
 import os
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 from tqdm import tqdm
@@ -216,14 +217,14 @@ def _train(model,
 
     total = len(data_loader) if hasattr(data_loader, "__len__") else None
     meter = tqdm(itertools.count(), desc=f"Epoch {epoch}", ncols=0, total=total)
-    timer = colossalai.utils.Timer()
+    time_elapse = 0.
     for _ in meter:
         try:
             # We introduce a timer as a temporary solution to exclude interference
             # due to the bugs exists in NVTabular dataloader, please see my discussion:
             # https://github.com/dask/dask/discussions/9405.
             batch = next(data_iter)
-            timer.start()
+            start = time.time()
             dense, sparse, labels = put_data_in_device(batch, model.dense_device, model.sparse_device,
                                                        use_distributed_dataloader, rank, world_size)
             with record_function("(zhg)forward pass"):
@@ -238,7 +239,7 @@ def _train(model,
 
             with record_function("(zhg)optimization"):
                 optimizer.step()
-            timer.stop(keep_in_history=True)
+            time_elapse += time.time() - start
             if prof:
                 prof.step()
 
@@ -254,7 +255,7 @@ def _train(model,
             dist_logger.info(f"{get_mem_info('Training:  ')}")
             break
     if hasattr(data_loader, "__len__"):
-        dist_logger.info(f"average throughput: {len(data_loader) / timer.get_history_sum():.2f} it/s")
+        dist_logger.info(f"average throughput: {len(data_loader) / time_elapse:.2f} it/s")
 
 
 def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader):
@@ -327,31 +328,11 @@ def train_val_test(
     return train_val_test_results
 
 
-def dist_config(args):
-    colossalai.logging.disable_existing_loggers()
-
-    mpi_world_size = os.environ.get("OMPI_COMM_WORLD_SIZE", None)
-    if mpi_world_size is not None:
-        # below is just a trick for integrating NVTabular dataloader for criteo terabyte dataset
-        if os.environ.get("NVT_TAG", None):
-            os.environ["OMPI_COMM_WORLD_LOCAL_RANK"] = "0"
-        colossalai.launch_from_openmpi(
-            config={},
-            host=os.environ.get("MASTER_ADDR", "localhost"),
-            port=os.environ.get("MASTER_PORT", "12355"),
-            seed=args.seed,
-            verbose=False,
-        )
-    else:
-        if os.environ.get("NVT_TAG", None):
-            os.environ["LOCAL_RANK"] = "0"
-        colossalai.launch_from_torch(config={}, seed=args.seed, verbose=False)
-
-
 def main():
     args = parse_args()
 
-    dist_config(args)
+    colossalai.logging.disable_existing_loggers()
+    colossalai.launch_from_torch(config={}, seed=args.seed, verbose=False)
 
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
@@ -378,7 +359,7 @@ def main():
     val_dataloader = data_module.get_dataloader(args, "val", **dataloader_factory)
     test_dataloader = data_module.get_dataloader(args, "test", **dataloader_factory)
 
-    if args.dataset_dir is not None:
+    if args.dataset_dir is not None and hasattr(train_dataloader, "__len__"):
         dist_logger.info(
             f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
             f"test batches: {len(test_dataloader)}",
