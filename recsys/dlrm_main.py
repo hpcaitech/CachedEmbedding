@@ -367,7 +367,7 @@ def main():
 
     id_freq_map = None
     if args.use_freq:
-        id_freq_map = data_module.get_id_freq_map(args.dataset_dir).cuda(non_blocking=True)
+        id_freq_map = data_module.get_id_freq_map(args.dataset_dir)
 
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device

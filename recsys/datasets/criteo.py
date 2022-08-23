@@ -299,7 +299,6 @@ class PetastormDataReader(IterableDataset):
                 while start_idx < dense.shape[0]:
                     buffer_size = 0 if buffer is None else buffer[0].shape[0]
                     if buffer_size == self.batch_size:
-                        _num_batch += 1
                         yield self._batch_ndarray(*buffer)
                         buffer = None
                     else:
@@ -317,7 +316,7 @@ class PetastormDataReader(IterableDataset):
             # Shuffle all 3 in unison
             shuffler = np.random.permutation(len(dense))
             dense = dense[shuffler]
-            sparse = sparse[shuffler]
+            sparse = sparse[:, shuffler]
             labels = labels[shuffler]
 
         return Batch(
