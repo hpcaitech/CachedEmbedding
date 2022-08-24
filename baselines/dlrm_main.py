@@ -488,7 +488,7 @@ def main(argv: List[str]) -> None:
 
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
-        print(f"set memory to {int(args.memory_fraction * 80)} GB")
+        print(f"set memory to {int(args.memory_fraction * 10)} GB")
     if args.num_embeddings_per_feature is not None:
         args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
         args.num_embeddings = None
@@ -542,21 +542,21 @@ def main(argv: List[str]) -> None:
         print(count_parameters(train_model, "DLRM"))
 
     # Torchrec Planner
-    hbm_cap = int(args.memory_fraction * 80) if args.memory_fraction else 70
+    hbm_cap = int(args.memory_fraction * 10) if args.memory_fraction else 10
     env = ShardingEnv.from_process_group(dist.GroupMember.WORLD)
     topology = Topology(
         world_size=env.world_size,
         compute_device="cuda",
         hbm_cap=hbm_cap * 1024**3,    # GPU mem
-        ddr_cap=300 * 1024 * 3,    # CPU mem
-        intra_host_bw=1000 * 1024**3 / 1000,
+        ddr_cap=100 * 1024**3,    # CPU mem
+    # intra_host_bw=1000 * 1024**3 / 1000,
     )    # Device to Device bandwidth
     # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
     #     batch_size=args.batch_size)
     # constraints = {
     #     f"t_{feature_name}":
     #     ParameterConstraints(compute_kernels=[EmbeddingComputeKernel.BATCHED_FUSED_UVM.value])
-    #     for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, DEFAULT_CAT_NAMES)
+    #     for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, data_module.DEFAULT_CAT_NAMES)
     # }
     planner = EmbeddingShardingPlanner(topology=topology,
     # constraints=constraints,

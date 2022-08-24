@@ -238,7 +238,7 @@ class PetastormDataReader(IterableDataset):
                  shuffle_batches=False,
                  hashes=None,
                  seed=1024,
-                 drop_last=False):
+                 drop_last=True):
         self.dataset = ParquetDataset(paths, use_legacy_dataset=False)
         self.batch_size = batch_size
         self.rank = rank
