@@ -38,7 +38,8 @@ from torch.profiler import profile, record_function, ProfilerActivity, schedule,
 try:
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/data:dlrm_dataloader
-    from data.dlrm_dataloader import get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE
+    from data.dlrm_dataloader import get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE, \
+        TERABYTE_NUM_EMBEDDINGS_PER_FEATURE, KAGGLE_TOTAL_TRAINING_SAMPLES
     from data import avazu
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
@@ -49,7 +50,8 @@ except ImportError:
 # internal import
 try:
     from .data.dlrm_dataloader import (    # noqa F811
-        get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+        get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE, TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,    # noqa F811
+        KAGGLE_TOTAL_TRAINING_SAMPLES)    # noqa F811
     from .data import avazu
     from .modules.dlrm_train import DLRMTrain    # noqa F811
 except ImportError:
@@ -59,13 +61,16 @@ from colo_recsys.utils import TrainValTestResults, count_parameters
 from recsys.utils import get_mem_info
 
 TRAIN_PIPELINE_STAGES = 3    # Number of stages in TrainPipelineSparseDist.
+TOTAL_TRAINING_SAMPLES = None
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="torchrec dlrm example trainer")
+
     parser.add_argument("--kaggle", action='store_true')
     parser.add_argument("--profile_dir", default="tensorboard_log/torchrec", type=str)
     parser.add_argument("--memory_fraction", default=None, type=float)
+
     parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
     parser.add_argument("--batch_size", type=int, default=32, help="batch size to use for training")
     parser.add_argument(
@@ -462,10 +467,11 @@ def main(argv: List[str]) -> None:
     global TOTAL_TRAINING_SAMPLES
     if 'criteo' in args.in_memory_binary_criteo_path:
         if args.kaggle:
-            TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 for criteo kaggle
+            TOTAL_TRAINING_SAMPLES = KAGGLE_TOTAL_TRAINING_SAMPLES
             setattr(args, 'num_embeddings_per_feature', KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
         else:
-            raise NotImplementedError("The criteo 1TB dataset is building")
+            TOTAL_TRAINING_SAMPLES = criteo.TOTAL_TRAINING_SAMPLES
+            setattr(args, 'num_embeddings_per_feature', TERABYTE_NUM_EMBEDDINGS_PER_FEATURE)
         data_module = criteo
     elif 'avazu' in args.in_memory_binary_criteo_path:
         TOTAL_TRAINING_SAMPLES = avazu.TOTAL_TRAINING_SAMPLES
@@ -500,8 +506,9 @@ def main(argv: List[str]) -> None:
 
     if dist.get_rank() == 0:
         print(args)
-        # print(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
-        #       f"test batches: {len(test_dataloader)}")
+        if getattr(train_dataloader, "__len__", None):
+            print(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
+                  f"test batches: {len(test_dataloader)}")
     # Sets default limits for random dataloader iterations when left unspecified.
     if args.in_memory_binary_criteo_path is None:
         for stage in STAGES:
@@ -555,7 +562,8 @@ def main(argv: List[str]) -> None:
     #     batch_size=args.batch_size)
     # constraints = {
     #     f"t_{feature_name}":
-    #     ParameterConstraints(compute_kernels=[EmbeddingComputeKernel.BATCHED_FUSED_UVM.value])
+    #     ParameterConstraints(compute_kernels=[EmbeddingComputeKernel.BATCHED_FUSED_UVM_CACHING.value],
+    #                          caching_ratio=0.01 if num_embeddings > 100 else None)
     #     for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, data_module.DEFAULT_CAT_NAMES)
     # }
     planner = EmbeddingShardingPlanner(topology=topology,
