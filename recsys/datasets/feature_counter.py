@@ -5,6 +5,7 @@ from tqdm import tqdm
 import numpy as np
 from .criteo import DEFAULT_CAT_NAMES
 from petastorm import make_batch_reader
+from pyarrow.parquet import ParquetDataset
 
 
 class GlobalFeatureCounter:
@@ -40,13 +41,19 @@ class PetastormCounter:
 
     def compute(self):
         _id_freq_map = np.zeros(self.total_features, dtype=np.int64)
+
+        files = self.datafiles
         random.seed(self.seed)
-        files = list(map(lambda x: "file://" + x, self.datafiles))
         random.shuffle(files)
         if 0. < self.subsample_fraction < 1.:
-            files = files[:int(np.ceil(len(files)) * self.subsample_fraction)]
-        with make_batch_reader(files, num_epochs=1) as reader:
-            for batch in tqdm(reader, ncols=0, desc="Collecting id-freq map"):
+            files = files[:int(np.ceil(len(files) * self.subsample_fraction))]
+
+        dataset = ParquetDataset(files, use_legacy_dataset=False)
+        with make_batch_reader(list(map(lambda x: "file://" + x, dataset.files)), num_epochs=1) as reader:
+            for batch in tqdm(reader,
+                              ncols=0,
+                              desc="Collecting id-freq map",
+                              total=sum([fragment.metadata.num_row_groups for fragment in dataset.fragments])):
                 sparse = np.concatenate([getattr(batch, col_name).reshape(-1, 1) for col_name in DEFAULT_CAT_NAMES],
                                         axis=1)
                 sparse = (sparse + self.offsets).reshape(-1)
