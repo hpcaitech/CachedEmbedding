@@ -268,9 +268,12 @@ def _evaluate(
             try:
                 _loss, logits, labels = train_pipeline.progress(combined_iterator)
                 preds = torch.sigmoid(logits)
+                labels = labels.int()
                 auroc(preds, labels)
                 accuracy(preds, labels)
             except StopIteration:
+                break
+            except RuntimeError:    # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
                 break
     auroc_result = auroc.compute().item()
     accuracy_result = accuracy.compute().item()
@@ -375,6 +378,9 @@ def _train(
                 )
                 train_pipeline._model.train()
         except StopIteration:
+            print(f"{get_mem_info('Training:  ')}")
+            break
+        except RuntimeError:    # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"{get_mem_info('Training:  ')}")
             break
 
@@ -494,7 +500,7 @@ def main(argv: List[str]) -> None:
 
     if args.memory_fraction is not None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
-        print(f"set memory to {int(args.memory_fraction * 10)} GB")
+        print(f"set memory to {int(args.memory_fraction * 80)} GB")
     if args.num_embeddings_per_feature is not None:
         args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
         args.num_embeddings = None
@@ -549,13 +555,13 @@ def main(argv: List[str]) -> None:
         print(count_parameters(train_model, "DLRM"))
 
     # Torchrec Planner
-    hbm_cap = int(args.memory_fraction * 10) if args.memory_fraction else 10
+    hbm_cap = int(args.memory_fraction * 80) if args.memory_fraction else 80
     env = ShardingEnv.from_process_group(dist.GroupMember.WORLD)
     topology = Topology(
         world_size=env.world_size,
         compute_device="cuda",
         hbm_cap=hbm_cap * 1024**3,    # GPU mem
-        ddr_cap=100 * 1024**3,    # CPU mem
+        ddr_cap=1000 * 1024**3,    # CPU mem
     # intra_host_bw=1000 * 1024**3 / 1000,
     )    # Device to Device bandwidth
     # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
