@@ -129,9 +129,10 @@ def parse_args():
         default=1,
         help="Number of cache lines in each cache set. Similar to the N-way set associate mechanism in cache."
         "Not implemented yet. Increasing this would scale up the cache capacity")
-    parser.add_argument("--use_freq", action='store_true')
-    parser.add_argument("--warmup_ratio", type=float, default=0.7)
-    parser.add_argument("--buffer_size", type=int, default=50_000)
+    parser.add_argument("--use_freq", action='store_true', help="use the dataset freq information to initialize the softwar cache")
+    parser.add_argument("--use_lfu", action='store_true', help="use the LFU as the cache eviction strategy. If false use DATASET aware version")
+    parser.add_argument("--warmup_ratio", type=float, default=0.7, help="warmup ratio of the software cache")
+    parser.add_argument("--buffer_size", type=int, default=0, help="limit buffer size, if buffer_size=1, do not use the buffer.")
 
     # Training
     parser.add_argument(
