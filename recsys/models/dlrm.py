@@ -52,14 +52,7 @@ class FusedSparseModules(nn.Module):
                 buffer_size=buffer_size,
             )
         else:
-            raise NotImplementedError()
-            self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
-                                                         embedding_dim,
-                                                         fused_op=fused_op,
-                                                         mode=reduction_mode,
-                                                         sparse=sparse,
-                                                         include_last_offset=True,
-                                                         output_device_type=output_device_type)
+            raise NotImplementedError("Other EmbeddingBags are under development")
 
         if is_dist_dataloader:
             self.kjt_collector = KJTAllToAll(gpc.get_group(ParallelMode.GLOBAL))

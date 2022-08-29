@@ -5,6 +5,7 @@ import numpy as np
 
 
 class TaobaoTxtToNpz:
+
     def __init__(
             self,
             datatype,
@@ -15,7 +16,7 @@ class TaobaoTxtToNpz:
             raw_path="",
             pro_data="",
             spa_fea_sizes="",
-            num_pts=1,  # pts to train or test
+            num_pts=1,    # pts to train or test
     ):
         # save arguments
         if mode == "train":
@@ -24,11 +25,11 @@ class TaobaoTxtToNpz:
             self.numpy_rand_seed = numpy_rand_seed + 31
         self.mode = mode
         # save dataset parameters
-        self.total = num_pts  # number of lines in txt to process
+        self.total = num_pts    # number of lines in txt to process
         self.ts_length = ts_length
-        self.points_per_user = points_per_user  # pos and neg points per user
+        self.points_per_user = points_per_user    # pos and neg points per user
         self.spa_fea_sizes = spa_fea_sizes
-        self.M = 200  # max history length
+        self.M = 200    # max history length
 
         # split the datafile into path and filename
         lstr = raw_path.split("/")
@@ -43,9 +44,9 @@ class TaobaoTxtToNpz:
             file = str(pro_data)
             levels = np.fromstring(self.spa_fea_sizes, dtype=int, sep="-")
             if datatype == "taobao":
-                self.Unum = levels[0]  # 987994  num of users
-                self.Inum = levels[1]  # 4162024 num of items
-                self.Cnum = levels[2]  # 9439    num of categories
+                self.Unum = levels[0]    # 987994  num of users
+                self.Inum = levels[1]    # 4162024 num of items
+                self.Cnum = levels[2]    # 9439    num of categories
                 print("Reading raw data=%s" % (str(raw_path)))
                 if self.mode == "test":
                     self.build_taobao_test(
@@ -58,9 +59,7 @@ class TaobaoTxtToNpz:
                         file,
                     )
             elif datatype == "synthetic":
-                self.build_synthetic_train_or_val(
-                    file,
-                )
+                self.build_synthetic_train_or_val(file,)
         # load data
         with np.load(file) as data:
             self.X_cat = data["X_cat"]
@@ -90,7 +89,7 @@ class TaobaoTxtToNpz:
             y = y[indices]
 
         N = len(y)
-        X_cat = np.zeros((3, N, self.ts_length + 1), dtype="i4")  # 4 byte int
+        X_cat = np.zeros((3, N, self.ts_length + 1), dtype="i4")    # 4 byte int
         X_int = np.zeros((1, N, self.ts_length + 1), dtype=np.float)
         X_cat[0, :, :] = users
         X_cat[1, :, :] = items
@@ -120,7 +119,7 @@ class TaobaoTxtToNpz:
 
         print("total lines: ", self.total)
 
-        self.total_out = self.total * self.points_per_user * 2  # pos + neg points
+        self.total_out = self.total * self.points_per_user * 2    # pos + neg points
         print("Total number of points in raw datafile: ", self.total)
         print("Total number of points in output will be at most: ", self.total_out)
         np.random.seed(self.numpy_rand_seed)
@@ -129,11 +128,11 @@ class TaobaoTxtToNpz:
         time = np.arange(self.ts_length + 1, dtype=np.int32) / (self.ts_length + 1)
         # time = np.ones(self.ts_length + 1, dtype=np.int32)
 
-        users = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")  # 4 byte int
-        items = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")  # 4 byte int
-        cats = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")  # 4 byte int
+        users = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")    # 4 byte int
+        items = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")    # 4 byte int
+        cats = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")    # 4 byte int
         times = np.zeros((self.total_out, self.ts_length + 1), dtype=np.float)
-        y = np.zeros(self.total_out, dtype="i4")  # 4 byte int
+        y = np.zeros(self.total_out, dtype="i4")    # 4 byte int
 
         # determine how many datapoints to take from each user based on the length of
         # user behavior sequence
@@ -147,7 +146,7 @@ class TaobaoTxtToNpz:
             self.points_per_user = 1
             for j in range(k):
                 regime[j] = np.min([regime[j], self.points_per_user])
-        last = self.M - 1  # max index of last item
+        last = self.M - 1    # max index of last item
 
         # try to generate the desired number of points (time series) per each user.
         # if history is short it may not succeed to generate sufficiently different
@@ -164,30 +163,21 @@ class TaobaoTxtToNpz:
                 cate_hist_list = units[5].split(",")
                 neg_item_hist_list = units[6].split(",")
                 neg_cate_hist_list = units[7].split(",")
-                user = np.array(np.maximum(np.int32(units[0]) - self.Inum, 0),
-                    dtype=np.int32)
+                user = np.array(np.maximum(np.int32(units[0]) - self.Inum, 0), dtype=np.int32)
                 # y[i] = np.int32(units[3])
-                items_ = np.array(
-                    list(map(lambda x: np.maximum(np.int32(x), 0), item_hist_list)),
-                    dtype=np.int32
-                )
-                cats_ = np.array(
-                    list(map(lambda x: np.maximum(np.int32(x)
-                        - self.Inum - self.Unum, 0), cate_hist_list)), dtype=np.int32
-                )
-                neg_items_ = np.array(
-                    list(map(lambda x: np.maximum(np.int32(x), 0), neg_item_hist_list)),
-                    dtype=np.int32
-                )
-                neg_cats_ = np.array(
-                    list(map(lambda x: np.maximum(np.int32(x)
-                        - self.Inum - self.Unum, 0), neg_cate_hist_list)),
-                    dtype=np.int32
-                )
+                items_ = np.array(list(map(lambda x: np.maximum(np.int32(x), 0), item_hist_list)), dtype=np.int32)
+                cats_ = np.array(list(map(lambda x: np.maximum(np.int32(x) - self.Inum - self.Unum, 0),
+                                          cate_hist_list)),
+                                 dtype=np.int32)
+                neg_items_ = np.array(list(map(lambda x: np.maximum(np.int32(x), 0), neg_item_hist_list)),
+                                      dtype=np.int32)
+                neg_cats_ = np.array(list(
+                    map(lambda x: np.maximum(np.int32(x) - self.Inum - self.Unum, 0), neg_cate_hist_list)),
+                                     dtype=np.int32)
 
                 # select datapoints
                 first = np.argmax(items_ > 0)
-                ind = int((last - first) // 10)  # index into regime array
+                ind = int((last - first) // 10)    # index into regime array
                 # pos
                 for _ in range(regime[ind]):
                     a1 = min(first + self.ts_length, last - 1)
@@ -216,8 +206,7 @@ class TaobaoTxtToNpz:
                         t_short += 1
                     items[t, :-1] = items_[indices]
                     cats[t, :-1] = cats_[indices]
-                    neg_indices = np.random.choice(r_target, 1,
-                    replace=False)   # random final item
+                    neg_indices = np.random.choice(r_target, 1, replace=False)    # random final item
                     items[t, -1] = neg_items_[neg_indices]
                     cats[t, -1] = neg_cats_[neg_indices]
                     users[t] = np.full(self.ts_length + 1, user)
@@ -246,18 +235,18 @@ class TaobaoTxtToNpz:
                     print("pre-processing line: ", i)
         self.total = i + 1
 
-        self.total_out = self.total  # pos + neg points
+        self.total_out = self.total    # pos + neg points
         print("ts_length: ", self.ts_length)
         print("Total number of points in raw datafile: ", self.total)
         print("Total number of points in output will be at most: ", self.total_out)
 
         time = np.arange(self.ts_length + 1, dtype=np.int32) / (self.ts_length + 1)
 
-        users = np.zeros((self.total_out, self.ts_length + 1), dtypei4="")  # 4 byte int
-        items = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")  # 4 byte int
-        cats = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")  # 4 byte int
+        users = np.zeros((self.total_out, self.ts_length + 1), dtypei4="")    # 4 byte int
+        items = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")    # 4 byte int
+        cats = np.zeros((self.total_out, self.ts_length + 1), dtype="i4")    # 4 byte int
         times = np.zeros((self.total_out, self.ts_length + 1), dtype=np.float)
-        y = np.zeros(self.total_out, dtype="i4")  # 4 byte int
+        y = np.zeros(self.total_out, dtype="i4")    # 4 byte int
 
         # try to generate the desired number of points (time series) per each user.
         # if history is short it may not succeed to generate sufficiently different
@@ -273,17 +262,12 @@ class TaobaoTxtToNpz:
                 item_hist_list = units[4].split(",")
                 cate_hist_list = units[5].split(",")
 
-                user = np.array(np.maximum(np.int32(units[0]) - self.Inum, 0),
-                    dtype=np.int32)
+                user = np.array(np.maximum(np.int32(units[0]) - self.Inum, 0), dtype=np.int32)
                 y[t] = np.int32(units[3])
-                items_ = np.array(
-                    list(map(lambda x: np.maximum(np.int32(x), 0), item_hist_list)),
-                    dtype=np.int32
-                )
-                cats_ = np.array(
-                    list(map(lambda x: np.maximum(np.int32(x)
-                        - self.Inum - self.Unum, 0), cate_hist_list)), dtype=np.int32
-                )
+                items_ = np.array(list(map(lambda x: np.maximum(np.int32(x), 0), item_hist_list)), dtype=np.int32)
+                cats_ = np.array(list(map(lambda x: np.maximum(np.int32(x) - self.Inum - self.Unum, 0),
+                                          cate_hist_list)),
+                                 dtype=np.int32)
 
                 # get pts
                 items[t] = items_[-(self.ts_length + 1):]
@@ -313,10 +297,9 @@ class TaobaoTxtToNpz:
         fea_sizes = np.fromstring(self.spa_fea_sizes, dtype=int, sep="-")
         maxval = np.min(fea_sizes)
         num_s = len(fea_sizes)
-        X_cat = np.random.randint(maxval, size=(num_s, self.total, self.ts_length + 1),
-        dtype="i4")  # 4 byte int
+        X_cat = np.random.randint(maxval, size=(num_s, self.total, self.ts_length + 1), dtype="i4")    # 4 byte int
         X_int = np.random.uniform(0, 1, size=(1, self.total, self.ts_length + 1))
-        y = np.random.randint(0, 2, self.total, dtype="i4")  # 4 byte int
+        y = np.random.randint(0, 2, self.total, dtype="i4")    # 4 byte int
 
         # saving to compressed numpy file
         if not path.exists(out_file):
@@ -376,8 +359,7 @@ if __name__ == '__main__':
     parser.add_argument("--num-train-pts", type=int, default=100)
     parser.add_argument("--num-val-pts", type=int, default=20)
     parser.add_argument("--points-per-user", type=int, default=10)
-    parser.add_argument("--arch-embedding-size", type=str, default="4-3-2")  # vectors
+    parser.add_argument("--arch-embedding-size", type=str, default="4-3-2")    # vectors
     parser.add_argument("--numpy-rand-seed", type=int, default=123)
     args = parser.parse_args()
     main(args)
-    

@@ -11,20 +11,21 @@ import random
 import numpy as np
 import argparse
 
-
 RAW_DATA_FILE = "./UserBehavior.csv"
 DATASET_PKL = "./dataset.pkl"
 Test_File = "./taobao_test.txt"
 Train_File = "./taobao_train.txt"
 Train_handle = open(Train_File, 'w')
 Test_handle = open(Test_File, 'w')
-Feature_handle = open("./taobao_feature.pkl",'wb')
+Feature_handle = open("./taobao_feature.pkl", 'wb')
 
 MAX_LEN_ITEM = 200
+
 
 def to_df(file_name):
     df = pd.read_csv(RAW_DATA_FILE, header=None, names=['uid', 'iid', 'cid', 'btag', 'time'])
     return df
+
 
 def remap(df):
     item_key = sorted(df['iid'].unique().tolist())
@@ -49,7 +50,7 @@ def remap(df):
     df['btag'] = df['btag'].map(lambda x: btag_map[x])
 
     print(item_len, user_len, cate_len, btag_len)
-    return df, item_len, user_len + item_len + cate_len + btag_len + 1 #+1 is for unknown target btag
+    return df, item_len, user_len + item_len + cate_len + btag_len + 1    #+1 is for unknown target btag
 
 
 def gen_user_item_group(df, item_cnt, feature_size):
@@ -100,7 +101,6 @@ def gen_dataset(user_df, item_df, item_cnt, feature_size, dataset_pkl):
                 target_item_cate = item_df.get_group(target_item)['cid'].tolist()[0]
                 target_item_btag = feature_size
 
-
         # the item history part of the sample
         item_part = []
         for i in range(len(item_hist) - 1):
@@ -111,7 +111,7 @@ def gen_dataset(user_df, item_df, item_cnt, feature_size, dataset_pkl):
         # choose the item side information: which user has clicked the target item
         # padding history with 0
         if len(item_part) <= MAX_LEN_ITEM:
-            item_part_pad =  [[0] * 4] * (MAX_LEN_ITEM - len(item_part)) + item_part
+            item_part_pad = [[0] * 4] * (MAX_LEN_ITEM - len(item_part)) + item_part
         else:
             item_part_pad = item_part[len(item_part) - MAX_LEN_ITEM:len(item_part)]
 
@@ -127,7 +127,9 @@ def gen_dataset(user_df, item_df, item_cnt, feature_size, dataset_pkl):
                 item_list.append(item_part_pad[i][1])
                 cat_list.append(item_part_pad[i][2])
                 # cat_list.append(item_part_pad[i][0])
-            test_sample_list.append(str(uid) + "\t" + str(target_item) + "\t" + str(target_item_cate) + "\t" + str(label) + "\t" + ",".join(map(str, item_list)) + "\t" +",".join(map(str, cat_list))+"\n")
+            test_sample_list.append(
+                str(uid) + "\t" + str(target_item) + "\t" + str(target_item_cate) + "\t" + str(label) + "\t" +
+                ",".join(map(str, item_list)) + "\t" + ",".join(map(str, cat_list)) + "\n")
         else:
             cat_list = []
             item_list = []
@@ -135,17 +137,19 @@ def gen_dataset(user_df, item_df, item_cnt, feature_size, dataset_pkl):
             for i in range(len(item_part_pad)):
                 item_list.append(item_part_pad[i][1])
                 cat_list.append(item_part_pad[i][2])
-            train_sample_list.append(str(uid) + "\t" + str(target_item) + "\t" + str(target_item_cate) + "\t" + str(label) + "\t" + ",".join(map(str, item_list)) + "\t" +",".join(map(str, cat_list))+"\n")
+            train_sample_list.append(
+                str(uid) + "\t" + str(target_item) + "\t" + str(target_item_cate) + "\t" + str(label) + "\t" +
+                ",".join(map(str, item_list)) + "\t" + ",".join(map(str, cat_list)) + "\n")
 
-    train_sample_length_quant = len(train_sample_list)/256*256
-    test_sample_length_quant = len(test_sample_list)/256*256
+    train_sample_length_quant = len(train_sample_list) / 256 * 256
+    test_sample_length_quant = len(test_sample_list) / 256 * 256
 
-    print("train_sample_length_quant",train_sample_length_quant)
-    print("length",len(train_sample_list))
+    print("train_sample_length_quant", train_sample_length_quant)
+    print("length", len(train_sample_list))
     train_sample_list = train_sample_list[:int(train_sample_length_quant)]
     test_sample_list = test_sample_list[:int(test_sample_length_quant)]
     random.shuffle(train_sample_list)
-    print("length",len(train_sample_list))
+    print("length", len(train_sample_list))
     return train_sample_list, test_sample_list
 
 
@@ -163,7 +167,7 @@ def produce_neg_item_hist_with_cate(train_file, test_file):
         hist_seq = len(hist_list)
         sample_count += 1
         for item in hist_list:
-            item_dict.setdefault(str(item),0)
+            item_dict.setdefault(str(item), 0)
 
     #print("hist_list : ", hist_list)
 
@@ -177,14 +181,14 @@ def produce_neg_item_hist_with_cate(train_file, test_file):
         hist_seq = len(hist_list)
         sample_count += 1
         for item in hist_list:
-            item_dict.setdefault(str(item),0)
+            item_dict.setdefault(str(item), 0)
 
     #print("item_dict : ", item_dict)
-    del(item_dict["('0', '0')"])
+    del (item_dict["('0', '0')"])
     keys_list = list(item_dict.keys())
     keys_list = np.array(keys_list)
-    print("item_dict.keys()",keys_list.shape)
-    neg_array = np.random.choice(keys_list, (sample_count, hist_seq+20))
+    print("item_dict.keys()", keys_list.shape)
+    neg_array = np.random.choice(keys_list, (sample_count, hist_seq + 20))
     neg_list = neg_array.tolist()
     sample_count = 0
 
@@ -205,7 +209,7 @@ def produce_neg_item_hist_with_cate(train_file, test_file):
                 break
         sample_count += 1
         neg_item_list, neg_cate_list = zip(*neg_hist_list)
-        Train_handle.write(line.strip() + "\t" + ",".join(neg_item_list) + "\t" + ",".join(neg_cate_list) + "\n" )
+        Train_handle.write(line.strip() + "\t" + ",".join(neg_item_list) + "\t" + ",".join(neg_cate_list) + "\n")
 
     for line in test_file:
         units = line.strip().split("\t")
@@ -224,7 +228,8 @@ def produce_neg_item_hist_with_cate(train_file, test_file):
                 break
         sample_count += 1
         neg_item_list, neg_cate_list = zip(*neg_hist_list)
-        Test_handle.write(line.strip() + "\t" + ",".join(neg_item_list) + "\t" + ",".join(neg_cate_list) + "\n" )
+        Test_handle.write(line.strip() + "\t" + ",".join(neg_item_list) + "\t" + ",".join(neg_cate_list) + "\n")
+
 
 def main():
     df = to_df(RAW_DATA_FILE)

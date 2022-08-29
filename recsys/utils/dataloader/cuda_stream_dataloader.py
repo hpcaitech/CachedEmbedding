@@ -7,8 +7,6 @@ from torch.utils.data import Sampler, Dataset, DataLoader
 
 from .base_dataiter import BaseStreamDataIter
 
-T_co = TypeVar('T_co', covariant=True)
-
 
 class CudaStreamDataIter(BaseStreamDataIter):
     """

@@ -5,10 +5,9 @@ import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler, record_function
 import torchmetrics as metrics
 
-from recsys.utils import get_mem_info
 from recsys.datasets import criteo, avazu
 from recsys.models.dlrm import HybridParallelDLRM
-from recsys.utils import FiniteDataIter, TrainValTestResults
+from recsys.utils import get_mem_info, FiniteDataIter, TrainValTestResults
 
 import colossalai
 
