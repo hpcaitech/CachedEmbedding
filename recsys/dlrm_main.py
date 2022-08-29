@@ -1,3 +1,4 @@
+import time
 from tqdm import tqdm
 import itertools
 import torch
@@ -202,9 +203,17 @@ def _train(model,
     else:
         data_iter = iter(data_loader)
 
-    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
+    total = len(data_loader) if hasattr(data_loader, "__len__") else None
+    meter = tqdm(itertools.count(), desc=f"Epoch {epoch}", ncols=0, total=total)
+    time_elapse = 0.
+    for _ in meter:
         try:
-            dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
+            # We introduce a timer as a temporary solution to exclude interference
+            # due to the bugs exists in NVTabular dataloader, please see my discussion:
+            # https://github.com/dask/dask/discussions/9405.
+            batch = next(data_iter)
+            start = time.time()
+            dense, sparse, labels = put_data_in_device(batch, model.dense_device, model.sparse_device,
                                                        use_distributed_dataloader, rank, world_size)
             with record_function("(zhg)forward pass"):
                 logits = model(dense, sparse).squeeze()
@@ -218,13 +227,24 @@ def _train(model,
 
             with record_function("(zhg)optimization"):
                 optimizer.step()
-
+            time_elapse += time.time() - start
             if prof:
                 prof.step()
 
+            # Below will introduce additional overhead
+            # postfix_str = f"loss={loss.item():.4f}"
+            # if hasattr(model.sparse_modules.embed, "num_miss_history"):
+            #     hit_rate = model.sparse_modules.embed.num_hits_history[-1] / (
+            #         model.sparse_modules.embed.num_hits_history[-1] +
+            #         model.sparse_modules.embed.num_miss_history[-1])
+            #     postfix_str += f" hit rate={hit_rate*100:.2f}%"
+            # meter.set_postfix_str(postfix_str)
         except StopIteration:
-            dist_logger.info(f"{get_mem_info('Training:  ')}")
+            dist_logger.info(f"{get_mem_info('Training:  ')}, "
+                             f"{model.sparse_modules.embed.cache_weight_mgr.print_comm_stats()}")
             break
+    if hasattr(data_loader, "__len__"):
+        dist_logger.info(f"average throughput: {len(data_loader) / time_elapse:.2f} it/s")
 
 
 def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader):
@@ -240,13 +260,17 @@ def _evaluate(model, data_loader, stage, use_overlap, use_distributed_dataloader
         data_iter = iter(data_loader)
 
     with torch.no_grad():
-        for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
+        for _ in tqdm(itertools.count(),
+                      desc=f"Evaluating {stage} set",
+                      ncols=0,
+                      total=len(data_loader) if hasattr(data_loader, "__len__") else None):
             try:
                 dense, sparse, labels = put_data_in_device(next(data_iter), model.dense_device, model.sparse_device,
                                                            use_distributed_dataloader, rank, world_size)
                 logits = model(dense, sparse).squeeze()
                 preds = torch.sigmoid(logits)
                 # dist_logger.info(f"pred: {preds.max(), preds.min()}")
+                labels = labels.int()
                 auroc(preds, labels)
                 accuracy(preds, labels)
             except StopIteration:
@@ -324,7 +348,7 @@ def main():
     val_dataloader = data_module.get_dataloader(args, "val", **dataloader_factory)
     test_dataloader = data_module.get_dataloader(args, "test", **dataloader_factory)
 
-    if args.dataset_dir is not None:
+    if args.dataset_dir is not None and hasattr(train_dataloader, "__len__"):
         dist_logger.info(
             f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
             f"test batches: {len(test_dataloader)}",

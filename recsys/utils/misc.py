@@ -1,10 +1,10 @@
 import torch
-from dataclasses import dataclass, field
-from typing import List, Optional
 import psutil
 from contextlib import contextmanager
 import time
 from time import perf_counter
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 
 @dataclass

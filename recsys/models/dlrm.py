@@ -1,13 +1,6 @@
-#!/usr/bin/env python3
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-#
 # The infrastructures of DLRM are mainly inspired by TorchRec:
 # https://github.com/pytorch/torchrec/blob/main/torchrec/models/dlrm.py
-
+import os
 from contextlib import nullcontext
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -155,7 +148,7 @@ class HybridParallelDLRM(nn.Module):
         self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                           dense_arch_layer_sizes,
                                                           over_arch_layer_sizes).to(dense_device),
-                                 device_ids=[gpc.get_global_rank()],
+                                 device_ids=[0 if os.environ.get("NVT_TAG", None) else gpc.get_global_rank()],
                                  process_group=gpc.get_group(ParallelMode.GLOBAL),
                                  gradient_as_bucket_view=True,
                                  broadcast_buffers=False,

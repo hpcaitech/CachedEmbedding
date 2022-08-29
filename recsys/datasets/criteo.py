@@ -6,26 +6,33 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+import random
 from typing import Dict, Iterator, List, Optional
 import numpy as np
+import glob
 
-from torchrec.datasets.criteo import (CAT_FEATURE_COUNT, DEFAULT_CAT_NAMES, DEFAULT_INT_NAMES, DAYS, BinaryCriteoUtils)
+from torchrec.datasets.criteo import (CAT_FEATURE_COUNT, DEFAULT_CAT_NAMES, DEFAULT_INT_NAMES, DEFAULT_LABEL_NAME, DAYS,
+                                      BinaryCriteoUtils)
 from torchrec.datasets.utils import PATH_MANAGER_KEY, Batch
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from iopath.common.file_io import PathManager, PathManagerFactory
 from pyre_extensions import none_throws
 import torch
 from torch.utils.data import DataLoader, IterableDataset
+from petastorm import make_batch_reader
+from pyarrow.parquet import ParquetDataset
 
-from .feature_counter import CriteoSparseProcessor, GlobalFeatureCounter
+from .feature_counter import GlobalFeatureCounter, PetastormCounter
 
 STAGES = ["train", "val", "test"]
 
-NUM_EMBEDDINGS_PER_FEATURE = None
-
+# 177,944,275 in total
+NUM_EMBEDDINGS_PER_FEATURE = "45833188,36746,17245,7413,20243,3,7114,1441,62,29275261,1572176,345138,10,2209,11267," \
+                             "128,4,974,14,48937457,11316796,40094537,452104,12606,104,35"
+# 33,762,577 in total
 KAGGLE_NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,' \
                                            '27,14992,5461306,10,5652,2173,4,7046547,18,15,286181,105,142572'
-KAGGLE_TOTAL_TRAINING_SAMPLES = 39291954    # 0-6 days for criteo kaggle, 45840617 samples in total
+KAGGLE_TOTAL_TRAINING_SAMPLES = 39_291_954    # 0-6 days for criteo kaggle, 45,840,617 samples in total
 
 
 class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
@@ -221,11 +228,117 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         return self.num_batches
 
 
-def get_dataloader(args, stage, rank, world_size):
-    stage = stage.lower()
-    if stage not in STAGES:
-        raise ValueError(f"Supplied stage was {stage}. Must be one of {STAGES}.")
+class PetastormDataReader(IterableDataset):
 
+    def __init__(self,
+                 paths,
+                 batch_size,
+                 rank=None,
+                 world_size=None,
+                 shuffle_batches=False,
+                 hashes=None,
+                 seed=1024,
+                 drop_last=True):
+        self.dataset = ParquetDataset(paths, use_legacy_dataset=False)
+        self.batch_size = batch_size
+        self.rank = rank
+        self.world_size = world_size
+        self.shuffle_batches = shuffle_batches
+        self.hashes = np.array(hashes).reshape((1, CAT_FEATURE_COUNT)) if hashes is not None else None
+        self.sparse_offsets = np.array([0, *np.cumsum(hashes)[:-1]], dtype=np.int64).reshape(-1, 1) \
+            if hashes is not None else None
+
+        self._num_ids_in_batch: int = CAT_FEATURE_COUNT * batch_size
+        self.keys: List[str] = DEFAULT_CAT_NAMES
+        self.lengths: torch.Tensor = torch.ones((self._num_ids_in_batch,), dtype=torch.int32)
+        self.offsets: torch.Tensor = torch.arange(0, self._num_ids_in_batch + 1, dtype=torch.int32)
+        self.stride = batch_size
+        self.length_per_key: List[int] = CAT_FEATURE_COUNT * [batch_size]
+        self.offset_per_key: List[int] = [batch_size * i for i in range(CAT_FEATURE_COUNT + 1)]
+        self.index_per_key: Dict[str, int] = {key: i for (i, key) in enumerate(self.keys)}
+        self.seed = seed
+        self.epoch = 0
+
+        self.drop_last = drop_last
+        if drop_last:
+            self.num_batches = sum([fragment.metadata.num_rows for fragment in self.dataset.fragments
+                                   ]) // self.batch_size
+        else:
+            self.num_batches = (sum([fragment.metadata.num_rows
+                                     for fragment in self.dataset.fragments]) + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        buffer: Optional[List[np.ndarray]] = None
+
+        def append_to_buffer(_dense: np.ndarray, _sparse: np.ndarray, _labels: np.ndarray) -> None:
+            nonlocal buffer
+            if buffer is None:
+                buffer = [_dense, _sparse, _labels]
+            else:
+                buffer[0] = np.concatenate([buffer[0], _dense], axis=0)
+                buffer[1] = np.concatenate([buffer[1], _sparse], axis=1)
+                buffer[2] = np.concatenate([buffer[2], _labels], axis=0)
+
+        random.seed(self.seed + self.epoch)    # for sync RNG inside the petastorm reader
+        self.epoch += 1
+        with make_batch_reader(
+                list(map(lambda x: "file://" + x, self.dataset.files)),
+                num_epochs=1,
+                workers_count=1,    # for reproducibility
+        ) as reader:
+            # note that `batch` here is just a bunch of samples read by petastorm instead of `batch` consumed by models
+            for batch in reader:
+                labels = getattr(batch, DEFAULT_LABEL_NAME)
+                sparse = np.concatenate([getattr(batch, col_name).reshape(1, -1) for col_name in DEFAULT_CAT_NAMES],
+                                        axis=0)
+                if self.sparse_offsets is not None:
+                    sparse = sparse + self.sparse_offsets
+                dense = np.concatenate([getattr(batch, col_name).reshape(-1, 1) for col_name in DEFAULT_INT_NAMES],
+                                       axis=1)
+                start_idx = 0
+                while start_idx < dense.shape[0]:
+                    buffer_size = 0 if buffer is None else buffer[0].shape[0]
+                    if buffer_size == self.batch_size:
+                        yield self._batch_ndarray(*buffer)
+                        buffer = None
+                    else:
+                        rows_to_get = min(self.batch_size - buffer_size, dense.shape[0] - start_idx)
+                        label_chunk = labels[start_idx:start_idx + rows_to_get]
+                        sparse_chunk = sparse[:, start_idx:start_idx + rows_to_get]
+                        dense_chunk = dense[start_idx:start_idx + rows_to_get, :]
+                        append_to_buffer(dense_chunk, sparse_chunk, label_chunk)
+                        start_idx += rows_to_get
+        if buffer is not None and not self.drop_last:
+            yield self._batch_ndarray(*buffer)
+
+    def _batch_ndarray(self, dense: np.ndarray, sparse: np.ndarray, labels: np.ndarray):
+        if self.shuffle_batches:
+            # Shuffle all 3 in unison
+            shuffler = np.random.permutation(len(dense))
+            dense = dense[shuffler]
+            sparse = sparse[:, shuffler]
+            labels = labels[shuffler]
+
+        return Batch(
+            dense_features=torch.from_numpy(dense),
+            sparse_features=KeyedJaggedTensor(
+                keys=self.keys,
+                values=torch.from_numpy(sparse.reshape(-1)),
+                lengths=self.lengths,
+                offsets=self.offsets,
+                stride=self.stride,
+                length_per_key=self.length_per_key,
+                offset_per_key=self.offset_per_key,
+                index_per_key=self.index_per_key,
+            ),
+            labels=torch.from_numpy(labels.reshape(-1)),
+        )
+
+    def __len__(self):
+        return self.num_batches
+
+
+def _get_kaggle_dataloader(args, stage, rank, world_size):
     files = os.listdir(args.dataset_dir)
 
     def is_final_day(s: str) -> bool:
@@ -263,15 +376,70 @@ def get_dataloader(args, stage, rank, world_size):
     return dataloader
 
 
+def _get_terabyte_dataloader(args, stage, rank, world_size):
+    # TODO: replace the data_split with stage
+    if stage == "train":
+        data_split = "train"
+    elif stage == "val":
+        data_split = "validation"
+    else:
+        data_split = "test"
+
+    if world_size > 1 or rank != 0:
+        raise RuntimeError("We do not support distributed dataloader currently.")
+
+    file_num = len(glob.glob(os.path.join(args.dataset_dir, data_split, "*.parquet")))
+    files = [os.path.join(args.dataset_dir, data_split, f"part_{i}.parquet") for i in range(file_num)]
+
+    dataloader = DataLoader(PetastormDataReader(files,
+                                                args.batch_size,
+                                                rank=None,
+                                                world_size=None,
+                                                shuffle_batches=stage == "train",
+                                                hashes=args.num_embeddings_per_feature,
+                                                seed=args.seed),
+                            batch_size=None,
+                            pin_memory=False,
+                            collate_fn=lambda x: x,
+                            num_workers=0)
+
+    return dataloader
+
+
+def get_dataloader(args, stage, rank, world_size):
+    stage = stage.lower()
+    if stage not in STAGES:
+        raise ValueError(f"Supplied stage was {stage}. Must be one of {STAGES}.")
+
+    if "kaggle" in args.dataset_dir:
+        return _get_kaggle_dataloader(args, stage, rank, world_size)
+    else:
+        return _get_terabyte_dataloader(args, stage, rank, world_size)
+
+
 def get_id_freq_map(path):
+    checkpoint_path = os.path.join(path, "id_freq_map.pt")
+    if os.path.exists(checkpoint_path):
+        id_freq_map = torch.load(checkpoint_path)
+        return id_freq_map
+
     if 'kaggle' not in path:
-        raise NotImplementedError()
+        file_num = len(glob.glob(os.path.join(path, "train", "*.parquet")))
+        files = [os.path.join(path, "train", f"part_{i}.parquet") for i in range(file_num)]
+        feature_count = PetastormCounter(files,
+                                         list(map(int, NUM_EMBEDDINGS_PER_FEATURE.split(','))),
+                                         subsample_fraction=0.1)
+        id_freq_map = feature_count.compute()
+    else:
+        files = os.listdir(path)
+        sparse_files = list(filter(lambda s: 'sparse' in s, files))
+        sparse_files = [os.path.join(path, _f) for _f in sparse_files]
 
-    files = os.listdir(path)
-    sparse_files = list(filter(lambda s: 'sparse' in s, files))
-    sparse_files = [os.path.join(path, _f) for _f in sparse_files]
+        feature_count = GlobalFeatureCounter(sparse_files, list(map(int, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(','))))
+        id_freq_map = feature_count.compute()
 
-    file_processor = CriteoSparseProcessor(list(map(int, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE.split(','))))
-    feature_count = GlobalFeatureCounter(sparse_files, file_processor)
+    id_freq_map = torch.from_numpy(id_freq_map)
+    if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+        torch.save(id_freq_map, checkpoint_path)
 
-    return feature_count.id_freq_map
+    return id_freq_map
