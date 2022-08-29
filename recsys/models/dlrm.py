@@ -7,7 +7,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import record_function
 
 from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
-from ..modules.embeddings import FusedHybridParallelEmbeddingBag
 from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 

@@ -1,15 +1,15 @@
 #!/bin/bash
 
 # For Colossalai enabled recsys
-bash scriptes/kaggle.sh
+#bash scripts/kaggle.sh
 
-bash scriptes/avazu.sh
+#bash scripts/avazu.sh
 
-bash scriptes/terabyte.sh
+#bash scripts/terabyte.sh
 
 # For TorchRec baseline
-bash scriptes/torchrec_kaggle.sh
+bash scripts/torchrec_kaggle.sh
 
-bash scriptes/torchrec_avazu.sh
+#bash scripts/torchrec_avazu.sh
 
-bash scriptes/torchrec_terabyte.sh
+#bash scripts/torchrec_terabyte.sh
