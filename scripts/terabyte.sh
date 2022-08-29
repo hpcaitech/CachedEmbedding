@@ -17,6 +17,11 @@ torchx run -s local_cwd -cfg log_dir=log/terabyte/w4_p1_16k dist.ddp -j 1x4 --sc
     --learning_rate 1. --batch_size 16384 --use_sparse_embed_grad --use_cache --use_freq \
     --profile_dir "tensorboard_log/terabyte/w4_p1_16k"  --buffer_size 0 --use_overlap --cache_sets 1779442
 
+torchx run -s local_cwd -cfg log_dir=log/terabyte/w8_p1_16k dist.ddp -j 1x8 --script recsys/dlrm_main.py -- \
+    --dataset_dir /data/criteo_preproc/ \
+    --learning_rate 1. --batch_size 16384 --use_sparse_embed_grad --use_cache --use_freq \
+    --profile_dir "tensorboard_log/terabyte/w8_p1_16k"  --buffer_size 0 --use_overlap --cache_sets 1779442
+
 torchx run -s local_cwd -cfg log_dir=log/terabyte/w1_p1_32k dist.ddp -j 1x1 --script recsys/dlrm_main.py -- \
     --dataset_dir /data/criteo_preproc/ \
     --learning_rate 1. --batch_size 32768 --use_sparse_embed_grad --use_cache --use_freq \

@@ -241,7 +241,8 @@ def _train(model,
             #     postfix_str += f" hit rate={hit_rate*100:.2f}%"
             # meter.set_postfix_str(postfix_str)
         except StopIteration:
-            dist_logger.info(f"{get_mem_info('Training:  ')}")
+            dist_logger.info(f"{get_mem_info('Training:  ')}, "
+                             f"{model.sparse_modules.embed.cache_weight_mgr.print_comm_stats()}")
             break
     if hasattr(data_loader, "__len__"):
         dist_logger.info(f"average throughput: {len(data_loader) / time_elapse:.2f} it/s")

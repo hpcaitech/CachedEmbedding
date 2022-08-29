@@ -17,6 +17,11 @@ torchx run -s local_cwd -cfg log_dir=log/avazu/w4_p1_16k dist.ddp -j 1x4 --scrip
     --learning_rate 5e-2 --batch_size 16384 --use_sparse_embed_grad --use_cache --use_freq \
     --profile_dir "tensorboard_log/avazu/w4_p1_16k"  --buffer_size 0 --use_overlap --cache_sets 94458
 
+torchx run -s local_cwd -cfg log_dir=log/avazu/w8_p1_16k dist.ddp -j 1x8 --script recsys/dlrm_main.py -- \
+    --dataset_dir /data/avazu_sample --pin_memory --shuffle_batches \
+    --learning_rate 5e-2 --batch_size 16384 --use_sparse_embed_grad --use_cache --use_freq \
+    --profile_dir "tensorboard_log/avazu/w8_p1_16k"  --buffer_size 0 --use_overlap --cache_sets 94458
+
 torchx run -s local_cwd -cfg log_dir=log/avazu/w1_p1_32k dist.ddp -j 1x1 --script recsys/dlrm_main.py -- \
     --dataset_dir /data/avazu_sample --pin_memory --shuffle_batches \
     --learning_rate 5e-2 --batch_size 32768 --use_sparse_embed_grad --use_cache --use_freq \
