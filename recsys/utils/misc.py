@@ -3,6 +3,28 @@ import psutil
 from contextlib import contextmanager
 import time
 from time import perf_counter
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+
+@dataclass
+class TrainValTestResults:
+    val_accuracies: List[float] = field(default_factory=list)
+    val_aurocs: List[float] = field(default_factory=list)
+    test_accuracy: Optional[float] = None
+    test_auroc: Optional[float] = None
+
+
+def count_parameters(model, prefix=''):
+    trainable_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    param_amount = sum(p.numel() for p in model.parameters())
+    buffer_amount = sum(b.numel() for b in model.buffers())
+    param_storage = sum([p.numel() * p.element_size() for p in model.parameters()])
+    buffer_storage = sum([b.numel() * b.element_size() for b in model.buffers()])
+    stats_str = f'{prefix}: {trainable_param:,}.' + '\n'
+    stats_str += f"Number of model parameters: {param_amount:,}, storage overhead: {param_storage/1024**3:.2f} GB. "
+    stats_str += f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
+    return stats_str
 
 
 def get_mem_info(prefix=''):

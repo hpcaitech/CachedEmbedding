@@ -43,7 +43,7 @@ try:
     from data import avazu
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
-    from modules.dlrm_train import DLRMTrain
+    from models.dlrm import DLRMTrain
 except ImportError:
     pass
 
@@ -53,12 +53,11 @@ try:
         get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE, TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,    # noqa F811
         KAGGLE_TOTAL_TRAINING_SAMPLES)    # noqa F811
     from .data import avazu
-    from .modules.dlrm_train import DLRMTrain    # noqa F811
+    from .models.dlrm import DLRMTrain    # noqa F811
 except ImportError:
     pass
 
-from colo_recsys.utils import TrainValTestResults, count_parameters
-from recsys.utils import get_mem_info
+from recsys.utils import get_mem_info, TrainValTestResults, count_parameters
 
 TRAIN_PIPELINE_STAGES = 3    # Number of stages in TrainPipelineSparseDist.
 TOTAL_TRAINING_SAMPLES = None

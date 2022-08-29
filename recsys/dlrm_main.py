@@ -1,7 +1,4 @@
-import os
 import time
-from dataclasses import dataclass, field
-from typing import List, Optional
 from tqdm import tqdm
 import itertools
 import torch
@@ -11,7 +8,7 @@ import torchmetrics as metrics
 from recsys.utils import get_mem_info
 from recsys.datasets import criteo, avazu
 from recsys.models.dlrm import HybridParallelDLRM
-from recsys.utils import FiniteDataIter
+from recsys.utils import FiniteDataIter, TrainValTestResults
 
 import colossalai
 
@@ -188,14 +185,6 @@ def put_data_in_device(batch, dense_device, sparse_device, is_dist=False, rank=0
         labels = torch.tensor_split(batch.labels.to(dense_device), world_size, dim=0)[rank]
         sparse_features = batch.sparse_features.to(sparse_device)
         return dense_features, sparse_features, labels
-
-
-@dataclass
-class TrainValTestResults:
-    val_accuracies: List[float] = field(default_factory=list)
-    val_aurocs: List[float] = field(default_factory=list)
-    test_accuracy: Optional[float] = None
-    test_auroc: Optional[float] = None
 
 
 def _train(model,
