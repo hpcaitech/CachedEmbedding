@@ -12,7 +12,7 @@ from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 
 import colossalai
-from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag
+from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag, EvictionStrategy
 from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 
@@ -38,7 +38,8 @@ class FusedSparseModules(nn.Module):
                  id_freq_map=None,
                  warmup_ratio=0.7,
                  buffer_size=50_000,
-                 is_dist_dataloader=True):
+                 is_dist_dataloader=True,
+                 use_lfu_eviction=False):
         super(FusedSparseModules, self).__init__()
         if use_cache:
             self.embed = ParallelFreqAwareEmbeddingBag(
@@ -51,6 +52,7 @@ class FusedSparseModules(nn.Module):
                 ids_freq_mapping=id_freq_map,
                 warmup_ratio=warmup_ratio,
                 buffer_size=buffer_size,
+                evict_strategy=EvictionStrategy.LFU if use_lfu_eviction else EvictionStrategy.DATASET
             )
         else:
             raise NotImplementedError()
@@ -131,7 +133,8 @@ class HybridParallelDLRM(nn.Module):
                  id_freq_map=None,
                  warmup_ratio=0.7,
                  buffer_size=50_000,
-                 is_dist_dataloader=True):
+                 is_dist_dataloader=True,
+                 use_lfu_eviction=False):
 
         super(HybridParallelDLRM, self).__init__()
         if use_cache and sparse_device.type != dense_device.type:
@@ -152,7 +155,8 @@ class HybridParallelDLRM(nn.Module):
                                                  id_freq_map=id_freq_map,
                                                  warmup_ratio=warmup_ratio,
                                                  buffer_size=buffer_size,
-                                                 is_dist_dataloader=is_dist_dataloader).to(sparse_device)
+                                                 is_dist_dataloader=is_dist_dataloader,
+                                                 use_lfu_eviction=use_lfu_eviction).to(sparse_device)
         self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                           dense_arch_layer_sizes,
                                                           over_arch_layer_sizes).to(dense_device),
