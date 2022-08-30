@@ -1,13 +1,17 @@
+import os
 import time
+from dataclasses import dataclass, field
+from typing import List, Optional
 from tqdm import tqdm
 import itertools
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler, record_function
 import torchmetrics as metrics
 
+from recsys.utils import get_mem_info
 from recsys.datasets import criteo, avazu
 from recsys.models.dlrm import HybridParallelDLRM
-from recsys.utils import get_mem_info, FiniteDataIter, TrainValTestResults
+from recsys.utils import FiniteDataIter, TrainValTestResults
 
 import colossalai
 
@@ -125,9 +129,13 @@ def parse_args():
         default=1,
         help="Number of cache lines in each cache set. Similar to the N-way set associate mechanism in cache."
         "Not implemented yet. Increasing this would scale up the cache capacity")
-    parser.add_argument("--use_freq", action='store_true')
-    parser.add_argument("--warmup_ratio", type=float, default=0.7)
-    parser.add_argument("--buffer_size", type=int, default=50_000)
+    parser.add_argument("--use_freq", action='store_true',
+                        help="use the dataset freq information to initialize the softwar cache")
+    parser.add_argument("--use_lfu", action='store_true',
+                        help="use the LFU as the cache eviction strategy. If false use DATASET aware version")
+    parser.add_argument("--warmup_ratio", type=float, default=0.7, help="warmup ratio of the software cache")
+    parser.add_argument("--buffer_size", type=int, default=0,
+                        help="limit buffer size, if buffer_size=1, do not use the buffer.")
 
     # Training
     parser.add_argument(
@@ -361,8 +369,8 @@ def main():
     device = torch.device('cuda', torch.cuda.current_device())
     sparse_device = torch.device('cpu') if args.use_cpu else device
     model = HybridParallelDLRM(
-        [args.num_embeddings] *
-        len(data_module.DEFAULT_CAT_NAMES) if args.dataset_dir is None else args.num_embeddings_per_feature,
+        [args.num_embeddings]
+        * len(data_module.DEFAULT_CAT_NAMES) if args.dataset_dir is None else args.num_embeddings_per_feature,
         args.embedding_dim,
         len(data_module.DEFAULT_CAT_NAMES),
         len(data_module.DEFAULT_INT_NAMES),
