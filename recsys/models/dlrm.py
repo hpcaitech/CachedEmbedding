@@ -55,13 +55,6 @@ class FusedSparseModules(nn.Module):
             )
         else:
             raise NotImplementedError("Other EmbeddingBags are under development")
-            self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
-                                                         embedding_dim,
-                                                         fused_op=fused_op,
-                                                         mode=reduction_mode,
-                                                         sparse=sparse,
-                                                         include_last_offset=True,
-                                                         output_device_type=output_device_type)
 
         if is_dist_dataloader:
             self.kjt_collector = KJTAllToAll(gpc.get_group(ParallelMode.GLOBAL))
@@ -172,9 +165,9 @@ class HybridParallelDLRM(nn.Module):
         param_storage += sum(p.numel() * p.element_size() for p in self.dense_modules.parameters())
 
         buffer_amount = sum(b.numel() for b in self.sparse_modules.buffers()) + \
-                        sum(b.numel() for b in self.dense_modules.buffers())
+            sum(b.numel() for b in self.dense_modules.buffers())
         buffer_storage = sum(b.numel() * b.element_size() for b in self.sparse_modules.buffers()) + \
-                         sum(b.numel() * b.element_size() for b in self.dense_modules.buffers())
+            sum(b.numel() * b.element_size() for b in self.dense_modules.buffers())
         stat_str = f"Number of model parameters: {param_amount:,}, storage overhead: {param_storage/1024**3:.2f} GB. " \
                    f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
         self.stat_str = stat_str
