@@ -7,7 +7,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import record_function
 
 from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
-
 from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 
@@ -55,7 +54,7 @@ class FusedSparseModules(nn.Module):
                 evict_strategy=EvictionStrategy.LFU if use_lfu_eviction else EvictionStrategy.DATASET
             )
         else:
-            raise NotImplementedError()
+            raise NotImplementedError("Other EmbeddingBags are under development")
             self.embed = FusedHybridParallelEmbeddingBag(sum(num_embeddings_per_feature),
                                                          embedding_dim,
                                                          fused_op=fused_op,

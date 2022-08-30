@@ -14,7 +14,6 @@ class TrainValTestResults:
     test_accuracy: Optional[float] = None
     test_auroc: Optional[float] = None
 
-
 def count_parameters(model, prefix=''):
     trainable_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
     param_amount = sum(p.numel() for p in model.parameters())
