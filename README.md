@@ -45,7 +45,7 @@ The DLRM performance on three datasets using ColossalAI version (this repo) and 
 |            |  torchrec  |           0.79515636          |  0.967177451  |   45 it/s  |         1h35m         |           66.54           |           68.43          |          7.7          |
 |   kaggle   | ColossalAI |          0.776755869          |  0.779025435  |   50 it/s  |          49s          |            0.9            |           2.14           |         34.66         |
 |            |  torchrec  |          0.786652029          |  0.782288849  |   81 it/s  |          30s          |           16.13           |           17.99          |         13.89         |
-|   avazue   | ColossalAI |          0.701478183          |  0.821486056  |   72 it/s  |          31s          |            0.31           |           1.06           |         16.89         |
+|   avazue   | ColossalAI |          0.72732079           |  0.824390948  |   72 it/s  |          31s          |            0.31           |           1.06           |         16.89         |
 |            |  torchrec  |          0.725972056          |  0.824484706  |  111 it/s  |          21s          |            4.53           |           5.83           |         12.25         |
 
 ### Cite us
