@@ -1,4 +1,4 @@
-# FreqAwareCache Embedding
+# FreqAwareCache Embedding : larger embedding tables, smaller GPU memory budget.
 
 The embedding tables in deep learning recommendation system models are becoming extremly large and cannot be fit in GPU memory.
 This project provides an efficient way to train large recommendation system models whose embedding tables can not fit in GPU memory.
@@ -39,7 +39,7 @@ bash ./docker/launch.sh
 
 2. Run
 
-All the commands to run the FreqCacheEmbedding enabled recommendations models are presented in `run.sh`
+All the commands to run DLRM on three datasets are presented in `run.sh`
 ```
 bash scripts/run.sh
 ```
