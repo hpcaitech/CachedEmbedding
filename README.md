@@ -28,11 +28,24 @@ During the time this repo was built, another commonly adopted dataset,
 is unavailable (see this [issue](https://github.com/pytorch/torchrec/issues/245)).
 We will append its preprocessing & running scripts very soon.
 
-### Command  
+### Usage
+
+1. Installation
+
+```
+docker pull hpcaitech/fawembedding:0.1.0
+bash ./docker/launch.sh
+```
+
+2. Run
+
 All the commands to run the FreqCacheEmbedding enabled recommendations models are presented in `run.sh`
- 
+```
+bash scripts/run.sh
+```
+
 ### Model  
-Currently, this repo only contains DLRM & DeepFM models, 
+Currently, this repo only contains DLRM models, 
 and we are working on testing more recommendation models.
 
 ### Performance
