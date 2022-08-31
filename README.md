@@ -1,8 +1,18 @@
-# FreqCacheEmbedding
+# FreqAwareCache Embedding
 
-This repo contains the implementation of FreqCacheEmbedding, which extends the vanilla
+The embedding tables in deep learning recommendation system models are becoming extremly large and cannot be fit in GPU memory.
+This project provides an efficient way to train large recommendation system models whose embedding tables can not fit in GPU memory.
+The entire training is completed on GPU in a synchronized parameter updating manner.
+
+This project applies the FreqAwareCache Embedding, which extends the vanilla
 [PyTorch EmbeddingBag](https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html#torch.nn.EmbeddingBag) 
-with **Freqency-Aware Cache Embedding** from [ColossalAI](https://github.com/hpcaitech/ColossalAI) to enable heterogeneous training for large scale recommendation models.
+with **Freqency-Aware Cache Embedding** method from [ColossalAI](https://github.com/hpcaitech/ColossalAI).
+The FreqAwareCache Embedding use a [software cache approach](https://colossalai.readthedocs.io/en/latest/colossalai/colossalai.nn.parallel.layers.html) to dynamically manage the extremely large embedding table in the CPU and GPU memory space.
+It can also leverage the id's frequency statistics of the target dataset to reduce CPU-GPU communication volume.
+For example, this repo can train DLRM model including a **91.10 GB** embedding table on Criteo 1TB dataset using just **3.75 GB** max CUDA memory allocated on a single GPU!!
+Despite the additional cache indexing and CPU-GPU overhead, the overall performance of our system drops very little compared to the torchrec.
+However, torchrec usually requires an order of magnitude more CUDA memory requirements.
+Also, our software cache is implemented using pytorch without any customized C++/CUDA kernels, and developers can customize or optimize it according to their needs.
 
 ### Dataset  
 1. [Criteo Kaggle](https://www.kaggle.com/c/avazu-ctr-prediction/data)
@@ -27,12 +37,12 @@ and we are working on testing more recommendation models.
 
 ### Performance
 
-The DLRM performance on three datasets using ColossalAI version (this repo) and torchrec (with UVM) is shown as follows. The cache ratio of FreqAwareEmbedding is set as 1%.
+The DLRM performance on three datasets using ColossalAI version (this repo) and torchrec (with UVM) is shown as follows. The cache ratio of FreqAwareEmbedding is set as 1%. The evaluation is conducted on A100 (80GB memory) and AMD 7543 32-Core CPU (512GB memory).
 
 |            |   method   | AUROC over Test after 1 Epoch | Acc over test | Throughput | Time to Train 1 Epoch | GPU memory allocated (GB) | GPU memory reserved (GB) | CPU memory usage (GB) |
 |:----------:|:----------:|:-----------------------------:|:-------------:|:----------:|:---------------------:|:-------------------------:|:------------------------:|:---------------------:|
 | criteo 1TB | ColossalAI |          0.791299403          |  0.967155457  |   42 it/s  |         1h40m         |            3.75           |           5.04           |         94.39         |
-|            |  torchrec  |           0.79515636          |  0.967177451  |   45 it/s  |         1h25m         |           66.54           |           68.43          |          7.7          |
+|            |  torchrec  |           0.79515636          |  0.967177451  |   45 it/s  |         1h35m         |           66.54           |           68.43          |          7.7          |
 |   kaggle   | ColossalAI |          0.776755869          |  0.779025435  |   50 it/s  |          49s          |            0.9            |           2.14           |         34.66         |
 |            |  torchrec  |          0.786652029          |  0.782288849  |   81 it/s  |          30s          |           16.13           |           17.99          |         13.89         |
 |   avazue   | ColossalAI |          0.701478183          |  0.821486056  |   72 it/s  |          31s          |            0.31           |           1.06           |         16.89         |
