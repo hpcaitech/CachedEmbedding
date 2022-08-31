@@ -13,9 +13,13 @@ You might need to change the `'/data/scratch/RecSys/criteo_kaggle_npy'` to `<kag
 
 ## Avazu
 1. download data from: https://www.kaggle.com/c/avazu-ctr-prediction/data
-2. convert & split data files:
+2. convert tsv files to npy files:
 ```bash
 python npy_preproc_avazu.py --input_dir <avazu_dir> --output_dir <avazu_npy_dir>
+```
+3. split train/val/test files
+```bash
+python npy_preproc_avazu.py --input_dir <avazu_npy_dir> --output_dir <avazu_split_dir> --is_split
 ```
 
 ## Criteo Terabyte
