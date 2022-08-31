@@ -17,16 +17,12 @@ Also, our software cache is implemented using pytorch without any customized C++
 ### Dataset  
 1. [Criteo Kaggle](https://www.kaggle.com/c/avazu-ctr-prediction/data)
 2. [Avazu](https://www.kaggle.com/c/avazu-ctr-prediction/data)
+3. [Criteo 1TB](https://ailab.criteo.com/download-criteo-1tb-click-logs-dataset/) 
 
 Basically, the preprocessing processes are derived from 
 [Torchrec's utilities](https://github.com/pytorch/torchrec/blob/main/torchrec/datasets/scripts/npy_preproc_criteo.py) 
 and [Avazu kaggle community](https://www.kaggle.com/code/leejunseok97/deepfm-deepctr-torch)
-Please refer to `recsys/datasets/preprocess_scripts` dir to see the details.
-
-During the time this repo was built, another commonly adopted dataset, 
-[Criteo 1TB](https://ailab.criteo.com/download-criteo-1tb-click-logs-dataset/) 
-is unavailable (see this [issue](https://github.com/pytorch/torchrec/issues/245)).
-We will append its preprocessing & running scripts very soon.
+Please refer to `scripts/preprocess` dir to see the details.
 
 ### Usage
 
@@ -39,14 +35,13 @@ bash ./docker/launch.sh
 
 2. Run
 
-All the commands to run DLRM on three datasets are presented in `run.sh`
+All the commands to run DLRM on three datasets are presented in `scripts/run.sh`
 ```
 bash scripts/run.sh
 ```
 
 ### Model  
-Currently, this repo only contains DLRM models, 
-and we are working on testing more recommendation models.
+Currently, this repo only contains DLRM models, and we are working on testing more recommendation models.
 
 ### Performance
 
