@@ -1,17 +1,19 @@
 # The infrastructures of DLRM are mainly inspired by TorchRec:
 # https://github.com/pytorch/torchrec/blob/main/torchrec/models/dlrm.py
+from imp import cache_from_source
 import os
 from contextlib import nullcontext
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import record_function
-
+from typing import List
 from baselines.models.dlrm import DenseArch, OverArch, InteractionArch, choose
 from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 
 import colossalai
-from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag, EvictionStrategy
+from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag, EvictionStrategy, \
+    TablewiseEmbeddingBagConfig, ParallelFreqAwareEmbeddingBagTablewise
 from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 
@@ -21,7 +23,29 @@ dist_logger = colossalai.logging.get_dist_logger()
 def sparse_embedding_shape_hook(embeddings, feature_size, batch_size):
     return embeddings.view(feature_size, batch_size, -1).transpose(0, 1)
 
-
+def sparse_embedding_shape_hook_for_tablewise(embeddings, feature_size, batch_size):
+    return embeddings.view(embeddings.shape[0], feature_size, -1)
+def prepare_tablewise_config(num_embeddings_per_feature,
+                             cache_ratio):
+    # WARNING, prototype. only support criteo_kaggle dataset and world_size == 2.
+    embedding_bag_config_list: List[TablewiseEmbeddingBagConfig] = []
+    to_rank_0 = [0,2,6,7,9,10,12,14,15,17,18,23,25]
+    to_rank_1 = [1,3,4,5,8,11,13,16,19,20,21,22,24]
+    for i, num_embeddings in enumerate(num_embeddings_per_feature):
+        if i in to_rank_0:
+            assign = 0
+        else:
+            assign = 1
+        embedding_bag_config_list.append(
+            TablewiseEmbeddingBagConfig(
+            num_embeddings = num_embeddings,
+            cuda_row_num= int(cache_ratio * num_embeddings) + 100,
+            assigned_rank=assign
+            )
+        )
+    return embedding_bag_config_list
+        
+    
 class FusedSparseModules(nn.Module):
 
     def __init__(self,
@@ -38,21 +62,37 @@ class FusedSparseModules(nn.Module):
                  warmup_ratio=0.7,
                  buffer_size=50_000,
                  is_dist_dataloader=True,
-                 use_lfu_eviction=False):
+                 use_lfu_eviction=False,
+                 use_tablewise_parallel=False):
         super(FusedSparseModules, self).__init__()
+        
         if use_cache:
-            self.embed = ParallelFreqAwareEmbeddingBag(
-                sum(num_embeddings_per_feature),
-                embedding_dim,
-                sparse=sparse,
-                mode=reduction_mode,
-                include_last_offset=True,
-                cuda_row_num=cache_sets,
-                ids_freq_mapping=id_freq_map,
-                warmup_ratio=warmup_ratio,
-                buffer_size=buffer_size,
-                evict_strategy=EvictionStrategy.LFU if use_lfu_eviction else EvictionStrategy.DATASET
-            )
+            if use_tablewise_parallel:
+                # establist config list
+                embedding_bag_config_list = prepare_tablewise_config(num_embeddings_per_feature,0.5)
+                self.embed = ParallelFreqAwareEmbeddingBagTablewise(
+                    embedding_bag_config_list,
+                    embedding_dim,
+                    sparse=sparse,
+                    mode=reduction_mode,
+                    include_last_offset=True,
+                    evict_strategy=EvictionStrategy.LFU
+                )
+                self.shape_hook = sparse_embedding_shape_hook_for_tablewise
+            else:
+                self.embed = ParallelFreqAwareEmbeddingBag(
+                    sum(num_embeddings_per_feature),
+                    embedding_dim,
+                    sparse=sparse,
+                    mode=reduction_mode,
+                    include_last_offset=True,
+                    cuda_row_num=cache_sets,
+                    ids_freq_mapping=id_freq_map,
+                    warmup_ratio=warmup_ratio,
+                    buffer_size=buffer_size,
+                    evict_strategy=EvictionStrategy.LFU if use_lfu_eviction else EvictionStrategy.DATASET
+                )
+                self.shape_hook = sparse_embedding_shape_hook
         else:
             raise NotImplementedError("Other EmbeddingBags are under development")
 
@@ -67,11 +107,10 @@ class FusedSparseModules(nn.Module):
                 sparse_features = self.kjt_collector.all_to_all(sparse_features)
 
         keys, batch_size = sparse_features.keys(), sparse_features.stride()
-
         flattened_sparse_embeddings = self.embed(
             sparse_features.values(),
             sparse_features.offsets(),
-            shape_hook=lambda x: sparse_embedding_shape_hook(x, len(keys), batch_size))
+            shape_hook=lambda x: self.shape_hook(x, len(keys), batch_size))
         return flattened_sparse_embeddings
 
 
@@ -159,18 +198,19 @@ class HybridParallelDLRM(nn.Module):
                                  static_graph=True)
 
         # precompute for parallelized embedding
-        param_amount = sum(num_embeddings_per_feature) * embedding_dim
-        param_storage = self.sparse_modules.embed.weight.element_size() * param_amount
-        param_amount += sum(p.numel() for p in self.dense_modules.parameters())
-        param_storage += sum(p.numel() * p.element_size() for p in self.dense_modules.parameters())
-
-        buffer_amount = sum(b.numel() for b in self.sparse_modules.buffers()) + \
-            sum(b.numel() for b in self.dense_modules.buffers())
-        buffer_storage = sum(b.numel() * b.element_size() for b in self.sparse_modules.buffers()) + \
-            sum(b.numel() * b.element_size() for b in self.dense_modules.buffers())
-        stat_str = f"Number of model parameters: {param_amount:,}, storage overhead: {param_storage/1024**3:.2f} GB. " \
-                   f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
-        self.stat_str = stat_str
+        # param_amount = sum(num_embeddings_per_feature) * embedding_dim
+        # param_storage = self.sparse_modules.embed.weight.element_size() * param_amount
+        # param_amount += sum(p.numel() for p in self.dense_modules.parameters())
+        # param_storage += sum(p.numel() * p.element_size() for p in self.dense_modules.parameters())
+# 
+        # buffer_amount = sum(b.numel() for b in self.sparse_modules.buffers()) + \
+        #     sum(b.numel() for b in self.dense_modules.buffers())
+        # buffer_storage = sum(b.numel() * b.element_size() for b in self.sparse_modules.buffers()) + \
+        #     sum(b.numel() * b.element_size() for b in self.dense_modules.buffers())
+        # stat_str = f"Number of model parameters: {param_amount:,}, storage overhead: {param_storage/1024**3:.2f} GB. " \
+        #            f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
+        # self.stat_str = stat_str
+        self.stat_str = ""
 
     def forward(self, dense_features, sparse_features, inspect_time=False):
         ctx1 = get_time_elapsed(dist_logger, "embedding lookup in forward pass") \
