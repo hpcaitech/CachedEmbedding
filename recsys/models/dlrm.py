@@ -16,6 +16,7 @@ from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag, Evictio
     TablewiseEmbeddingBagConfig, ParallelFreqAwareEmbeddingBagTablewise
 from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
+import numpy as np
 
 dist_logger = colossalai.logging.get_dist_logger()
 
@@ -23,29 +24,48 @@ dist_logger = colossalai.logging.get_dist_logger()
 def sparse_embedding_shape_hook(embeddings, feature_size, batch_size):
     return embeddings.view(feature_size, batch_size, -1).transpose(0, 1)
 
+
 def sparse_embedding_shape_hook_for_tablewise(embeddings, feature_size, batch_size):
     return embeddings.view(embeddings.shape[0], feature_size, -1)
+
+
 def prepare_tablewise_config(num_embeddings_per_feature,
-                             cache_ratio):
+                             cache_ratio,
+                             id_freq_map_total=None,
+                             dataset="criteo_kaggle",
+                             world_size=2):
     # WARNING, prototype. only support criteo_kaggle dataset and world_size == 2.
     embedding_bag_config_list: List[TablewiseEmbeddingBagConfig] = []
-    to_rank_0 = [0,2,6,7,9,10,12,14,15,17,18,23,25]
-    to_rank_1 = [1,3,4,5,8,11,13,16,19,20,21,22,24]
-    for i, num_embeddings in enumerate(num_embeddings_per_feature):
-        if i in to_rank_0:
-            assign = 0
-        else:
-            assign = 1
-        embedding_bag_config_list.append(
-            TablewiseEmbeddingBagConfig(
-            num_embeddings = num_embeddings,
-            cuda_row_num= int(cache_ratio * num_embeddings) + 100,
-            assigned_rank=assign
-            )
-        )
-    return embedding_bag_config_list
+    if dataset == "criteo_kaggle":
+        if world_size == 1:
+            rank_arrange = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        elif world_size == 2:
+            rank_arrange = [0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0]
+        else :
+            raise NotImplementedError("Other Tablewise settings are under development")
         
-    
+        table_offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)])
+
+        for i, num_embeddings in enumerate(num_embeddings_per_feature):
+            ids_freq_mapping = None
+            if id_freq_map_total != None:
+                ids_freq_mapping = id_freq_map_total[table_offsets[i] : table_offsets[i+1]]
+            cuda_row_num = int(cache_ratio * num_embeddings) + 2000
+            if cuda_row_num > num_embeddings:
+                cuda_row_num = num_embeddings
+            embedding_bag_config_list.append(
+                TablewiseEmbeddingBagConfig(
+                    num_embeddings=num_embeddings,
+                    cuda_row_num=cuda_row_num,
+                    assigned_rank=rank_arrange[i],
+                    ids_freq_mapping=ids_freq_mapping
+                )
+            )
+        return embedding_bag_config_list
+    else:
+        raise NotImplementedError("Other Tablewise settings are under development")
+
+
 class FusedSparseModules(nn.Module):
 
     def __init__(self,
@@ -65,18 +85,18 @@ class FusedSparseModules(nn.Module):
                  use_lfu_eviction=False,
                  use_tablewise_parallel=False):
         super(FusedSparseModules, self).__init__()
-        
+
         if use_cache:
             if use_tablewise_parallel:
                 # establist config list
-                embedding_bag_config_list = prepare_tablewise_config(num_embeddings_per_feature,0.5)
+                embedding_bag_config_list = prepare_tablewise_config(num_embeddings_per_feature, 0.3, id_freq_map)
                 self.embed = ParallelFreqAwareEmbeddingBagTablewise(
                     embedding_bag_config_list,
                     embedding_dim,
                     sparse=sparse,
                     mode=reduction_mode,
                     include_last_offset=True,
-                    evict_strategy=EvictionStrategy.LFU
+                    evict_strategy=EvictionStrategy.LFU if use_lfu_eviction else EvictionStrategy.DATASET
                 )
                 self.shape_hook = sparse_embedding_shape_hook_for_tablewise
             else:
@@ -202,7 +222,7 @@ class HybridParallelDLRM(nn.Module):
         # param_storage = self.sparse_modules.embed.weight.element_size() * param_amount
         # param_amount += sum(p.numel() for p in self.dense_modules.parameters())
         # param_storage += sum(p.numel() * p.element_size() for p in self.dense_modules.parameters())
-# 
+#
         # buffer_amount = sum(b.numel() for b in self.sparse_modules.buffers()) + \
         #     sum(b.numel() for b in self.dense_modules.buffers())
         # buffer_storage = sum(b.numel() * b.element_size() for b in self.sparse_modules.buffers()) + \
