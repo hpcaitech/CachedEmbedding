@@ -136,7 +136,8 @@ def parse_args():
     parser.add_argument("--warmup_ratio", type=float, default=0.7, help="warmup ratio of the software cache")
     parser.add_argument("--buffer_size", type=int, default=0,
                         help="limit buffer size, if buffer_size=1, do not use the buffer.")
-
+    parser.add_argument("--use_tablewise", action='store_true',
+                        help="use tablewise structure for cached embedding bag. If false use columnwise.")
     # Training
     parser.add_argument(
         "--seed",
@@ -248,8 +249,8 @@ def _train(model,
             #     postfix_str += f" hit rate={hit_rate*100:.2f}%"
             # meter.set_postfix_str(postfix_str)
         except StopIteration:
-            # dist_logger.info(f"{get_mem_info('Training:  ')}, "
-            #                  f"{model.sparse_modules.embed.cache_weight_mgr.print_comm_stats()}")
+            dist_logger.info(f"{get_mem_info('Training:  ')}, "
+                             f"{model.sparse_modules.embed.print_comm_stats_()}")
             break
     if hasattr(data_loader, "__len__"):
         dist_logger.info(f"average throughput: {len(data_loader) / time_elapse:.2f} it/s")
@@ -387,6 +388,9 @@ def main():
         warmup_ratio=args.warmup_ratio,
         buffer_size=args.buffer_size,
         is_dist_dataloader=args.use_distributed_dataloader,
+        use_lfu_eviction=args.use_lfu,
+        use_tablewise=args.use_tablewise,
+        dataset=args.dataset_dir
     )
     dist_logger.info(f"{model.model_stats('DLRM')}", ranks=[0])
     dist_logger.info(f"{get_mem_info('After model init:  ')}", ranks=[0])

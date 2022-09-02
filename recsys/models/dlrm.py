@@ -1,7 +1,7 @@
 # The infrastructures of DLRM are mainly inspired by TorchRec:
 # https://github.com/pytorch/torchrec/blob/main/torchrec/models/dlrm.py
-from imp import cache_from_source
 import os
+import torch
 from contextlib import nullcontext
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -28,7 +28,6 @@ def sparse_embedding_shape_hook(embeddings, feature_size, batch_size):
 def sparse_embedding_shape_hook_for_tablewise(embeddings, feature_size, batch_size):
     return embeddings.view(embeddings.shape[0], feature_size, -1)
 
-
 def prepare_tablewise_config(num_embeddings_per_feature,
                              cache_ratio,
                              id_freq_map_total=None,
@@ -36,7 +35,7 @@ def prepare_tablewise_config(num_embeddings_per_feature,
                              world_size=2):
     # WARNING, prototype. only support criteo_kaggle dataset and world_size == 2.
     embedding_bag_config_list: List[TablewiseEmbeddingBagConfig] = []
-    if dataset == "criteo_kaggle":
+    if 'criteo' in dataset and 'kaggle' in dataset:
         if world_size == 1:
             rank_arrange = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         elif world_size == 2:
@@ -65,7 +64,6 @@ def prepare_tablewise_config(num_embeddings_per_feature,
     else:
         raise NotImplementedError("Other Tablewise settings are under development")
 
-
 class FusedSparseModules(nn.Module):
 
     def __init__(self,
@@ -83,13 +81,15 @@ class FusedSparseModules(nn.Module):
                  buffer_size=50_000,
                  is_dist_dataloader=True,
                  use_lfu_eviction=False,
-                 use_tablewise_parallel=False):
+                 use_tablewise_parallel=False,
+                 dataset:str=None):
         super(FusedSparseModules, self).__init__()
 
         if use_cache:
             if use_tablewise_parallel:
                 # establist config list
-                embedding_bag_config_list = prepare_tablewise_config(num_embeddings_per_feature, 0.3, id_freq_map)
+                world_size = torch.distributed.get_world_size()
+                embedding_bag_config_list = prepare_tablewise_config(num_embeddings_per_feature, 0.3, id_freq_map,dataset,world_size)
                 self.embed = ParallelFreqAwareEmbeddingBagTablewise(
                     embedding_bag_config_list,
                     embedding_dim,
@@ -185,7 +185,9 @@ class HybridParallelDLRM(nn.Module):
                  warmup_ratio=0.7,
                  buffer_size=50_000,
                  is_dist_dataloader=True,
-                 use_lfu_eviction=False):
+                 use_lfu_eviction=False,
+                 use_tablewise=False,
+                 dataset: str = None):
 
         super(HybridParallelDLRM, self).__init__()
         if use_cache and sparse_device.type != dense_device.type:
@@ -207,7 +209,10 @@ class HybridParallelDLRM(nn.Module):
                                                  warmup_ratio=warmup_ratio,
                                                  buffer_size=buffer_size,
                                                  is_dist_dataloader=is_dist_dataloader,
-                                                 use_lfu_eviction=use_lfu_eviction).to(sparse_device)
+                                                 use_lfu_eviction=use_lfu_eviction,
+                                                 use_tablewise_parallel=use_tablewise,
+                                                 dataset=dataset
+                                                 ).to(sparse_device)
         self.dense_modules = DDP(module=FusedDenseModules(embedding_dim, num_sparse_features, dense_in_features,
                                                           dense_arch_layer_sizes,
                                                           over_arch_layer_sizes).to(dense_device),
@@ -218,19 +223,21 @@ class HybridParallelDLRM(nn.Module):
                                  static_graph=True)
 
         # precompute for parallelized embedding
-        # param_amount = sum(num_embeddings_per_feature) * embedding_dim
-        # param_storage = self.sparse_modules.embed.weight.element_size() * param_amount
-        # param_amount += sum(p.numel() for p in self.dense_modules.parameters())
-        # param_storage += sum(p.numel() * p.element_size() for p in self.dense_modules.parameters())
+        param_amount = sum(num_embeddings_per_feature) * embedding_dim
+        if use_tablewise:
+            param_storage = self.sparse_modules.embed.element_size * param_amount
+        else :
+            param_storage = self.sparse_modules.embed.weight.element_size() * param_amount
+        param_amount += sum(p.numel() for p in self.dense_modules.parameters())
+        param_storage += sum(p.numel() * p.element_size() for p in self.dense_modules.parameters())
 #
-        # buffer_amount = sum(b.numel() for b in self.sparse_modules.buffers()) + \
-        #     sum(b.numel() for b in self.dense_modules.buffers())
-        # buffer_storage = sum(b.numel() * b.element_size() for b in self.sparse_modules.buffers()) + \
-        #     sum(b.numel() * b.element_size() for b in self.dense_modules.buffers())
-        # stat_str = f"Number of model parameters: {param_amount:,}, storage overhead: {param_storage/1024**3:.2f} GB. " \
-        #            f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
-        # self.stat_str = stat_str
-        self.stat_str = ""
+        buffer_amount = sum(b.numel() for b in self.sparse_modules.buffers()) + \
+            sum(b.numel() for b in self.dense_modules.buffers())
+        buffer_storage = sum(b.numel() * b.element_size() for b in self.sparse_modules.buffers()) + \
+            sum(b.numel() * b.element_size() for b in self.dense_modules.buffers())
+        stat_str = f"Number of model parameters: {param_amount:,}, storage overhead: {param_storage/1024**3:.2f} GB. " \
+                   f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
+        self.stat_str = stat_str
 
     def forward(self, dense_features, sparse_features, inspect_time=False):
         ctx1 = get_time_elapsed(dist_logger, "embedding lookup in forward pass") \
