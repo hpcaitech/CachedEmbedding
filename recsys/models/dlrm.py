@@ -28,27 +28,31 @@ def sparse_embedding_shape_hook(embeddings, feature_size, batch_size):
 def sparse_embedding_shape_hook_for_tablewise(embeddings, feature_size, batch_size):
     return embeddings.view(embeddings.shape[0], feature_size, -1)
 
+
 def prepare_tablewise_config(num_embeddings_per_feature,
                              cache_ratio,
                              id_freq_map_total=None,
                              dataset="criteo_kaggle",
                              world_size=2):
-    # WARNING, prototype. only support criteo_kaggle dataset and world_size == 2.
+    # WARNING, prototype. only support criteo_kaggle dataset and world_size == 2, 4
+    # TODO: automatic arrange
     embedding_bag_config_list: List[TablewiseEmbeddingBagConfig] = []
     if 'criteo' in dataset and 'kaggle' in dataset:
         if world_size == 1:
             rank_arrange = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         elif world_size == 2:
             rank_arrange = [0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0]
+        elif world_size == 4:
+            rank_arrange = [3, 1, 0, 3, 1, 0, 2, 1, 0, 2, 3, 1, 3, 1, 2, 3, 1, 2, 3, 0, 2, 0, 0, 2, 3, 2]
         else :
             raise NotImplementedError("Other Tablewise settings are under development")
-        
+
         table_offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)])
 
         for i, num_embeddings in enumerate(num_embeddings_per_feature):
             ids_freq_mapping = None
             if id_freq_map_total != None:
-                ids_freq_mapping = id_freq_map_total[table_offsets[i] : table_offsets[i+1]]
+                ids_freq_mapping = id_freq_map_total[table_offsets[i] : table_offsets[i + 1]]
             cuda_row_num = int(cache_ratio * num_embeddings) + 2000
             if cuda_row_num > num_embeddings:
                 cuda_row_num = num_embeddings
@@ -63,6 +67,7 @@ def prepare_tablewise_config(num_embeddings_per_feature,
         return embedding_bag_config_list
     else:
         raise NotImplementedError("Other Tablewise settings are under development")
+
 
 class FusedSparseModules(nn.Module):
 
@@ -82,14 +87,15 @@ class FusedSparseModules(nn.Module):
                  is_dist_dataloader=True,
                  use_lfu_eviction=False,
                  use_tablewise_parallel=False,
-                 dataset:str=None):
+                 dataset: str = None):
         super(FusedSparseModules, self).__init__()
 
         if use_cache:
             if use_tablewise_parallel:
                 # establist config list
                 world_size = torch.distributed.get_world_size()
-                embedding_bag_config_list = prepare_tablewise_config(num_embeddings_per_feature, 0.3, id_freq_map,dataset,world_size)
+                embedding_bag_config_list = prepare_tablewise_config(
+                    num_embeddings_per_feature, 0.3, id_freq_map, dataset, world_size)
                 self.embed = ParallelFreqAwareEmbeddingBagTablewise(
                     embedding_bag_config_list,
                     embedding_dim,
@@ -224,10 +230,7 @@ class HybridParallelDLRM(nn.Module):
 
         # precompute for parallelized embedding
         param_amount = sum(num_embeddings_per_feature) * embedding_dim
-        if use_tablewise:
-            param_storage = self.sparse_modules.embed.element_size * param_amount
-        else :
-            param_storage = self.sparse_modules.embed.weight.element_size() * param_amount
+        param_storage = self.sparse_modules.embed.element_size() * param_amount
         param_amount += sum(p.numel() for p in self.dense_modules.parameters())
         param_storage += sum(p.numel() * p.element_size() for p in self.dense_modules.parameters())
 #
