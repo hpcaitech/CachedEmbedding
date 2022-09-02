@@ -186,6 +186,7 @@ class PetastormDataReader(IterableDataset):
 
     def __iter__(self):
         buffer: Optional[List[np.ndarray]] = None
+        count = 0
 
         def append_to_buffer(_dense: np.ndarray, _sparse: np.ndarray, _labels: np.ndarray) -> None:
             nonlocal buffer
@@ -202,8 +203,7 @@ class PetastormDataReader(IterableDataset):
                 workers_count=1,    # for reproducibility
         ) as reader:
             # note that `batch` here is just a bunch of samples read by petastorm instead of `batch` consumed by models
-            for _ in range(self.num_batches):
-                batch = next(reader)
+            for batch in reader:
                 labels = getattr(batch, DEFAULT_LABEL_NAME)
                 sparse = np.concatenate([getattr(batch, col_name).reshape(1, -1) for col_name in DEFAULT_CAT_NAMES],
                                         axis=0)
@@ -215,6 +215,9 @@ class PetastormDataReader(IterableDataset):
                     if buffer_size == self.batch_size:
                         yield self._batch_ndarray(*buffer)
                         buffer = None
+                        count += 1
+                        if count == self.num_batches:
+                            raise StopIteration()
                     else:
                         rows_to_get = min(self.batch_size - buffer_size, dense.shape[0] - start_idx)
                         label_chunk = labels[start_idx:start_idx + rows_to_get]
