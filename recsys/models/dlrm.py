@@ -42,8 +42,12 @@ def prepare_tablewise_config(num_embeddings_per_feature,
             rank_arrange = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         elif world_size == 2:
             rank_arrange = [0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0]
+        elif world_size == 3:
+            rank_arrange = [2, 1, 0, 1, 1, 2, 2, 1, 0, 0, 1, 1, 0, 1, 0, 2, 0, 2, 2, 0, 2, 2, 0, 1, 1, 0]
         elif world_size == 4:
             rank_arrange = [3, 1, 0, 3, 1, 0, 2, 1, 0, 2, 3, 1, 3, 1, 2, 3, 1, 2, 3, 0, 2, 0, 0, 2, 3, 2]
+        elif world_size == 8:
+            rank_arrange = [6, 6, 0, 4, 7, 2, 5, 7, 0, 5, 7, 1, 7, 3, 5, 3, 1, 6, 6, 0, 2, 2, 1, 4, 3, 4]
         else :
             raise NotImplementedError("Other Tablewise settings are under development")
 
@@ -102,6 +106,9 @@ class FusedSparseModules(nn.Module):
                     sparse=sparse,
                     mode=reduction_mode,
                     include_last_offset=True,
+                    cuda_row_num=cache_sets,
+                    warmup_ratio=warmup_ratio,
+                    buffer_size=buffer_size,
                     evict_strategy=EvictionStrategy.LFU if use_lfu_eviction else EvictionStrategy.DATASET
                 )
                 self.shape_hook = sparse_embedding_shape_hook_for_tablewise
