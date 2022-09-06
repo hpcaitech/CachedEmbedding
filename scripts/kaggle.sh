@@ -2,8 +2,8 @@
 
 # For Colossalai enabled recsys
 # criteo kaggle
-# export DATAPATH=/data/scratch/RecSys/criteo_kaggle_data/
-export DATAPATH=/data/criteo_kaggle_data/
+export DATAPATH=/data/scratch/RecSys/criteo_kaggle_data/
+# export DATAPATH=/data/criteo_kaggle_data/
 export GPUNUM=4
 export BATCHSIZE=16384
 export CACHESIZE=337625

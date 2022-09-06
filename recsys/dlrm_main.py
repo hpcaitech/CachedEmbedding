@@ -123,12 +123,6 @@ def parse_args():
                         default=500_000,
                         help="Number of cache sets in the cache. "
                         "*** Please make sure it can hold AT LEAST ONE BATCH OF SPARSE FEATURE IDS ***")
-    parser.add_argument(
-        "--cache_lines",
-        type=int,
-        default=1,
-        help="Number of cache lines in each cache set. Similar to the N-way set associate mechanism in cache."
-        "Not implemented yet. Increasing this would scale up the cache capacity")
     parser.add_argument("--use_freq", action='store_true',
                         help="use the dataset freq information to initialize the softwar cache")
     parser.add_argument("--use_lfu", action='store_true',
@@ -390,7 +384,6 @@ def main():
         fused_op=args.fused_op,
         use_cache=args.use_cache,
         cache_sets=args.cache_sets,
-        cache_lines=args.cache_lines,
         id_freq_map=id_freq_map,
         warmup_ratio=args.warmup_ratio,
         buffer_size=args.buffer_size,
