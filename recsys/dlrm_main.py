@@ -160,6 +160,11 @@ def parse_args():
     )
     parser.add_argument("--use_overlap", action="store_true")
     parser.add_argument("--use_distributed_dataloader", action="store_true")
+    parser.add_argument(
+        "--eval_acc",
+        action="store_true",
+        help="Evaluation the model accuracy on test dataset.",
+    )
 
     args = parser.parse_args()
 
@@ -311,16 +316,18 @@ def train_val_test(
             _train(model, optimizer, criterion, train_dataloader, epoch, prof, args.use_overlap,
                    args.use_distributed_dataloader)
 
-            val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val", args.use_overlap,
+            if args.eval_acc:
+                val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val", args.use_overlap,
+                                                    args.use_distributed_dataloader)
+
+                train_val_test_results.val_accuracies.append(val_accuracy)
+                train_val_test_results.val_aurocs.append(val_auroc)
+
+        if args.eval_acc:
+            test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test", args.use_overlap,
                                                 args.use_distributed_dataloader)
-
-            train_val_test_results.val_accuracies.append(val_accuracy)
-            train_val_test_results.val_aurocs.append(val_auroc)
-
-        test_accuracy, test_auroc = _evaluate(model, test_dataloader, "test", args.use_overlap,
-                                              args.use_distributed_dataloader)
-        train_val_test_results.test_accuracy = test_accuracy
-        train_val_test_results.test_auroc = test_auroc
+            train_val_test_results.test_accuracy = test_accuracy
+            train_val_test_results.test_auroc = test_auroc
 
     return train_val_test_results
 

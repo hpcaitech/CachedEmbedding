@@ -148,6 +148,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Use pinned memory when loading data.",
     )
     parser.add_argument(
+        "--eval_acc",
+        dest="eval_acc",
+        action="store_true",
+        help="Evaluation the model accuracy on test dataset.",
+    )
+    parser.add_argument(
         "--mmap_mode",
         dest="mmap_mode",
         action="store_true",
@@ -207,6 +213,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         mmap_mode=None,
         shuffle_batches=None,
         change_lr=None,
+        eval_acc=False,
     )
     parser.add_argument(
         "--adagrad",
@@ -425,28 +432,31 @@ def train_val_test(
                    args.lr_change_point, args.lr_after_change_point, args.validation_freq_within_epoch,
                    args.limit_train_batches, args.limit_val_batches, prof)
             train_iterator = iter(train_dataloader)
-            val_next_iterator = (test_iterator if epoch == args.epochs - 1 else train_iterator)
 
-            val_accuracy, val_auroc = _evaluate(
-                args.limit_val_batches,
+            if args.eval_acc:
+                val_next_iterator = (test_iterator if epoch == args.epochs - 1 else train_iterator)
+
+                val_accuracy, val_auroc = _evaluate(
+                    args.limit_val_batches,
+                    train_pipeline,
+                    val_iterator,
+                    val_next_iterator,
+                    "val",
+                )
+
+                train_val_test_results.val_accuracies.append(val_accuracy)
+                train_val_test_results.val_aurocs.append(val_auroc)
+
+        if args.eval_acc:
+            test_accuracy, test_auroc = _evaluate(
+                args.limit_test_batches,
                 train_pipeline,
-                val_iterator,
-                val_next_iterator,
-                "val",
+                test_iterator,
+                iter(test_dataloader),
+                "test",
             )
-
-            train_val_test_results.val_accuracies.append(val_accuracy)
-            train_val_test_results.val_aurocs.append(val_auroc)
-
-        test_accuracy, test_auroc = _evaluate(
-            args.limit_test_batches,
-            train_pipeline,
-            test_iterator,
-            iter(test_dataloader),
-            "test",
-        )
-        train_val_test_results.test_accuracy = test_accuracy
-        train_val_test_results.test_auroc = test_auroc
+            train_val_test_results.test_accuracy = test_accuracy
+            train_val_test_results.test_auroc = test_auroc
 
     return train_val_test_results
 
