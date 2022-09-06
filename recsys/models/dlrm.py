@@ -84,7 +84,6 @@ class FusedSparseModules(nn.Module):
                  output_device_type=None,
                  use_cache=False,
                  cache_sets=500_000,
-                 cache_lines=1,
                  id_freq_map=None,
                  warmup_ratio=0.7,
                  buffer_size=50_000,
@@ -99,14 +98,14 @@ class FusedSparseModules(nn.Module):
                 # establist config list
                 world_size = torch.distributed.get_world_size()
                 embedding_bag_config_list = prepare_tablewise_config(
-                    num_embeddings_per_feature, 0.3, id_freq_map, dataset, world_size)
+                    num_embeddings_per_feature, 0.01, id_freq_map, dataset, world_size)
                 self.embed = ParallelFreqAwareEmbeddingBagTablewise(
                     embedding_bag_config_list,
                     embedding_dim,
                     sparse=sparse,
                     mode=reduction_mode,
                     include_last_offset=True,
-                    cuda_row_num=cache_sets,
+                    cuda_row_num=cache_sets // world_size + 1,
                     warmup_ratio=warmup_ratio,
                     buffer_size=buffer_size,
                     evict_strategy=EvictionStrategy.LFU if use_lfu_eviction else EvictionStrategy.DATASET
@@ -193,7 +192,6 @@ class HybridParallelDLRM(nn.Module):
                  fused_op='all_to_all',
                  use_cache=False,
                  cache_sets=500_000,
-                 cache_lines=1,
                  id_freq_map=None,
                  warmup_ratio=0.7,
                  buffer_size=50_000,
@@ -217,7 +215,6 @@ class HybridParallelDLRM(nn.Module):
                                                  output_device_type=dense_device.type,
                                                  use_cache=use_cache,
                                                  cache_sets=cache_sets,
-                                                 cache_lines=cache_lines,
                                                  id_freq_map=id_freq_map,
                                                  warmup_ratio=warmup_ratio,
                                                  buffer_size=buffer_size,
