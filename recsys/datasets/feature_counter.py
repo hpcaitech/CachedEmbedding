@@ -28,7 +28,6 @@ class GlobalFeatureCounter:
             id_freq_map += np.bincount(flattened, minlength=self.hash_sizes.sum())
         return id_freq_map
 
-
 class PetastormCounter:
 
     def __init__(self, datafiles, hash_sizes, subsample_fraction=0.2, seed=1024):
