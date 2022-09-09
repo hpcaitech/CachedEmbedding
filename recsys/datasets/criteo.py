@@ -256,23 +256,38 @@ class PetastormDataReader(IterableDataset):
                  shuffle_batches=False,
                  hashes=None,
                  seed=1024,
-                 drop_last=True):
+                 drop_last=True,
+                 assigned_tables=None):
+        
+        if assigned_tables is not None:
+            # tablewise mode
+            self.assigned_tables = np.array(assigned_tables)
+        else:
+            # full table mode
+            self.assigned_tables = np.arange(CAT_FEATURE_COUNT)
         self.dataset = ParquetDataset(paths, use_legacy_dataset=False)
         self.batch_size = batch_size
         self.rank = rank
         self.world_size = world_size
         self.shuffle_batches = shuffle_batches
-        self.hashes = np.array(hashes).reshape((1, CAT_FEATURE_COUNT)) if hashes is not None else None
-        self.sparse_offsets = np.array([0, *np.cumsum(hashes)[:-1]], dtype=np.int64).reshape(-1, 1) \
-            if hashes is not None else None
+        if hashes is not None:
+            self.hashes = []
+            for i, length in enumerate(hashes):
+                if i in self.assigned_tables:
+                    self.hashes.append(length)
+            self.hashes = np.array(self.hashes).reshape(1, -1)
+        else:
+            self.hashes = None
+        self.sparse_offsets = np.array([0, *np.cumsum(self.hashes)[:-1]], dtype=np.int64).reshape(
+                    -1, 1) if self.hashes is not None else None
 
-        self._num_ids_in_batch: int = CAT_FEATURE_COUNT * batch_size
-        self.keys: List[str] = DEFAULT_CAT_NAMES
+        self._num_ids_in_batch: int = len(self.assigned_tables) * batch_size
+        self.keys: List[str] = [DEFAULT_CAT_NAMES[i] for i in self.assigned_tables]
         self.lengths: torch.Tensor = torch.ones((self._num_ids_in_batch,), dtype=torch.int32)
         self.offsets: torch.Tensor = torch.arange(0, self._num_ids_in_batch + 1, dtype=torch.int32)
         self.stride = batch_size
-        self.length_per_key: List[int] = CAT_FEATURE_COUNT * [batch_size]
-        self.offset_per_key: List[int] = [batch_size * i for i in range(CAT_FEATURE_COUNT + 1)]
+        self.length_per_key: List[int] = len(self.assigned_tables) * [batch_size]
+        self.offset_per_key: List[int] = [batch_size * i for i in range(len(self.assigned_tables) + 1)]
         self.index_per_key: Dict[str, int] = {key: i for (i, key) in enumerate(self.keys)}
         self.seed = seed
         self.epoch = 0
@@ -307,7 +322,7 @@ class PetastormDataReader(IterableDataset):
             # note that `batch` here is just a bunch of samples read by petastorm instead of `batch` consumed by models
             for batch in reader:
                 labels = getattr(batch, DEFAULT_LABEL_NAME)
-                sparse = np.concatenate([getattr(batch, col_name).reshape(1, -1) for col_name in DEFAULT_CAT_NAMES],
+                sparse = np.concatenate([getattr(batch, col_name).reshape(1, -1) for col_name in self.keys],
                                         axis=0)
                 if self.sparse_offsets is not None:
                     sparse = sparse + self.sparse_offsets
@@ -395,7 +410,7 @@ def _get_kaggle_dataloader(args, stage, rank, world_size, assigned_tables=None):
     return dataloader
 
 
-def _get_terabyte_dataloader(args, stage, rank, world_size):
+def _get_terabyte_dataloader(args, stage, rank, world_size, assigned_tables=None):
     # TODO: replace the data_split with stage
     if stage == "train":
         data_split = "train"
@@ -416,7 +431,8 @@ def _get_terabyte_dataloader(args, stage, rank, world_size):
                                                 world_size=None,
                                                 shuffle_batches=stage == "train",
                                                 hashes=args.num_embeddings_per_feature,
-                                                seed=args.seed),
+                                                seed=args.seed,
+                                                assigned_tables=assigned_tables),
                             batch_size=None,
                             pin_memory=False,
                             collate_fn=lambda x: x,
@@ -436,7 +452,7 @@ def get_dataloader(args, stage, rank, world_size, assigned_tables = None):
     if "kaggle" in args.dataset_dir:
         return _get_kaggle_dataloader(args, stage, rank, world_size, assigned_tables)
     else:
-        return _get_terabyte_dataloader(args, stage, rank, world_size)
+        return _get_terabyte_dataloader(args, stage, rank, world_size, assigned_tables)
 
 
 def get_id_freq_map(path):
