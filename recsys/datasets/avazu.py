@@ -206,7 +206,7 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
         return self.num_batches
 
 
-def get_dataloader(args, stage, rank, world_size):
+def get_dataloader(args, stage, rank, world_size,  assigned_tables = None):
     stage = stage.lower()
 
     files = os.listdir(args.dataset_dir)

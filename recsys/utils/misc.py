@@ -5,7 +5,9 @@ import time
 from time import perf_counter
 from dataclasses import dataclass, field
 from typing import List, Optional
+from colossalai.nn.parallel.layers import TablewiseEmbeddingBagConfig
 
+import numpy as np
 
 @dataclass
 class TrainValTestResults:
@@ -150,3 +152,58 @@ def get_partition(embedding_dim, rank, world_size):
     size_list = [chunk_size + 1 if i < threshold else chunk_size for i in range(world_size)]
     offset = sum(size_list[:rank])
     return offset, offset + size_list[rank], False
+
+
+def prepare_tablewise_config(num_embeddings_per_feature,
+                             cache_ratio,
+                             id_freq_map_total=None,
+                             dataset="criteo_kaggle",
+                             world_size=2):
+    # WARNING, prototype. only support criteo_kaggle dataset and world_size == 2, 4
+    # TODO: automatic arrange
+    embedding_bag_config_list: List[TablewiseEmbeddingBagConfig] = []
+    rank_arrange = get_tablewise_rank_arrange(dataset, world_size)
+    table_offsets = np.array([0, *np.cumsum(num_embeddings_per_feature)])
+    for i, num_embeddings in enumerate(num_embeddings_per_feature):
+        ids_freq_mapping = None
+        if id_freq_map_total != None:
+            ids_freq_mapping = id_freq_map_total[table_offsets[i] : table_offsets[i + 1]]
+        cuda_row_num = int(cache_ratio * num_embeddings) + 2000
+        if cuda_row_num > num_embeddings:
+            cuda_row_num = num_embeddings
+        embedding_bag_config_list.append(
+            TablewiseEmbeddingBagConfig(
+                num_embeddings=num_embeddings,
+                cuda_row_num=cuda_row_num,
+                assigned_rank=rank_arrange[i],
+                ids_freq_mapping=ids_freq_mapping
+            )
+        )
+    return embedding_bag_config_list
+
+def get_tablewise_rank_arrange(dataset=None, world_size=0):
+    if 'criteo' in dataset and 'kaggle' in dataset:
+        if world_size == 1:
+            rank_arrange = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        elif world_size == 2:
+            rank_arrange = [0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0]
+        elif world_size == 3:
+            rank_arrange = [2, 1, 0, 1, 1, 2, 2, 1, 0, 0, 1, 1, 0, 1, 0, 2, 0, 2, 2, 0, 2, 2, 0, 1, 1, 0]
+        elif world_size == 4:
+            rank_arrange = [3, 1, 0, 3, 1, 0, 2, 1, 0, 2, 3, 1, 3, 1, 2, 3, 1, 2, 3, 0, 2, 0, 0, 2, 3, 2]
+        elif world_size == 8:
+            rank_arrange = [6, 6, 0, 4, 7, 2, 5, 7, 0, 5, 7, 1, 7, 3, 5, 3, 1, 6, 6, 0, 2, 2, 1, 4, 3, 4]
+        else :
+            raise NotImplementedError("Other Tablewise settings are under development")
+    elif 'criteo' in dataset:
+        if world_size == 1:
+            rank_arrange = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        elif world_size == 2:
+            rank_arrange = [1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0]
+        elif world_size == 4:
+            rank_arrange = [1, 3, 3, 3, 3, 0, 2, 2, 1, 2, 2, 2, 0, 1, 2, 1, 0, 1, 0, 0, 2, 3, 3, 3, 1, 0]
+        else :
+            raise NotImplementedError("Other Tablewise settings are under development")
+    else:
+        raise NotImplementedError("Other Tablewise settings are under development")
+    return rank_arrange

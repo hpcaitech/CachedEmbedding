@@ -15,6 +15,8 @@ from recsys.utils import FiniteDataIter, TrainValTestResults
 
 import colossalai
 
+from utils import get_tablewise_rank_arrange
+
 dist_logger = colossalai.logging.get_dist_logger()
 
 
@@ -193,7 +195,7 @@ def put_data_in_device(batch, dense_device, sparse_device, is_dist=False, rank=0
         sparse_features = batch.sparse_features.to(sparse_device)
         return dense_features, sparse_features, labels
 
-
+    
 def _train(model,
            optimizer,
            criterion,
@@ -347,6 +349,15 @@ def main():
     dist_logger.info(f"launch rank: {rank} / {world_size}")
     dist_logger.info(f"config: {args}", ranks=[0])
 
+    assigned_tables = None
+    if args.use_tablewise:
+        rank_arrange = None
+        rank_arrange = get_tablewise_rank_arrange(args.dataset_dir, torch.distributed.get_world_size())
+        assigned_tables = []
+        for table, assign_rank in enumerate(rank_arrange):
+            if assign_rank == torch.distributed.get_rank():
+                assigned_tables.append(table)
+    
     if 'criteo' in args.dataset_dir:
         data_module = criteo
     elif 'avazu' in args.dataset_dir:
@@ -354,9 +365,9 @@ def main():
     else:
         raise NotImplementedError()    # TODO: random data interface
 
-    train_dataloader = data_module.get_dataloader(args, 'train', **dataloader_factory)
-    val_dataloader = data_module.get_dataloader(args, "val", **dataloader_factory)
-    test_dataloader = data_module.get_dataloader(args, "test", **dataloader_factory)
+    train_dataloader = data_module.get_dataloader(args, 'train', **dataloader_factory, assigned_tables = assigned_tables)
+    val_dataloader = data_module.get_dataloader(args, "val", **dataloader_factory, assigned_tables = assigned_tables)
+    test_dataloader = data_module.get_dataloader(args, "test", **dataloader_factory, assigned_tables = assigned_tables)
 
     if args.dataset_dir is not None and hasattr(train_dataloader, "__len__"):
         dist_logger.info(

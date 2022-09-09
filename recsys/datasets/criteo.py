@@ -82,8 +82,15 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         shuffle_batches: bool = False,
         mmap_mode: bool = False,
         hashes: Optional[List[int]] = None,
-        path_manager_key: str = PATH_MANAGER_KEY,
+        path_manager_key: str = PATH_MANAGER_KEY, 
+        assigned_tables: Optional[List[int]] = None
     ) -> None:
+        if assigned_tables is not None:
+            # tablewise mode
+            self.assigned_tables = np.array(assigned_tables)
+        else:
+            # full table mode
+            self.assigned_tables = np.arange(CAT_FEATURE_COUNT)
         self.dense_paths = dense_paths
         self.sparse_paths = sparse_paths
         self.labels_paths = labels_paths
@@ -92,13 +99,21 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         self.world_size = world_size
         self.shuffle_batches = shuffle_batches
         self.mmap_mode = mmap_mode
-        self.hashes = np.array(hashes).reshape((1, CAT_FEATURE_COUNT)) if hashes is not None else None
+        # self.hashes = np.array(hashes).reshape((1, CAT_FEATURE_COUNT)) if hashes is not None else None
+        if hashes is not None:
+            self.hashes = []
+            for i, length in enumerate(hashes):
+                if i in self.assigned_tables:
+                    self.hashes.append(length)
+            self.hashes = np.array(self.hashes).reshape(1,-1)
+        else:
+            self.hashes = None
         self.path_manager_key = path_manager_key
         self.path_manager: PathManager = PathManagerFactory().get(path_manager_key)
+        
         # customization
-        self.sparse_offsets = np.array([0, *np.cumsum(hashes)[:-1]], dtype=np.int64).reshape(
-            1, -1) if hashes is not None else None
-
+        self.sparse_offsets = np.array([0, *np.cumsum(self.hashes)[:-1]], dtype=np.int64).reshape(
+                    1, -1) if self.hashes is not None else None
         self._load_data_for_rank()
         self.num_rows_per_file: List[int] = [a.shape[0] for a in self.dense_arrs]
         self.num_batches: int = sum(self.num_rows_per_file) // batch_size
@@ -106,15 +121,14 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         # These values are the same for the KeyedJaggedTensors in all batches, so they
         # are computed once here. This avoids extra work from the KeyedJaggedTensor sync
         # functions.
-        self._num_ids_in_batch: int = CAT_FEATURE_COUNT * batch_size
-        self.keys: List[str] = DEFAULT_CAT_NAMES
+        self._num_ids_in_batch: int = len(self.assigned_tables) * batch_size
+        self.keys: List[str] = [DEFAULT_CAT_NAMES[i] for i in self.assigned_tables]
         self.lengths: torch.Tensor = torch.ones((self._num_ids_in_batch,), dtype=torch.int32)
         self.offsets: torch.Tensor = torch.arange(0, self._num_ids_in_batch + 1, dtype=torch.int32)
         self.stride = batch_size
-        self.length_per_key: List[int] = CAT_FEATURE_COUNT * [batch_size]
-        self.offset_per_key: List[int] = [batch_size * i for i in range(CAT_FEATURE_COUNT + 1)]
+        self.length_per_key: List[int] = len(self.assigned_tables) * [batch_size]
+        self.offset_per_key: List[int] = [batch_size * i for i in range(len(self.assigned_tables) + 1)]
         self.index_per_key: Dict[str, int] = {key: i for (i, key) in enumerate(self.keys)}
-
     def _load_data_for_rank(self) -> None:
         file_idx_to_row_range = BinaryCriteoUtils.get_file_idx_to_row_range(
             lengths=[
@@ -145,10 +159,15 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
         # where samples are batched during training.
         # Otherwise, the ML dataset is preloaded, and the hash is applied here in
         # the preload stage, as shown:
+        expand_hashes = np.ones(CAT_FEATURE_COUNT, dtype=np.int64).reshape(1,-1)
+        expand_sparse_offsets = np.ones(CAT_FEATURE_COUNT, dtype=np.int64).reshape(1,-1)
+        for i, table in enumerate(self.assigned_tables):
+            expand_hashes[0,table] = self.hashes[0,i]
+            expand_sparse_offsets[0,table] = self.sparse_offsets[0,i]
         if not self.mmap_mode and self.hashes is not None:
             for sparse_arr in self.sparse_arrs:
-                sparse_arr %= self.hashes
-                sparse_arr += self.sparse_offsets
+                sparse_arr %= expand_hashes
+                sparse_arr += expand_sparse_offsets
 
     def _np_arrays_to_batch(self, dense: np.ndarray, sparse: np.ndarray, labels: np.ndarray) -> Batch:
         if self.shuffle_batches:
@@ -157,7 +176,6 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
             dense = dense[shuffler]
             sparse = sparse[shuffler]
             labels = labels[shuffler]
-
         return Batch(
             dense_features=torch.from_numpy(dense),
             sparse_features=KeyedJaggedTensor(
@@ -206,7 +224,7 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
                 slice_ = slice(row_idx, row_idx + rows_to_get)
 
                 dense_inputs = self.dense_arrs[file_idx][slice_, :]
-                sparse_inputs = self.sparse_arrs[file_idx][slice_, :]
+                sparse_inputs = self.sparse_arrs[file_idx][slice_, :].take(self.assigned_tables, -1)
                 target_labels = self.labels_arrs[file_idx][slice_, :]
 
                 if self.mmap_mode and self.hashes is not None:
@@ -338,7 +356,7 @@ class PetastormDataReader(IterableDataset):
         return self.num_batches
 
 
-def _get_kaggle_dataloader(args, stage, rank, world_size):
+def _get_kaggle_dataloader(args, stage, rank, world_size, assigned_tables=None):
     files = os.listdir(args.dataset_dir)
 
     def is_final_day(s: str) -> bool:
@@ -368,7 +386,8 @@ def _get_kaggle_dataloader(args, stage, rank, world_size):
             rank=rank,
             world_size=world_size,
             shuffle_batches=args.shuffle_batches,
-            hashes=args.num_embeddings_per_feature),
+            hashes=args.num_embeddings_per_feature,
+            assigned_tables=assigned_tables),
         batch_size=None,
         pin_memory=args.pin_memory,
         collate_fn=lambda x: x,
@@ -406,13 +425,16 @@ def _get_terabyte_dataloader(args, stage, rank, world_size):
     return dataloader
 
 
-def get_dataloader(args, stage, rank, world_size):
+def get_dataloader(args, stage, rank, world_size, assigned_tables = None):
+    '''
+    if assigned_tables is not None, the dataloader is in tablewise mode.
+    '''
     stage = stage.lower()
     if stage not in STAGES:
         raise ValueError(f"Supplied stage was {stage}. Must be one of {STAGES}.")
 
     if "kaggle" in args.dataset_dir:
-        return _get_kaggle_dataloader(args, stage, rank, world_size)
+        return _get_kaggle_dataloader(args, stage, rank, world_size, assigned_tables)
     else:
         return _get_terabyte_dataloader(args, stage, rank, world_size)
 
