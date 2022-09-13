@@ -56,6 +56,9 @@ class InMemoryBinaryCriteoIterDataPipe(IterableDataset):
             Length of this list should be CAT_FEATURE_COUNT.
         path_manager_key (str): Path manager key used to load from different
             filesystems.
+        assigned_tables (Optional[List[int]]): For tablewise mode. sparse features(tables) are numbered as 0, 1, 2, ..., n. 
+                        appending a number to assigned_tables means the coresponding table is assinged to this loader.
+                        iff a table is assigned to this loader should it be loaded into the batch.
 
     Example::
 
