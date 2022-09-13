@@ -8,7 +8,7 @@ export GPUNUM=2
 export BATCHSIZE=16384
 export CACHESIZE=337625
 export USE_LFU=0
-export USE_TABLE_SHARD=1
+export USE_TABLE_SHARD=0
 
 if [[ ${USE_LFU} == 1 ]];  then
 LFU_FLAG="--use_lfu"
