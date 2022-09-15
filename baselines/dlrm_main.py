@@ -569,14 +569,6 @@ def main(argv: List[str]) -> None:
     }
 
     if args.sharder_type == 'naive':    
-        class TestShardedEmbeddingBagCollection(ShardedEmbeddingBagCollection):
-            def input_dist(
-                self,
-                ctx,
-                features,
-            ):
-                return super().input_dist(ctx, features)
-
         class TestCustomEBCSharder(EmbeddingBagCollectionSharder):
             def shard(
                 self,
@@ -584,8 +576,8 @@ def main(argv: List[str]) -> None:
                 params,
                 env: ShardingEnv,
                 device: Optional[torch.device] = None,
-            ) -> TestShardedEmbeddingBagCollection:
-                return TestShardedEmbeddingBagCollection(
+            ) -> ShardedEmbeddingBagCollection:
+                return ShardedEmbeddingBagCollection(
                     module, params, env, self.fused_params, device
                 )
 
