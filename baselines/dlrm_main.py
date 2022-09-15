@@ -33,7 +33,13 @@ from torchrec.distributed.types import ShardingEnv, ShardingType
 from torchrec.distributed.planner.types import ParameterConstraints
 from torchrec.distributed.embedding_types import EmbeddingComputeKernel
 from torch.profiler import profile, record_function, ProfilerActivity, schedule, tensorboard_trace_handler
+from typing import Dict
+from torchrec.distributed.types import ModuleSharder
 
+from torchrec.distributed.embeddingbag import (
+    EmbeddingBagCollectionSharder,
+    ShardedEmbeddingBagCollection,
+)
 # OSS import
 try:
     # pyre-ignore[21]
@@ -220,6 +226,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         dest="adagrad",
         action="store_true",
         help="Flag to determine if adagrad optimizer should be used.",
+    )
+    parser.add_argument(
+        "--sharder_type",
+        type=str,
+        default='fused',
+        help="embedding sharder type",
     )
     return parser.parse_args(argv)
 
@@ -555,9 +567,46 @@ def main(argv: List[str]) -> None:
         "learning_rate": args.learning_rate,
         "optimizer": OptimType.EXACT_ROWWISE_ADAGRAD if args.adagrad else OptimType.EXACT_SGD,
     }
-    sharders = [
-        EmbeddingBagCollectionSharder(fused_params=fused_params),
-    ]
+
+    if args.sharder_type == 'naive':    
+        class TestShardedEmbeddingBagCollection(ShardedEmbeddingBagCollection):
+            def input_dist(
+                self,
+                ctx,
+                features,
+            ):
+                return super().input_dist(ctx, features)
+
+        class TestCustomEBCSharder(EmbeddingBagCollectionSharder):
+            def shard(
+                self,
+                module: EmbeddingBagCollection,
+                params,
+                env: ShardingEnv,
+                device: Optional[torch.device] = None,
+            ) -> TestShardedEmbeddingBagCollection:
+                return TestShardedEmbeddingBagCollection(
+                    module, params, env, self.fused_params, device
+                )
+
+            def sharding_types(self, compute_device_type: str) -> List[str]:
+                return [
+                    ShardingType.TABLE_WISE.value,
+                ]
+
+            def compute_kernels(
+                self, sharding_type: str, compute_device_type: str
+            ) -> List[str]:
+                return [EmbeddingComputeKernel.DENSE.value]
+
+        sharders = [TestCustomEBCSharder()]
+    elif args.sharder_type == 'fused':
+        sharders = [
+            EmbeddingBagCollectionSharder(fused_params=fused_params),
+        ]
+    else:
+        raise NotImplementedError
+
 
     print(f"{get_mem_info('After model init:  ')}")
     if dist.get_rank() == 0:
@@ -588,8 +637,7 @@ def main(argv: List[str]) -> None:
     model = DistributedModelParallel(
         module=train_model,
         device=device,
-        sharders=cast(List[ModuleSharder[nn.Module]], sharders),
-    # )
+        sharders=sharders,
         plan=plan)
 
     print(f"{get_mem_info('After model parallel:  ')}")
