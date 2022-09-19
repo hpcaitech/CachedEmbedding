@@ -589,7 +589,7 @@ def main(argv: List[str]) -> None:
             def compute_kernels(
                 self, sharding_type: str, compute_device_type: str
             ) -> List[str]:
-                return [EmbeddingComputeKernel.CAI.value]
+                return [EmbeddingComputeKernel.CAI_BATCH.value]
 
         sharders = [TestCustomEBCSharder()]
     elif args.sharder_type == 'fused':
