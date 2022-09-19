@@ -568,7 +568,7 @@ def main(argv: List[str]) -> None:
         "optimizer": OptimType.EXACT_ROWWISE_ADAGRAD if args.adagrad else OptimType.EXACT_SGD,
     }
 
-    if args.sharder_type == 'naive':    
+    if args.sharder_type == 'naive_caibatch' or args.sharder_type == 'naive_dense':    
         class TestCustomEBCSharder(EmbeddingBagCollectionSharder):
             def shard(
                 self,
@@ -589,7 +589,7 @@ def main(argv: List[str]) -> None:
             def compute_kernels(
                 self, sharding_type: str, compute_device_type: str
             ) -> List[str]:
-                return [EmbeddingComputeKernel.CAI_BATCH.value]
+                return [EmbeddingComputeKernel.CAI_BATCH.value if args.sharder_type == 'naive_caibatch' else EmbeddingComputeKernel.DENSE.value]
 
         sharders = [TestCustomEBCSharder()]
     elif args.sharder_type == 'fused':
