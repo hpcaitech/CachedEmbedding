@@ -645,6 +645,8 @@ def main(argv: List[str]) -> None:
         compute_kernels = [EmbeddingComputeKernel.CAI_BATCH.value]
     elif args.sharder_type == "dense":
         compute_kernels = [EmbeddingComputeKernel.DENSE.value]
+    elif args.sharder_type == "uvm":
+        compute_kernels = [EmbeddingComputeKernel.FUSED_UVM.value]
     elif args.sharder_type == "uvm_lru":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM_CACHING.value]
     elif args.sharder_type == "uvm_lfu":
