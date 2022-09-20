@@ -120,10 +120,10 @@ def parse_args():
     parser.add_argument("--use_cpu", action='store_true')
     parser.add_argument("--use_sparse_embed_grad", action='store_true')
     parser.add_argument("--use_cache", action='store_true')
-    parser.add_argument("--cache_sets",
-                        type=int,
-                        default=500_000,
-                        help="Number of cache sets in the cache. "
+    parser.add_argument("--cache_ratio",
+                        type=float,
+                        default=0.01,
+                        help="cache ratio. "
                         "*** Please make sure it can hold AT LEAST ONE BATCH OF SPARSE FEATURE IDS ***")
     parser.add_argument("--use_freq", action='store_true',
                         help="use the dataset freq information to initialize the softwar cache")
@@ -394,7 +394,7 @@ def main():
         sparse=args.use_sparse_embed_grad,
         fused_op=args.fused_op,
         use_cache=args.use_cache,
-        cache_sets=args.cache_sets,
+        cache_ratio=args.cache_ratio,
         id_freq_map=id_freq_map,
         warmup_ratio=args.warmup_ratio,
         buffer_size=args.buffer_size,
