@@ -27,12 +27,19 @@ from torchrec.modules.embedding_configs import EmbeddingBagConfig
 from torchrec.optim.keyed import CombinedOptimizer, KeyedOptimizerWrapper
 from tqdm import tqdm
 from fbgemm_gpu.split_embedding_configs import EmbOptimType as OptimType
+from fbgemm_gpu.split_table_batched_embeddings_ops import CacheAlgorithm
 
 from torchrec.distributed.planner import EmbeddingShardingPlanner, Topology
 from torchrec.distributed.types import ShardingEnv, ShardingType
 from torchrec.distributed.planner.types import ParameterConstraints
 from torchrec.distributed.embedding_types import EmbeddingComputeKernel
-from torch.profiler import profile, record_function, ProfilerActivity, schedule, tensorboard_trace_handler
+from torch.profiler import (
+    profile,
+    record_function,
+    ProfilerActivity,
+    schedule,
+    tensorboard_trace_handler,
+)
 from typing import Dict
 from torchrec.distributed.types import ModuleSharder
 
@@ -40,13 +47,20 @@ from torchrec.distributed.embeddingbag import (
     EmbeddingBagCollectionSharder,
     ShardedEmbeddingBagCollection,
 )
+
 # OSS import
 try:
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/data:dlrm_dataloader
-    from data.dlrm_dataloader import get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE, \
-        TERABYTE_NUM_EMBEDDINGS_PER_FEATURE, KAGGLE_TOTAL_TRAINING_SAMPLES
+    from data.dlrm_dataloader import (
+        get_dataloader,
+        STAGES,
+        KAGGLE_NUM_EMBEDDINGS_PER_FEATURE,
+        TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,
+        KAGGLE_TOTAL_TRAINING_SAMPLES,
+    )
     from data import avazu
+
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
     from models import DLRMTrain
@@ -55,29 +69,37 @@ except ImportError:
 
 # internal import
 try:
-    from .data.dlrm_dataloader import (    # noqa F811
-        get_dataloader, STAGES, KAGGLE_NUM_EMBEDDINGS_PER_FEATURE, TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,    # noqa F811
-        KAGGLE_TOTAL_TRAINING_SAMPLES)    # noqa F811
+    from .data.dlrm_dataloader import (  # noqa F811
+        get_dataloader,
+        STAGES,
+        KAGGLE_NUM_EMBEDDINGS_PER_FEATURE,
+        TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,  # noqa F811
+        KAGGLE_TOTAL_TRAINING_SAMPLES,
+    )  # noqa F811
     from .data import avazu
-    from .models import DLRMTrain    # noqa F811
+    from .models import DLRMTrain  # noqa F811
 except ImportError:
     pass
 
 from recsys.utils import get_mem_info, TrainValTestResults, count_parameters
 
-TRAIN_PIPELINE_STAGES = 3    # Number of stages in TrainPipelineSparseDist.
+TRAIN_PIPELINE_STAGES = 3  # Number of stages in TrainPipelineSparseDist.
 TOTAL_TRAINING_SAMPLES = None
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="torchrec dlrm example trainer")
 
-    parser.add_argument("--kaggle", action='store_true')
+    parser.add_argument("--kaggle", action="store_true")
     parser.add_argument("--profile_dir", default="tensorboard_log/torchrec", type=str)
     parser.add_argument("--memory_fraction", default=None, type=float)
 
-    parser.add_argument("--epochs", type=int, default=1, help="number of epochs to train")
-    parser.add_argument("--batch_size", type=int, default=32, help="batch size to use for training")
+    parser.add_argument(
+        "--epochs", type=int, default=1, help="number of epochs to train"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=32, help="batch size to use for training"
+    )
     parser.add_argument(
         "--limit_train_batches",
         type=int,
@@ -230,7 +252,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--sharder_type",
         type=str,
-        default='fused',
+        default="fused",
         help="embedding sharder type",
     )
     return parser.parse_args(argv)
@@ -274,7 +296,9 @@ def _evaluate(
     # producing results for the TRAIN_PIPELINE_STAGES - 1 buffered batches (as opposed
     # to the last TRAIN_PIPELINE_STAGES - 1 batches from iterator).
     combined_iterator = itertools.chain(
-        iterator if limit_batches is None else itertools.islice(iterator, limit_batches),
+        iterator
+        if limit_batches is None
+        else itertools.islice(iterator, limit_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
     auroc = metrics.AUROC(compute_on_step=False).to(device)
@@ -291,7 +315,7 @@ def _evaluate(
                 accuracy(preds, labels)
             except StopIteration:
                 break
-            except RuntimeError:    # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
+            except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
                 break
     auroc_result = auroc.compute().item()
     accuracy_result = accuracy.compute().item()
@@ -365,7 +389,9 @@ def _train(
     # producing results for the TRAIN_PIPELINE_STAGES - 1 buffered batches (as opposed
     # to the last TRAIN_PIPELINE_STAGES - 1 batches from iterator).
     combined_iterator = itertools.chain(
-        iterator if limit_train_batches is None else itertools.islice(iterator, limit_train_batches),
+        iterator
+        if limit_train_batches is None
+        else itertools.islice(iterator, limit_train_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
     samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
@@ -378,7 +404,8 @@ def _train(
             prof.step()
 
             if change_lr and (
-                (it * (epoch + 1) / samples_per_trainer) > lr_change_point):    # progress made through the epoch
+                (it * (epoch + 1) / samples_per_trainer) > lr_change_point
+            ):  # progress made through the epoch
                 print(f"Changing learning rate to: {lr_after_change_point}")
                 optimizer = train_pipeline._optimizer
                 lr = lr_after_change_point
@@ -398,7 +425,7 @@ def _train(
         except StopIteration:
             print(f"{get_mem_info('Training:  ')}")
             break
-        except RuntimeError:    # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
+        except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"{get_mem_info('Training:  ')}")
             break
 
@@ -433,20 +460,34 @@ def train_val_test(
     train_iterator = iter(train_dataloader)
     test_iterator = iter(test_dataloader)
     with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
-            profile_memory=True,
-            on_trace_ready=tensorboard_trace_handler(args.profile_dir),
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
+        profile_memory=True,
+        on_trace_ready=tensorboard_trace_handler(args.profile_dir),
     ) as prof:
         for epoch in range(args.epochs):
             val_iterator = iter(val_dataloader)
-            _train(train_pipeline, train_iterator, val_iterator, val_dataloader, epoch, args.epochs, args.change_lr,
-                   args.lr_change_point, args.lr_after_change_point, args.validation_freq_within_epoch,
-                   args.limit_train_batches, args.limit_val_batches, prof)
+            _train(
+                train_pipeline,
+                train_iterator,
+                val_iterator,
+                val_dataloader,
+                epoch,
+                args.epochs,
+                args.change_lr,
+                args.lr_change_point,
+                args.lr_after_change_point,
+                args.validation_freq_within_epoch,
+                args.limit_train_batches,
+                args.limit_val_batches,
+                prof,
+            )
             train_iterator = iter(train_dataloader)
 
             if args.eval_acc:
-                val_next_iterator = (test_iterator if epoch == args.epochs - 1 else train_iterator)
+                val_next_iterator = (
+                    test_iterator if epoch == args.epochs - 1 else train_iterator
+                )
 
                 val_accuracy, val_auroc = _evaluate(
                     args.limit_val_batches,
@@ -473,6 +514,18 @@ def train_val_test(
     return train_val_test_results
 
 
+def build_constraints(feature_names, sharding_types=None, compute_kernels=None) -> dict:
+    if sharding_types is None and compute_kernels is None:
+        return {}
+    return {
+        f"t_{feature_name}": ParameterConstraints(
+            sharding_types=sharding_types,
+            compute_kernels=compute_kernels,
+        )
+        for feature_name in feature_names
+    }
+
+
 def main(argv: List[str]) -> None:
     """
     Trains, validates, and tests a Deep Learning Recommendation Model (DLRM)
@@ -492,17 +545,21 @@ def main(argv: List[str]) -> None:
     args = parse_args(argv)
 
     global TOTAL_TRAINING_SAMPLES
-    if 'criteo' in args.in_memory_binary_criteo_path:
+    if "criteo" in args.in_memory_binary_criteo_path:
         if args.kaggle:
             TOTAL_TRAINING_SAMPLES = KAGGLE_TOTAL_TRAINING_SAMPLES
-            setattr(args, 'num_embeddings_per_feature', KAGGLE_NUM_EMBEDDINGS_PER_FEATURE)
+            setattr(
+                args, "num_embeddings_per_feature", KAGGLE_NUM_EMBEDDINGS_PER_FEATURE
+            )
         else:
             TOTAL_TRAINING_SAMPLES = criteo.TOTAL_TRAINING_SAMPLES
-            setattr(args, 'num_embeddings_per_feature', TERABYTE_NUM_EMBEDDINGS_PER_FEATURE)
+            setattr(
+                args, "num_embeddings_per_feature", TERABYTE_NUM_EMBEDDINGS_PER_FEATURE
+            )
         data_module = criteo
-    elif 'avazu' in args.in_memory_binary_criteo_path:
+    elif "avazu" in args.in_memory_binary_criteo_path:
         TOTAL_TRAINING_SAMPLES = avazu.TOTAL_TRAINING_SAMPLES
-        setattr(args, 'num_embeddings_per_feature', avazu.NUM_EMBEDDINGS_PER_FEATURE)
+        setattr(args, "num_embeddings_per_feature", avazu.NUM_EMBEDDINGS_PER_FEATURE)
         data_module = avazu
     else:
         raise NotImplementedError()
@@ -523,7 +580,9 @@ def main(argv: List[str]) -> None:
         torch.cuda.set_per_process_memory_fraction(args.memory_fraction)
         print(f"set memory to {int(args.memory_fraction * 80)} GB")
     if args.num_embeddings_per_feature is not None:
-        args.num_embeddings_per_feature = list(map(int, args.num_embeddings_per_feature.split(",")))
+        args.num_embeddings_per_feature = list(
+            map(int, args.num_embeddings_per_feature.split(","))
+        )
         args.num_embeddings = None
 
     # TODO add CriteoIterDataPipe support and add random_dataloader arg
@@ -534,8 +593,10 @@ def main(argv: List[str]) -> None:
     if dist.get_rank() == 0:
         print(args)
         if getattr(train_dataloader, "__len__", None):
-            print(f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
-                  f"test batches: {len(test_dataloader)}")
+            print(
+                f"training batches: {len(train_dataloader)}, val batches: {len(val_dataloader)}, "
+                f"test batches: {len(test_dataloader)}"
+            )
     # Sets default limits for random dataloader iterations when left unspecified.
     if args.in_memory_binary_criteo_path is None:
         for stage in STAGES:
@@ -548,16 +609,22 @@ def main(argv: List[str]) -> None:
             name=f"t_{feature_name}",
             embedding_dim=args.embedding_dim,
             num_embeddings=none_throws(args.num_embeddings_per_feature)[feature_idx]
-            if args.num_embeddings is None else args.num_embeddings,
+            if args.num_embeddings is None
+            else args.num_embeddings,
             feature_names=[feature_name],
-        ) for feature_idx, feature_name in enumerate(data_module.DEFAULT_CAT_NAMES)
+        )
+        for feature_idx, feature_name in enumerate(data_module.DEFAULT_CAT_NAMES)
     ]
     sharded_module_kwargs = {}
     if args.over_arch_layer_sizes is not None:
-        sharded_module_kwargs["over_arch_layer_sizes"] = list(map(int, args.over_arch_layer_sizes.split(",")))
+        sharded_module_kwargs["over_arch_layer_sizes"] = list(
+            map(int, args.over_arch_layer_sizes.split(","))
+        )
 
     train_model = DLRMTrain(
-        embedding_bag_collection=EmbeddingBagCollection(tables=eb_configs, device=torch.device("meta")),
+        embedding_bag_collection=EmbeddingBagCollection(
+            tables=eb_configs, device=torch.device("meta")
+        ),
         dense_in_features=len(data_module.DEFAULT_INT_NAMES),
         dense_arch_layer_sizes=list(map(int, args.dense_arch_layer_sizes.split(","))),
         over_arch_layer_sizes=list(map(int, args.over_arch_layer_sizes.split(","))),
@@ -565,40 +632,33 @@ def main(argv: List[str]) -> None:
     )
     fused_params = {
         "learning_rate": args.learning_rate,
-        "optimizer": OptimType.EXACT_ROWWISE_ADAGRAD if args.adagrad else OptimType.EXACT_SGD,
+        "optimizer": OptimType.EXACT_ROWWISE_ADAGRAD
+        if args.adagrad
+        else OptimType.EXACT_SGD,
+        "cache_load_factor": 0.01,
+        # "cache_algorithm": CacheAlgorithm.LFU,
     }
-
-    if args.sharder_type == 'naive':    
-        class TestCustomEBCSharder(EmbeddingBagCollectionSharder):
-            def shard(
-                self,
-                module: EmbeddingBagCollection,
-                params,
-                env: ShardingEnv,
-                device: Optional[torch.device] = None,
-            ) -> ShardedEmbeddingBagCollection:
-                return ShardedEmbeddingBagCollection(
-                    module, params, env, self.fused_params, device
-                )
-
-            def sharding_types(self, compute_device_type: str) -> List[str]:
-                return [
-                    ShardingType.TABLE_WISE.value,
-                ]
-
-            def compute_kernels(
-                self, sharding_type: str, compute_device_type: str
-            ) -> List[str]:
-                return [EmbeddingComputeKernel.DENSE.value]
-
-        sharders = [TestCustomEBCSharder()]
-    elif args.sharder_type == 'fused':
-        sharders = [
-            EmbeddingBagCollectionSharder(fused_params=fused_params),
-        ]
+    sharding_types = None
+    compute_kernels = None
+    if args.sharder_type == "colossalai":
+        sharding_types = [ShardingType.TABLE_WISE.value]
+        compute_kernels = [EmbeddingComputeKernel.CAI_BATCH.value]
+    elif args.sharder_type == "dense":
+        compute_kernels = [EmbeddingComputeKernel.DENSE.value]
+    elif args.sharder_type == "uvm_lru":
+        compute_kernels = [EmbeddingComputeKernel.FUSED_UVM_CACHING.value]
+    elif args.sharder_type == "uvm_lfu":
+        compute_kernels = [EmbeddingComputeKernel.FUSED_UVM_CACHING.value]
+        fused_params["cache_algorithm"] = CacheAlgorithm.LFU
     else:
-        raise NotImplementedError
-
+        if dist.get_rank() == 0:
+            print("No constraints are applied")
+    constraints = build_constraints(
+        data_module.DEFAULT_CAT_NAMES, sharding_types, compute_kernels
+    )
+    sharders = [
+        EmbeddingBagCollectionSharder(fused_params=fused_params),
+    ]
 
     print(f"{get_mem_info('After model init:  ')}")
     if dist.get_rank() == 0:
@@ -610,10 +670,11 @@ def main(argv: List[str]) -> None:
     topology = Topology(
         world_size=env.world_size,
         compute_device="cuda",
-        hbm_cap=hbm_cap * 1024**3,    # GPU mem
-        ddr_cap=1000 * 1024**3,    # CPU mem
-    # intra_host_bw=1000 * 1024**3 / 1000,
-    )    # Device to Device bandwidth
+        hbm_cap=hbm_cap * 1024**3,  # GPU mem
+        ddr_cap=1000 * 1024**3,  # CPU mem
+        # batch_size=args.batch_size
+        # intra_host_bw=1000 * 1024**3 / 1000,
+    )  # Device to Device bandwidth
     # inter_host_bw=CROSS_NODE_BANDWIDTH,  # Not used yet
     #     batch_size=args.batch_size)
     # constraints = {
@@ -622,15 +683,16 @@ def main(argv: List[str]) -> None:
     #                          caching_ratio=0.01 if num_embeddings > 100 else None)
     #     for num_embeddings, feature_name in zip(args.num_embeddings_per_feature, data_module.DEFAULT_CAT_NAMES)
     # }
-    planner = EmbeddingShardingPlanner(topology=topology,
-    # constraints=constraints,
-                                      )
+    planner = EmbeddingShardingPlanner(
+        topology=topology,
+        batch_size=args.batch_size,
+        constraints=constraints,
+    )
     plan = planner.collective_plan(train_model, sharders, env.process_group)
+
     model = DistributedModelParallel(
-        module=train_model,
-        device=device,
-        sharders=sharders,
-        plan=plan)
+        module=train_model, device=device, sharders=sharders, plan=plan
+    )
 
     print(f"{get_mem_info('After model parallel:  ')}")
     if dist.get_rank() == 0:
@@ -643,7 +705,7 @@ def main(argv: List[str]) -> None:
             return lambda params: torch.optim.SGD(params, lr=args.learning_rate)
 
     dense_optimizer = KeyedOptimizerWrapper(
-        dict(model.named_parameters()),    # why dense? what about spares?
+        dict(model.named_parameters()),  # why dense? what about spares?
         optimizer_with_params(),
     )
     optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
@@ -653,7 +715,9 @@ def main(argv: List[str]) -> None:
         optimizer,
         device,
     )
-    train_val_test(args, train_pipeline, train_dataloader, val_dataloader, test_dataloader)
+    train_val_test(
+        args, train_pipeline, train_dataloader, val_dataloader, test_dataloader
+    )
 
 
 if __name__ == "__main__":
