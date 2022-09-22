@@ -7,6 +7,7 @@ export DATAPATH=/data/scratch/RecSys/criteo_kaggle_data/
 export GPUNUM=1
 export BATCHSIZE=16384
 export CACHESIZE=337625
+export CACHERATIO=0.01
 export USE_LFU=0
 export USE_TABLE_SHARD=1
 export EVAL_ACC=1
@@ -34,8 +35,8 @@ fi
 
 torchx run -s local_cwd -cfg log_dir=log/kaggle/w${GPUNUM}_p1_16k dist.ddp -j 1x${GPUNUM} --script recsys/dlrm_main.py -- \
     --dataset_dir ${DATAPATH} --pin_memory --shuffle_batches \
-    --learning_rate 1. --batch_size ${BATCHSIZE} --use_sparse_embed_grad --use_cache ${LFU_FLAG} ${TABLE_SHARD_FLAG} ${EVAL_ACC_FLAG} \
-    --profile_dir "tensorboard_log/kaggle/w${GPUNUM}_p1_${BATCHSIZE}"  --buffer_size 0 --use_overlap --cache_sets ${CACHESIZE} 2>&1 | tee logs/colo_${GPUNUM}_${BATCHSIZE}_${CACHESIZE}_lfu_${USE_LFU}_tw_${USE_TABLE_SHARD}.txt
+    --learning_rate 1. --batch_size ${BATCHSIZE} --use_sparse_embed_grad --use_cache --use_freq ${LFU_FLAG} ${TABLE_SHARD_FLAG} ${EVAL_ACC_FLAG} \
+    --profile_dir "tensorboard_log/kaggle/w${GPUNUM}_p1_${BATCHSIZE}"  --buffer_size 0 --use_overlap --cache_ratio ${CACHERATIO} 2>&1 | tee logs/colo_${GPUNUM}_${BATCHSIZE}_${CACHESIZE}_lfu_${USE_LFU}_tw_${USE_TABLE_SHARD}.txt
 # torchx run -s local_cwd -cfg log_dir=log/kaggle/w${GPUNUM}_p1_16k dist.ddp -j 1x${GPUNUM} --script recsys/dlrm_main.py -- \
 #     --dataset_dir ${DATAPATH} --pin_memory --shuffle_batches \
 #     --learning_rate 1. --batch_size ${BATCHSIZE} --use_sparse_embed_grad --use_cache --use_freq --use_lfu \
