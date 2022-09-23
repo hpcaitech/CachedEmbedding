@@ -98,7 +98,7 @@ def test(iter_num=1, batch_size=4096):
     fae = FreqAwareEmbeddingBag(
         num_embeddings=sum(num_embeddings_per_table),
         embedding_dim=EMBEDDING_DIM,
-        # sparse=True,
+        sparse=True,
         include_last_offset=True,
         cache_ratio=0.05,
         pin_weight=True,
@@ -158,7 +158,8 @@ def test(iter_num=1, batch_size=4096):
             fae_backwarding_time += time.time() - start
             print("fae backwarded. avg time = {} s".format(
                 fae_backwarding_time / (iter + 1 - WARMUP_ITERS)))
-            
+        fae.zero_grad()
+        
         # uvm 
         start = time.time()
         ret = uvm(features.values().long(), features.offsets().long())
@@ -173,4 +174,5 @@ def test(iter_num=1, batch_size=4096):
             uvm_backwarding_time += time.time() - start
             print("uvm backwarded. avg time = {} s".format(
                 uvm_backwarding_time / (iter + 1 - WARMUP_ITERS)))
+        uvm.zero_grad()
 test(TEST_ITER, TEST_BATCH_SIZE)
