@@ -95,18 +95,18 @@ class FusedSparseModules(nn.Module):
 
         if isinstance(sparse_features, list):
             batch_size = sparse_features[2]
+            self.embed.set_cache_op(cache_op)
             flattened_sparse_embeddings = self.embed(
                 sparse_features[0],
                 sparse_features[1],
-                shape_hook=lambda x: self.shape_hook(x, self.sparse_feature_num , batch_size), 
-                cache_op = cache_op)
+                shape_hook=lambda x: self.shape_hook(x, self.sparse_feature_num , batch_size),)
         elif isinstance(sparse_features, KeyedJaggedTensor):
             batch_size = sparse_features.stride()
+            self.embed.set_cache_op(cache_op)
             flattened_sparse_embeddings = self.embed(
                 sparse_features.values(),
                 sparse_features.offsets(),
-                shape_hook=lambda x: self.shape_hook(x, self.sparse_feature_num , batch_size), 
-                cache_op = cache_op)
+                shape_hook=lambda x: self.shape_hook(x, self.sparse_feature_num , batch_size),)
         else:
             raise TypeError
         return flattened_sparse_embeddings
