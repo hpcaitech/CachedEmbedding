@@ -17,6 +17,8 @@ from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag, Evictio
 from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 import numpy as np
+from typing import Union
+from torchrec import KeyedJaggedTensor
 
 dist_logger = colossalai.logging.get_dist_logger()
 
@@ -86,16 +88,27 @@ class FusedSparseModules(nn.Module):
         else:
             self.kjt_collector = None
 
-    def forward(self, sparse_features):
+    def forward(self, sparse_features : Union[List, KeyedJaggedTensor], cache_op: bool = True):
         if self.kjt_collector:
             with record_function("(zhg)KJT AllToAll collective"):
                 sparse_features = self.kjt_collector.all_to_all(sparse_features)
 
-        keys, batch_size = sparse_features.keys(), sparse_features.stride()
-        flattened_sparse_embeddings = self.embed(
-            sparse_features.values(),
-            sparse_features.offsets(),
-            shape_hook=lambda x: self.shape_hook(x, self.sparse_feature_num , batch_size))
+        if isinstance(sparse_features, list):
+            batch_size = sparse_features[2]
+            self.embed.set_cache_op(cache_op)
+            flattened_sparse_embeddings = self.embed(
+                sparse_features[0],
+                sparse_features[1],
+                shape_hook=lambda x: self.shape_hook(x, self.sparse_feature_num , batch_size),)
+        elif isinstance(sparse_features, KeyedJaggedTensor):
+            batch_size = sparse_features.stride()
+            self.embed.set_cache_op(cache_op)
+            flattened_sparse_embeddings = self.embed(
+                sparse_features.values(),
+                sparse_features.offsets(),
+                shape_hook=lambda x: self.shape_hook(x, self.sparse_feature_num , batch_size),)
+        else:
+            raise TypeError
         return flattened_sparse_embeddings
 
 
@@ -199,13 +212,14 @@ class HybridParallelDLRM(nn.Module):
                    f"Number of model buffers: {buffer_amount:,}, storage overhead: {buffer_storage/1024**3:.2f} GB."
         self.stat_str = stat_str
 
-    def forward(self, dense_features, sparse_features, inspect_time=False):
+    def forward(self, dense_features, sparse_features, inspect_time=False,
+                 cache_op = True):
         ctx1 = get_time_elapsed(dist_logger, "embedding lookup in forward pass") \
             if inspect_time else nullcontext()
         with ctx1:
             with record_function("Embedding lookup:"):
                 # B // world size, sparse feature dim, embedding dim
-                embedded_sparse = self.sparse_modules(sparse_features)
+                embedded_sparse = self.sparse_modules(sparse_features, cache_op)
 
         ctx2 = get_time_elapsed(dist_logger, "dense operations in forward pass") \
             if inspect_time else nullcontext()

@@ -150,6 +150,12 @@ def parse_args():
         help="Learning rate.",
     )
     parser.add_argument(
+        "--prefetch_num",
+        type=int,
+        default=1,
+        help="Number of batch prefetched for caching",
+    )
+    parser.add_argument(
         "--adagrad",
         dest="adagrad",
         action="store_true",
@@ -196,14 +202,15 @@ def put_data_in_device(batch, dense_device, sparse_device, is_dist=False, rank=0
         return dense_features, sparse_features, labels
 
     
-def _train(model,
+def _train(model : HybridParallelDLRM,
            optimizer,
            criterion,
            data_loader,
            epoch,
            prof=None,
            use_overlap=True,
-           use_distributed_dataloader=True):
+           use_distributed_dataloader=True,
+           prefetch_num = 1):
     model.train()
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
@@ -216,17 +223,49 @@ def _train(model,
     total = len(data_loader) if hasattr(data_loader, "__len__") else None
     meter = tqdm(itertools.count(), desc=f"Epoch {epoch}", ncols=0, total=total)
     time_elapse = 0.
-    for _ in meter:
+
+
+    dense_list = [None for i in range(prefetch_num)]
+    sparse_list = [None for i in range(prefetch_num)]
+    labels_list = [None for i in range(prefetch_num)]
+    sparse_values = [None for i in range(prefetch_num)]
+
+    print(f'prefetch_num {prefetch_num}')
+    for idx in meter:
         try:
             # We introduce a timer as a temporary solution to exclude interference
             # due to the bugs exists in NVTabular dataloader, please see my discussion:
             # https://github.com/dask/dask/discussions/9405.
-            batch = next(data_iter)
+            
             start = time.time()
-            dense, sparse, labels = put_data_in_device(batch, model.dense_device, model.sparse_device,
-                                                       use_distributed_dataloader, rank, world_size)
+
+            # trigger cache operations very prefetch num iterations.
+            # prefetch #prefetch_num batches.
+            prefetch_idx = idx % prefetch_num
+            if prefetch_idx == 0:
+                with torch.no_grad():
+                    for i in range(prefetch_num):
+                        batch = next(data_iter)
+                        dense, sparse, labels = put_data_in_device(batch, model.dense_device, model.sparse_device,
+                                                                use_distributed_dataloader, rank, world_size)
+                        dense_list[i] = dense
+                        sparse_list[i] = [sparse.values(), sparse.offsets(), sparse.stride()]
+                        sparse_values[i] = sparse.values()
+                        labels_list[i] = labels
+
+                    
+                    with record_function("prefetch cache"):
+                        cuda_sparse_ids = model.sparse_modules.embed.cache_weight_mgr.prepare_ids(torch.cat(sparse_values))
+                        cuda_sparse_list = torch.chunk(cuda_sparse_ids, prefetch_num)
+                        for i in range(prefetch_num):
+                            sparse_list[i][0] = cuda_sparse_list[i]
+            
+            dense = dense_list[prefetch_idx]
+            sparse = sparse_list[prefetch_idx]
+            labels = labels_list[prefetch_idx]
+
             with record_function("(zhg)forward pass"):
-                logits = model(dense, sparse).squeeze()
+                logits = model(dense, sparse, cache_op = False).squeeze()
 
             loss = criterion(logits, labels.float())
             # dist_logger.info(f"loss: {loss.item()}")
@@ -311,7 +350,7 @@ def train_val_test(
     ) as prof:
         for epoch in range(args.epochs):
             _train(model, optimizer, criterion, train_dataloader, epoch, prof, args.use_overlap,
-                   args.use_distributed_dataloader)
+                   args.use_distributed_dataloader, prefetch_num=args.prefetch_num)
 
             if args.eval_acc:
                 val_accuracy, val_auroc = _evaluate(model, val_dataloader, "val", args.use_overlap,
