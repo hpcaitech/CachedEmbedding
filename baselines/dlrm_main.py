@@ -20,6 +20,7 @@ from torchrec import EmbeddingBagCollection
 from torchrec.datasets import criteo
 from torchrec.datasets.utils import Batch
 from torchrec.distributed import TrainPipelineSparseDist
+from torchrec.distributed.train_pipeline import TrainPipelineSparseDistPrefetch, TrainPipelinePrefetch
 from torchrec.distributed.embeddingbag import EmbeddingBagCollectionSharder
 from torchrec.distributed.model_parallel import DistributedModelParallel
 from torchrec.distributed.types import ModuleSharder
@@ -303,7 +304,9 @@ def _evaluate(
     )
     auroc = metrics.AUROC(compute_on_step=False).to(device)
     accuracy = metrics.Accuracy(compute_on_step=False).to(device)
-
+    
+    train_pipeline._connected = False
+    
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     with torch.no_grad():
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
@@ -326,7 +329,7 @@ def _evaluate(
 
 
 def _train(
-    train_pipeline: TrainPipelineSparseDist,
+    train_pipeline: TrainPipelineSparseDistPrefetch,
     iterator: Iterator[Batch],
     next_iterator: Iterator[Batch],
     within_epoch_val_dataloader: DataLoader,
@@ -399,7 +402,7 @@ def _train(
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
         try:
-            train_pipeline.progress(combined_iterator)
+            train_pipeline.progress(combined_iterator)#, it)
 
             prof.step()
 
@@ -461,7 +464,7 @@ def train_val_test(
     test_iterator = iter(test_dataloader)
     with profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
+        schedule=schedule(wait=0, warmup=20, active=10, repeat=1),
         profile_memory=True,
         on_trace_ready=tensorboard_trace_handler(args.profile_dir),
     ) as prof:
@@ -712,11 +715,15 @@ def main(argv: List[str]) -> None:
     )
     optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
 
-    train_pipeline = TrainPipelineSparseDist(
+    train_pipeline = TrainPipelinePrefetch(
         model,
         optimizer,
         device,
+        prefetch_num=4,
+        sparse_embedding_kernel=model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
+            0]._emb_modules[0]
     )
+
     train_val_test(
         args, train_pipeline, train_dataloader, val_dataloader, test_dataloader
     )
