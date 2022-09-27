@@ -78,7 +78,15 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
                  shuffle_batches=False,
                  mmap_mode=False,
                  hashes=None,
-                 path_manager_key=PATH_MANAGER_KEY):
+                 path_manager_key=PATH_MANAGER_KEY,
+                 assigned_tables = None):
+        if assigned_tables is not None:
+            # tablewise mode
+            self.assigned_tables = np.array(assigned_tables)
+        else:
+            # full table mode
+            self.assigned_tables = np.arange(CAT_FEATURE_COUNT)
+            
         self.dense_paths = dense_paths
         self.sparse_paths = sparse_paths
         self.label_paths = label_paths
@@ -87,23 +95,30 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
         self.world_size = world_size
         self.shuffle_batches = shuffle_batches
         self.mmap_mode = mmap_mode
-        self.hashes = np.array(hashes).reshape((1, CAT_FEATURE_COUNT)) if hashes is not None else None
+        if hashes is not None:
+            self.hashes = []
+            for i, length in enumerate(hashes):
+                if i in self.assigned_tables:
+                    self.hashes.append(length)
+            self.hashes = np.array(self.hashes).reshape(1, -1)
+        else:
+            self.hashes = None
         self.path_manager_key = path_manager_key
 
-        self.sparse_offsets = np.array([0, *np.cumsum(hashes)[:-1]], dtype=np.int64).reshape(
-            1, -1) if hashes is not None else None
+        self.sparse_offsets = np.array([0, *np.cumsum(self.hashes)[:-1]], dtype=np.int64).reshape(
+            1, -1) if self.hashes is not None else None
 
         self._load_data()
         self.num_rows_per_file = [a.shape[0] for a in self.dense_arrs]
         self.num_batches: int = sum(self.num_rows_per_file) // batch_size
 
-        self._num_ids_in_batch: int = CAT_FEATURE_COUNT * batch_size
-        self.keys = DEFAULT_CAT_NAMES
+        self._num_ids_in_batch: int = len(self.assigned_tables) * batch_size
+        self.keys = [DEFAULT_CAT_NAMES[i] for i in self.assigned_tables]
         self.lengths = torch.ones((self._num_ids_in_batch,), dtype=torch.int32)
         self.offsets = torch.arange(0, self._num_ids_in_batch + 1, dtype=torch.int32)
         self.stride = batch_size
-        self.length_per_key = CAT_FEATURE_COUNT * [batch_size]
-        self.offset_per_key = [batch_size * i for i in range(CAT_FEATURE_COUNT + 1)]
+        self.length_per_key = len(self.assigned_tables) * [batch_size]
+        self.offset_per_key = [batch_size * i for i in range(len(self.assigned_tables) + 1)]
         self.index_per_key = {key: i for (i, key) in enumerate(self.keys)}
 
     def _load_data(self):
@@ -124,10 +139,15 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
                                                      range_right - range_left + 1,
                                                      path_manager_key=self.path_manager_key,
                                                      mmap_mode=self.mmap_mode).astype(_dtype))
+        expand_hashes = np.ones(CAT_FEATURE_COUNT, dtype=np.int64).reshape(1, -1)
+        expand_sparse_offsets = np.ones(CAT_FEATURE_COUNT, dtype=np.int64).reshape(1, -1)
+        for i, table in enumerate(self.assigned_tables):
+            expand_hashes[0, table] = self.hashes[0, i]
+            expand_sparse_offsets[0, table] = self.sparse_offsets[0, i]
         if not self.mmap_mode and self.hashes is not None:
             for sparse_arr in self.sparse_arrs:
-                sparse_arr %= self.hashes
-                sparse_arr += self.sparse_offsets
+                sparse_arr %= expand_hashes
+                sparse_arr += expand_sparse_offsets
 
     def __iter__(self):
         buffer = None
@@ -160,7 +180,7 @@ class InMemoryAvazuIterDataPipe(IterableDataset):
                 slice_ = slice(row_idx, row_idx + rows_to_get)
 
                 dense_inputs = self.dense_arrs[file_idx][slice_, :]
-                sparse_inputs = self.sparse_arrs[file_idx][slice_, :]
+                sparse_inputs = self.sparse_arrs[file_idx][slice_, :].take(self.assigned_tables, -1)
                 target_labels = self.labels_arrs[file_idx][slice_, :]
 
                 if self.mmap_mode and self.hashes is not None:
@@ -231,7 +251,8 @@ def get_dataloader(args, stage, rank, world_size,  assigned_tables = None):
                                   rank=rank,
                                   world_size=world_size,
                                   shuffle_batches=args.shuffle_batches,
-                                  hashes=args.num_embeddings_per_feature),
+                                  hashes=args.num_embeddings_per_feature,
+                                  assigned_tables=assigned_tables),
         batch_size=None,
         pin_memory=args.pin_memory,
         collate_fn=lambda x: x,
