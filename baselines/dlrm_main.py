@@ -347,6 +347,7 @@ def _train(
     validation_freq_within_epoch: Optional[int],
     limit_train_batches: Optional[int],
     limit_val_batches: Optional[int],
+    batch_size: int,
     prof=None,
 ) -> None:
     """
@@ -406,7 +407,7 @@ def _train(
     samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
-    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
+    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer / batch_size):
         try:
             train_pipeline.progress(combined_iterator)#, it)
 
@@ -431,6 +432,7 @@ def _train(
                     "val",
                 )
                 train_pipeline._model.train()
+        
         except StopIteration:
             print(f"{get_mem_info('Training:  ')}")
             break
@@ -489,6 +491,7 @@ def train_val_test(
                 args.validation_freq_within_epoch,
                 args.limit_train_batches,
                 args.limit_val_batches,
+                args.batch_size,
                 prof,
             )
             train_iterator = iter(train_dataloader)
@@ -733,6 +736,9 @@ def main(argv: List[str]) -> None:
     train_val_test(
         args, train_pipeline, train_dataloader, val_dataloader, test_dataloader
     )
+
+    model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
+            0]._emb_modules[0]._emb_module.cache_weight_mgr.print_comm_stats()
 
 
 if __name__ == "__main__":

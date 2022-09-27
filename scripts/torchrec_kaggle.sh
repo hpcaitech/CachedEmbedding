@@ -20,8 +20,15 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
 }
 
 export GPUNUM=1
-export PREFETCH_NUM=4
+export PREFETCH_NUM=16
 
+export EVAL_ACC=0
+
+if [[ ${EVAL_ACC} == 1 ]];  then
+EVAL_ACC_FLAG="--eval_acc"
+else
+export EVAL_ACC_FLAG=""
+fi
 
 # local batch size
 # 4
@@ -57,9 +64,9 @@ mkdir -p logs
 
 for GPUNUM in 1
 do
-for BATCHSIZE in 4096 #16384 8192 4096 2048 1024 512     
+for BATCHSIZE in 8192 512 ##16384 8192 4096 2048 1024 512     
 do
-for SHARDTYPE in  "colossalai" #"uvm" "colossalai"
+for SHARDTYPE in  "colossalai" #"uvm_lfu" #"colossalai"
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
@@ -69,7 +76,7 @@ rm -rf ./tensorboard_log/torchrec_kaggle/
 timeout -s SIGKILL 30m torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/${PLAN} dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
     --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim 128 --pin_memory \
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
-    --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "tensorboard_log/torchrec_kaggle/${PLAN}" --sharder_type ${SHARDTYPE} --prefetch_num ${PREFETCH_NUM} --eval_acc 2>&1 | tee logs/torchrec_${PLAN}.txt
+    --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "tensorboard_log/torchrec_kaggle/${PLAN}" --sharder_type ${SHARDTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee logs/torchrec_${PLAN}.txt
 done
 done
 done
