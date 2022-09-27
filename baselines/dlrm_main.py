@@ -256,6 +256,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         default="fused",
         help="embedding sharder type",
     )
+    parser.add_argument(
+        "--prefetch_num",
+        type=int,
+        default=1,
+        help="Number of batch prefetched for caching",
+    )
     return parser.parse_args(argv)
 
 
@@ -690,7 +696,7 @@ def main(argv: List[str]) -> None:
     # }
     planner = EmbeddingShardingPlanner(
         topology=topology,
-        batch_size=args.batch_size,
+        batch_size=args.batch_size * args.prefetch_num,
         constraints=constraints,
     )
     plan = planner.collective_plan(train_model, sharders, env.process_group)
@@ -719,7 +725,7 @@ def main(argv: List[str]) -> None:
         model,
         optimizer,
         device,
-        prefetch_num=4,
+        prefetch_num=args.prefetch_num,
         sparse_embedding_kernel=model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
             0]._emb_modules[0]
     )

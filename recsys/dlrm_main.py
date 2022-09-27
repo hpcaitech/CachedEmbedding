@@ -118,6 +118,7 @@ def parse_args():
         help="Size of each embedding.",
     )
     parser.add_argument("--use_cpu", action='store_true')
+    parser.add_argument("--use_cache_mgr_async_copy", action='store_true')
     parser.add_argument("--use_sparse_embed_grad", action='store_true')
     parser.add_argument("--use_cache", action='store_true')
     parser.add_argument("--cache_ratio",
@@ -349,6 +350,8 @@ def train_val_test(
             on_trace_ready=tensorboard_trace_handler(args.profile_dir),
     ) as prof:
         for epoch in range(args.epochs):
+
+            model.sparse_modules.embed.set_cache_mgr_async_copy(args.use_cache_mgr_async_copy)
             _train(model, optimizer, criterion, train_dataloader, epoch, prof, args.use_overlap,
                    args.use_distributed_dataloader, prefetch_num=args.prefetch_num)
 
