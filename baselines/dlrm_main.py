@@ -734,6 +734,9 @@ def main(argv: List[str]) -> None:
         args, train_pipeline, train_dataloader, val_dataloader, test_dataloader
     )
 
+    model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
+            0]._emb_modules[0]._emb_module.cache_weight_mgr.print_comm_stats()
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
