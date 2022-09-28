@@ -48,7 +48,10 @@ from torchrec.distributed.embeddingbag import (
     EmbeddingBagCollectionSharder,
     ShardedEmbeddingBagCollection,
 )
-
+try:
+    from torchrec.distributed.colossalai_embedding_kernel import CAIBatchedDenseEmbeddingBag
+except:
+    print('install CAI version torchrec from https://github.com/hpcaitech/torchrec')
 # OSS import
 try:
     # pyre-ignore[21]
@@ -724,22 +727,31 @@ def main(argv: List[str]) -> None:
     )
     optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
 
-    train_pipeline = TrainPipelinePrefetch(
-        model,
-        optimizer,
-        device,
-        prefetch_num=args.prefetch_num,
-        sparse_embedding_kernel=model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
-            0]._emb_modules[0]
-    )
+    if args.prefetch_num > 1:
+        train_pipeline = TrainPipelinePrefetch(
+            model,
+            optimizer,
+            device,
+            prefetch_num=args.prefetch_num,
+            sparse_embedding_kernel=model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
+                0]._emb_modules[0]
+        )
+    else:
+        train_pipeline = TrainPipelineSparseDist(
+            model,
+            optimizer,
+            device,
+        )
 
     train_val_test(
         args, train_pipeline, train_dataloader, val_dataloader, test_dataloader
     )
 
-    model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
-            0]._emb_modules[0]._emb_module.cache_weight_mgr.print_comm_stats()
-
+    kernel = model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
+            0]._emb_modules[0]
+    
+    if isinstance(kernel, CAIBatchedDenseEmbeddingBag):
+        kernel._emb_module.cache_weight_mgr.print_comm_stats()
 
 if __name__ == "__main__":
     main(sys.argv[1:])
