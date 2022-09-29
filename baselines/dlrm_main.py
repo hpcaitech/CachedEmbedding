@@ -413,9 +413,7 @@ def _train(
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer / batch_size):
         try:
             train_pipeline.progress(combined_iterator)#, it)
-
             prof.step()
-
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point
             ):  # progress made through the epoch
@@ -425,7 +423,6 @@ def _train(
                 for g in optimizer.param_groups:
                     g["lr"] = lr
                 change_lr = False
-
             if validation_freq_within_epoch and it % validation_freq_within_epoch == 0:
                 _evaluate(
                     limit_val_batches,
@@ -728,7 +725,7 @@ def main(argv: List[str]) -> None:
     optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
 
     if args.prefetch_num > 1:
-        train_pipeline = TrainPipelinePrefetch(
+        train_pipeline = TrainPipelineSparseDistPrefetch(
             model,
             optimizer,
             device,
