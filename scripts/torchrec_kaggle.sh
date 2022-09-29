@@ -25,8 +25,8 @@ export DATAPATH=/data/scratch/RecSys/criteo_kaggle_data/
 export GPUNUM=1
 export PREFETCH_NUM=16
 export EVAL_ACC=0
-# export SHARDTYPE="colossalai"
-export SHARDTYPE="uvm_lfu"
+export SHARDTYPE="colossalai"
+# export SHARDTYPE="uvm_lfu"
 export EMB_DIM=128
 
 if [[ ${EVAL_ACC} == 1 ]];  then
@@ -49,11 +49,11 @@ mkdir -p logs
 
 for PREFETCH_NUM in 1 #8 16 32
 do
-for GPUNUM in 1
+for GPUNUM in 2
 do
-for BATCHSIZE in 16384 8192  #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
+for BATCHSIZE in 512  #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
 do
-for SHARDTYPE in  "uvm_lfu" #"uvm_lfu" #"colossalai"
+for SHARDTYPE in  "colossalai" #"uvm_lfu" #"colossalai"
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
