@@ -63,7 +63,7 @@ try:
         TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,
         KAGGLE_TOTAL_TRAINING_SAMPLES,
     )
-    from data import avazu
+    from data import avazu, synth
 
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
@@ -418,8 +418,9 @@ def _train(
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer / batch_size):
         try:
-            train_pipeline.progress(combined_iterator)#, it)
-            prof.step()
+            train_pipeline.progress(combined_iterator)
+            if prof:
+                prof.step()
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point
             ):  # progress made through the epoch
@@ -476,58 +477,57 @@ def train_val_test(
 
     train_iterator = iter(train_dataloader)
     test_iterator = iter(test_dataloader)
-    with profile(
-        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        schedule=schedule(wait=0, warmup=20, active=10, repeat=1),
-        profile_memory=True,
-        on_trace_ready=tensorboard_trace_handler(args.profile_dir),
-    ) as prof:
-        for epoch in range(args.epochs):
-            val_iterator = iter(val_dataloader)
-            _train(
-                train_pipeline,
-                train_iterator,
-                val_iterator,
-                val_dataloader,
-                epoch,
-                args.epochs,
-                args.change_lr,
-                args.lr_change_point,
-                args.lr_after_change_point,
-                args.validation_freq_within_epoch,
-                args.limit_train_batches,
-                args.limit_val_batches,
-                args.batch_size,
-                prof,
-            )
-            train_iterator = iter(train_dataloader)
-
-            if args.eval_acc:
-                val_next_iterator = (
-                    test_iterator if epoch == args.epochs - 1 else train_iterator
-                )
-
-                val_accuracy, val_auroc = _evaluate(
-                    args.limit_val_batches,
-                    train_pipeline,
-                    val_iterator,
-                    val_next_iterator,
-                    "val",
-                )
-
-                train_val_test_results.val_accuracies.append(val_accuracy)
-                train_val_test_results.val_aurocs.append(val_auroc)
-
+    if args.profile_dir == "":
+        prof = None
+    else:
+        prof =  profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
+            profile_memory=True,
+            on_trace_ready=tensorboard_trace_handler(args.profile_dir),
+        )
+    for epoch in range(args.epochs):
+        val_iterator = iter(val_dataloader)
+        _train(
+            train_pipeline,
+            train_iterator,
+            val_iterator,
+            val_dataloader,
+            epoch,
+            args.epochs,
+            args.change_lr,
+            args.lr_change_point,
+            args.lr_after_change_point,
+            args.validation_freq_within_epoch,
+            args.limit_train_batches,
+            args.limit_val_batches,
+            args.batch_size,
+            prof,
+        )
+        train_iterator = iter(train_dataloader)
         if args.eval_acc:
-            test_accuracy, test_auroc = _evaluate(
-                args.limit_test_batches,
-                train_pipeline,
-                test_iterator,
-                iter(test_dataloader),
-                "test",
+            val_next_iterator = (
+                test_iterator if epoch == args.epochs - 1 else train_iterator
             )
-            train_val_test_results.test_accuracy = test_accuracy
-            train_val_test_results.test_auroc = test_auroc
+            val_accuracy, val_auroc = _evaluate(
+                args.limit_val_batches,
+                train_pipeline,
+                val_iterator,
+                val_next_iterator,
+                "val",
+            )
+            train_val_test_results.val_accuracies.append(val_accuracy)
+            train_val_test_results.val_aurocs.append(val_auroc)
+    if args.eval_acc:
+        test_accuracy, test_auroc = _evaluate(
+            args.limit_test_batches,
+            train_pipeline,
+            test_iterator,
+            iter(test_dataloader),
+            "test",
+        )
+        train_val_test_results.test_accuracy = test_accuracy
+        train_val_test_results.test_auroc = test_auroc
 
     return train_val_test_results
 
@@ -579,6 +579,10 @@ def main(argv: List[str]) -> None:
         TOTAL_TRAINING_SAMPLES = avazu.TOTAL_TRAINING_SAMPLES
         setattr(args, "num_embeddings_per_feature", avazu.NUM_EMBEDDINGS_PER_FEATURE)
         data_module = avazu
+    elif "embedding_bag" in args.in_memory_binary_criteo_path:
+        TOTAL_TRAINING_SAMPLES = 65536 * 16
+        setattr(args, "num_embeddings_per_feature", synth.NUM_EMBEDDINGS_PER_FEATURE)
+        data_module = synth
     else:
         raise NotImplementedError()
 
