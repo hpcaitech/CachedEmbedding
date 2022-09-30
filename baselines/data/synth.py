@@ -108,15 +108,17 @@ class SynthIterDataPipe(IterableDataset):
         return self.num_batches
     
     def _load_single_file(self, file_path):
-        
-        file_idx_to_row_range = BinaryCriteoUtils.get_file_idx_to_row_range(
-            lengths=[BATCH_SIZE],
-            rank=self.rank,
-            world_size=self.world_size
-        )
-        for _,(range_left, range_right) in file_idx_to_row_range.items():
-            rank_range_left = range_left
-            rank_range_right = range_right
+        # TODO: shard loading
+        # file_idx_to_row_range = BinaryCriteoUtils.get_file_idx_to_row_range(
+        #     lengths=[BATCH_SIZE],
+        #     rank=self.rank,
+        #     world_size=self.world_size
+        # )
+        # for _,(range_left, range_right) in file_idx_to_row_range.items():
+        #     rank_range_left = range_left
+        #     rank_range_right = range_right
+        rank_range_left = 0
+        rank_range_right = 65535
         indices, offsets, lengths = torch.load(file_path)
         indices = indices.int()
         offsets = offsets.int()
