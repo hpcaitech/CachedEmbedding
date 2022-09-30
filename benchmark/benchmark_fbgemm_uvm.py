@@ -10,13 +10,28 @@ import time
 
 BATCH_SIZE = 65536
 TABLLE_NUM = 856
-FILE_LIST = ["/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_1.pt"]
+FILE_LIST = ["/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_0.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_1.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_2.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_3.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_4.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_5.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_6.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_7.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_8.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_9.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_10.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_11.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_12.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_13.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_14.pt",
+             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_15.pt",]
 KEYS = []
 for i in range(TABLLE_NUM):
     KEYS.append("table_{}".format(i))
 EMBEDDING_DIM = 128
 # Full dataset is too big
-CHOSEN_TABLES = [0, 1, 2, 3, 4, 5]
+CHOSEN_TABLES = [0, 2, 3, 4, 5, 7, 8, 9, 10, 12, 15, 18, 22, 27, 28]
 
 TEST_ITER = 100
 TEST_BATCH_SIZE = 16384
@@ -175,4 +190,9 @@ def test(iter_num=1, batch_size=4096):
             print("uvm backwarded. avg time = {} s".format(
                 uvm_backwarding_time / (iter + 1 - WARMUP_ITERS)))
         uvm.zero_grad()
-test(TEST_ITER, TEST_BATCH_SIZE)
+
+
+# test(TEST_ITER, TEST_BATCH_SIZE)
+for i in range(16):
+    indices_per_table, offsets_per_table, lengths_per_table, num_embeddings_per_table = load_file(FILE_LIST[i])
+    print(num_embeddings_per_table)
