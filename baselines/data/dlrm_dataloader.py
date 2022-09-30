@@ -28,6 +28,7 @@ from torchrec.datasets.utils import Batch
 from petastorm import make_batch_reader
 from pyarrow.parquet import ParquetDataset
 from .avazu import AvazuIterDataPipe
+from .synth import get_synth_data_loader
 
 STAGES = ["train", "val", "test"]
 KAGGLE_NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,27,14992,' \
@@ -310,3 +311,6 @@ def get_dataloader(args: argparse.Namespace, backend: str, stage: str) -> DataLo
             return _get_petastorm_dataloader(args, stage)
     elif "avazu" in args.in_memory_binary_criteo_path:
         return get_avazu_data_loader(args, stage)
+    elif "embedding_bag" in args.in_memory_binary_criteo_path:
+        # dlrm dataset: https://github.com/facebookresearch/dlrm_datasets
+        return get_synth_data_loader(args, stage)
