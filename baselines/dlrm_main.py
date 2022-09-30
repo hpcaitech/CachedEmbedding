@@ -411,35 +411,35 @@ def _train(
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer / batch_size):
-        # try:
-        train_pipeline.progress(combined_iterator)
-        if prof:
-            prof.step()
-        if change_lr and (
-            (it * (epoch + 1) / samples_per_trainer) > lr_change_point
-        ):  # progress made through the epoch
-            print(f"Changing learning rate to: {lr_after_change_point}")
-            optimizer = train_pipeline._optimizer
-            lr = lr_after_change_point
-            for g in optimizer.param_groups:
-                g["lr"] = lr
-            change_lr = False
-        if validation_freq_within_epoch and it % validation_freq_within_epoch == 0:
-            _evaluate(
-                limit_val_batches,
-                train_pipeline,
-                iter(within_epoch_val_dataloader),
-                iterator,
-                "val",
-            )
-            train_pipeline._model.train()
+        try:
+            train_pipeline.progress(combined_iterator)
+            if prof:
+                prof.step()
+            if change_lr and (
+                (it * (epoch + 1) / samples_per_trainer) > lr_change_point
+            ):  # progress made through the epoch
+                print(f"Changing learning rate to: {lr_after_change_point}")
+                optimizer = train_pipeline._optimizer
+                lr = lr_after_change_point
+                for g in optimizer.param_groups:
+                    g["lr"] = lr
+                change_lr = False
+            if validation_freq_within_epoch and it % validation_freq_within_epoch == 0:
+                _evaluate(
+                    limit_val_batches,
+                    train_pipeline,
+                    iter(within_epoch_val_dataloader),
+                    iterator,
+                    "val",
+                )
+                train_pipeline._model.train()
         
-        # except StopIteration:
-        #     print(f"{get_mem_info('Training:  ')}")
-        #     break
-        # except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
-        #     print(f"{get_mem_info('Training:  ')}")
-        #     break
+        except StopIteration:
+            print(f"{get_mem_info('Training:  ')}")
+            break
+        except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
+            print(f"{get_mem_info('Training:  ')}")
+            break
 
 
 def train_val_test(
