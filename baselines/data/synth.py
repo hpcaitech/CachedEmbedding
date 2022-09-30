@@ -51,6 +51,8 @@ class SynthIterDataPipe(IterableDataset):
         self.offsets_per_table_per_file = []
         self.lengths_per_table_per_file = []
         self.num_rows_per_file = []
+        
+        self._buffer = None
         for file in self.sparse_paths[0]:
             print("load file: ", file)
             indices_per_table, offsets_per_table, lengths_per_table = self._load_single_file(file)
@@ -63,30 +65,28 @@ class SynthIterDataPipe(IterableDataset):
         self.stride = batch_size
         
     def __iter__(self) -> Iterator[Batch]:
-        buffer = None
-        # buffer structure:
+        # self._buffer structure:
         '''
-        buffer[0]: List of sparse_indices per table
-        buffer[1]: List of sparse_lengths per table
+        self._buffer[0]: List of sparse_indices per table
+        self._buffer[1]: List of sparse_lengths per table
         '''
         def append_to_buffer(sparse_indices: List[torch.Tensor], sparse_lengths: List[torch.Tensor]):
-            nonlocal buffer
-            if buffer is None:
-                buffer = [sparse_indices, sparse_lengths]
+            if self._buffer is None:
+                self._buffer = [sparse_indices, sparse_lengths]
             else:
                 for tb_idx, (sparse_indices_table, sparse_lengths_table) in enumerate(zip(sparse_indices, sparse_lengths)):
-                    buffer[0][tb_idx] = torch.cat((buffer[0][tb_idx], sparse_indices_table))
-                    buffer[1][tb_idx] = torch.cat((buffer[1][tb_idx], sparse_lengths_table))
+                    self._buffer[0][tb_idx] = torch.cat((self._buffer[0][tb_idx], sparse_indices_table))
+                    self._buffer[1][tb_idx] = torch.cat((self._buffer[1][tb_idx], sparse_lengths_table))
                     
         file_idx = 0
         row_idx = 0
         batch_idx = 0
         while batch_idx < self.num_batches:
-            buffer_row_count = 0 if buffer is None else buffer[1][0].shape[0]
+            buffer_row_count = 0 if self._buffer is None else self._buffer[1][0].shape[0]
             if buffer_row_count == self.batch_size:
-                yield self._make_batch(*buffer)
+                yield self._make_batch(*self._buffer)
                 batch_idx += 1
-                buffer = None
+                self._buffer = None
             else:
                 rows_to_get = min(
                     self.batch_size - buffer_row_count,
