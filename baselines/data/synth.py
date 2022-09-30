@@ -69,7 +69,7 @@ class SynthIterDataPipe(IterableDataset):
         buffer[0]: List of sparse_indices per table
         buffer[1]: List of sparse_lengths per table
         '''
-        def append_to_bufffer(sparse_indices: List[torch.Tensor], sparse_lengths: List[torch.Tensor]):
+        def append_to_buffer(sparse_indices: List[torch.Tensor], sparse_lengths: List[torch.Tensor]):
             nonlocal buffer
             if buffer is None:
                 buffer = [sparse_indices, sparse_lengths]
@@ -98,7 +98,7 @@ class SynthIterDataPipe(IterableDataset):
                                                                          self.lengths_per_table_per_file[file_idx],
                                                                          slice_
                                                                          )
-                append_to_bufffer(sparse_indices, sparse_lengths)
+                append_to_buffer(sparse_indices, sparse_lengths)
                 row_idx += rows_to_get
                 if row_idx >= BATCH_SIZE:
                     file_idx += 1
