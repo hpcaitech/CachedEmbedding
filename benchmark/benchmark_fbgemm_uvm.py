@@ -10,22 +10,7 @@ import time
 
 BATCH_SIZE = 65536
 TABLLE_NUM = 856
-FILE_LIST = ["/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_0.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_1.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_2.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_3.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_4.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_5.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_6.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_7.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_8.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_9.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_10.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_11.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_12.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_13.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_14.pt",
-             "/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_15.pt",]
+FILE_LIST = [f"/data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_{i}.pt" for i in range(16)]
 KEYS = []
 for i in range(TABLLE_NUM):
     KEYS.append("table_{}".format(i))
