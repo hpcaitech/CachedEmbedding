@@ -25,7 +25,8 @@ export DATAPATH=/data/scratch/RecSys/criteo_kaggle_data/
 export GPUNUM=1
 export PREFETCH_NUM=16
 export EVAL_ACC=0
-export SHARDTYPE="colossalai"
+export KERNELTYPE="colossalai"
+export SHARDTYPE="table"
 # export SHARDTYPE="uvm_lfu"
 export EMB_DIM=128
 
@@ -45,15 +46,19 @@ fi
 # export BATCHSIZE=8192
 # 1
 
-mkdir -p logs
 
-for PREFETCH_NUM in 1 #8 16 32
+for EMB_DIM in 32 #64 96
+do
+for PREFETCH_NUM in 2 #1 8 16 32
 do
 for GPUNUM in 2
 do
-for BATCHSIZE in 512  #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
+for BATCHSIZE in 1024 #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
 do
-for SHARDTYPE in  "colossalai" #"uvm_lfu" #"colossalai"
+for KERNELTYPE in   "uvm_lfu" #"colossalai" #"uvm_lfu" #"colossalai"
+do
+for SHARDTYPE in "table" "column" "row" "tablecolumn" "tablerow" 
+# for SHARDTYPE in "tablerow" 
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
@@ -61,10 +66,15 @@ export PLAN=g${GPUNUM}_bs_${BATCHSIZE}_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_
 rm -rf ./tensorboard_log/torchrec_kaggle/
 # env CUDA_LAUNCH_BLOCKING=1 
 # timeout -s SIGKILL 30m 
+LOG_DIR=./logs/${KERNELTYPE}_${SHARDTYPE}_logs
+mkdir -p ${LOG_DIR}
+
 torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/${PLAN} dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
     --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim ${EMB_DIM} --pin_memory \
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,${EMB_DIM}" --shuffle_batches \
-    --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "tensorboard_log/torchrec_kaggle/${PLAN}" --sharder_type ${SHARDTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee logs/torchrec_${PLAN}.txt
+    --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "tensorboard_log/torchrec_kaggle/${PLAN}" --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee ./${LOG_DIR}/torchrec_${PLAN}.txt
+done
+done
 done
 done
 done
