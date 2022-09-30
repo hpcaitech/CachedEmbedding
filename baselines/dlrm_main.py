@@ -254,10 +254,16 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Flag to determine if adagrad optimizer should be used.",
     )
     parser.add_argument(
-        "--sharder_type",
+        "--kernel_type",
         type=str,
         default="fused",
         help="embedding sharder type",
+    )
+    parser.add_argument(
+        "--shard_type",
+        type=str,
+        default="tw",
+        help="embedding tensor parallel type",
     )
     parser.add_argument(
         "--prefetch_num",
@@ -413,9 +419,7 @@ def _train(
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer / batch_size):
         try:
             train_pipeline.progress(combined_iterator)#, it)
-
             prof.step()
-
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point
             ):  # progress made through the epoch
@@ -425,7 +429,6 @@ def _train(
                 for g in optimizer.param_groups:
                     g["lr"] = lr
                 change_lr = False
-
             if validation_freq_within_epoch and it % validation_freq_within_epoch == 0:
                 _evaluate(
                     limit_val_batches,
@@ -655,21 +658,46 @@ def main(argv: List[str]) -> None:
     }
     sharding_types = None
     compute_kernels = None
-    if args.sharder_type == "colossalai":
+
+    if args.shard_type == "table":
         sharding_types = [ShardingType.TABLE_WISE.value]
+    elif args.shard_type == "tablecolumn":
+        sharding_types = [ShardingType.TABLE_COLUMN_WISE.value]
+    elif args.shard_type == "column":
+        sharding_types = [ShardingType.COLUMN_WISE.value]
+    elif args.shard_type == "row":
+        sharding_types = [ShardingType.ROW_WISE.value]
+    elif args.shard_type == "tablerow":
+        sharding_types = [ShardingType.TABLE_ROW_WISE.value]
+    else:
+        sharding_types = [ShardingType.TABLE_WISE.value, ShardingType.TABLE_COLUMN_WISE.value, ShardingType.COLUMN_WISE.value, ShardingType.ROW_WISE.value ]
+
+    print(f'sharding_types {sharding_types}')
+    
+    if args.kernel_type == "colossalai":
+        # ShardingType.DATA_PARALLEL.value,
+        # ShardingType.TABLE_WISE.value,
+        # ShardingType.COLUMN_WISE.value,
+        # ShardingType.TABLE_COLUMN_WISE.value,
+        # sharding_types = [ShardingType.TABLE_WISE.value]
         compute_kernels = [EmbeddingComputeKernel.CAI_BATCH.value]
-    elif args.sharder_type == "dense":
+    elif args.kernel_type == "dense":
         compute_kernels = [EmbeddingComputeKernel.DENSE.value]
-    elif args.sharder_type == "uvm":
+    elif args.kernel_type == "uvm":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM.value]
-    elif args.sharder_type == "uvm_lru":
+    elif args.kernel_type == "uvm_lru":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM_CACHING.value]
-    elif args.sharder_type == "uvm_lfu":
+    elif args.kernel_type == "uvm_lfu":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM_CACHING.value]
         fused_params["cache_algorithm"] = CacheAlgorithm.LFU
     else:
         if dist.get_rank() == 0:
             print("No constraints are applied")
+    
+    if  args.kernel_type != "colossalai":
+        print(f"{args.kernel_type} must be used with prefetch as 1")
+        args.prefetch_num = 1
+        
     constraints = build_constraints(
         data_module.DEFAULT_CAT_NAMES, sharding_types, compute_kernels
     )
@@ -688,7 +716,7 @@ def main(argv: List[str]) -> None:
         world_size=env.world_size,
         compute_device="cuda",
         hbm_cap=hbm_cap * 1024**3,  # GPU mem
-        ddr_cap=1000 * 1024**3,  # CPU mem
+        ddr_cap=512 * 1024**3,  # CPU mem
         # batch_size=args.batch_size
         # intra_host_bw=1000 * 1024**3 / 1000,
     )  # Device to Device bandwidth
@@ -702,8 +730,9 @@ def main(argv: List[str]) -> None:
     # }
     planner = EmbeddingShardingPlanner(
         topology=topology,
-        batch_size=args.batch_size * args.prefetch_num,
+        batch_size=args.batch_size,
         constraints=constraints,
+        debug=True,
     )
     plan = planner.collective_plan(train_model, sharders, env.process_group)
 
@@ -714,6 +743,7 @@ def main(argv: List[str]) -> None:
     print(f"{get_mem_info('After model parallel:  ')}")
     if dist.get_rank() == 0:
         print(f"Plan: {model.plan}")
+
 
     def optimizer_with_params():
         if args.adagrad:
@@ -728,7 +758,7 @@ def main(argv: List[str]) -> None:
     optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
 
     if args.prefetch_num > 1:
-        train_pipeline = TrainPipelinePrefetch(
+        train_pipeline = TrainPipelineSparseDistPrefetch(
             model,
             optimizer,
             device,
