@@ -1,0 +1,17 @@
+torchx 2022-09-30 15:55:18 INFO     Log directory is: log/torchrec_synth/g2_bs_1024_colossalai_pf_1_eb_128
+torchx 2022-09-30 15:55:18 INFO     Waiting for the app to finish...
+dlrm_main/0 bash: /opt/lcsoftware/spack/opt/spack/linux-ubuntu20.04-zen2/gcc-9.3.0/miniconda3-4.10.3-u6p3tgreee7aigtnvuhr44yqo7vcg6r6/lib/libtinfo.so.6: no version information available (required by bash)
+dlrm_main/0 WARNING:__main__:
+dlrm_main/0 *****************************************
+dlrm_main/0 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+dlrm_main/0 *****************************************
+dlrm_main/0 [1]:Colossalai should be built with cuda extension to use the FP16 optimizer
+dlrm_main/0 [1]:If you want to activate cuda mode for MoE, please install with cuda_ext!
+dlrm_main/0 [0]:Colossalai should be built with cuda extension to use the FP16 optimizer
+dlrm_main/0 [0]:If you want to activate cuda mode for MoE, please install with cuda_ext!
+dlrm_main/0 [1]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_10.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_10.pt
+dlrm_main/0 [0]:colossalai - torch.distributed.distributed_c10d - INFO: Added key: store_based_barrier_key:1 to store for rank: 0
+dlrm_main/0 [0]:colossalai - torch.distributed.distributed_c10d - INFO: Rank 0: Completed store-based barrier for key:store_based_barrier_key:1 with 2 nodes.
+dlrm_main/0 [1]:colossalai - torch.distributed.distributed_c10d - INFO: Added key: store_based_barrier_key:1 to store for rank: 1
+dlrm_main/0 [1]:colossalai - torch.distributed.distributed_c10d - INFO: Rank 1: Completed store-based barrier for key:store_based_barrier_key:1 with 2 nodes.

@@ -1,0 +1,624 @@
+torchx 2022-09-30 15:47:07 INFO     Log directory is: log/torchrec_synth/g1_bs_1024_colossalai_pf_1_eb_128
+torchx 2022-09-30 15:47:07 INFO     Waiting for the app to finish...
+dlrm_main/0 bash: /opt/lcsoftware/spack/opt/spack/linux-ubuntu20.04-zen2/gcc-9.3.0/miniconda3-4.10.3-u6p3tgreee7aigtnvuhr44yqo7vcg6r6/lib/libtinfo.so.6: no version information available (required by bash)
+dlrm_main/0 [0]:Colossalai should be built with cuda extension to use the FP16 optimizer
+dlrm_main/0 [0]:If you want to activate cuda mode for MoE, please install with cuda_ext!
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_10.pt
+dlrm_main/0 [0]:colossalai - torch.distributed.distributed_c10d - INFO: Added key: store_based_barrier_key:1 to store for rank: 0
+dlrm_main/0 [0]:colossalai - torch.distributed.distributed_c10d - INFO: Rank 0: Completed store-based barrier for key:store_based_barrier_key:1 with 1 nodes.
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_7.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_15.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_4.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_8.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_9.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_13.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_14.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_0.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_2.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_1.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_5.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_6.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_12.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_3.pt
+dlrm_main/0 [0]:load file:  /data/scratch/RecSys/embedding_bag/fbgemm_t856_bs65536_11.pt
+dlrm_main/0 [0]:Namespace(kaggle=True, profile_dir='', memory_fraction=None, epochs=1, batch_size=1024, limit_train_batches=None, limit_val_batches=None, limit_test_batches=None, dataset_name='criteo_1t', num_embeddings=None, num_embeddings_per_feature=[8015999, 9997799, 6138289, 21886, 204008, 6148, 282795, 1316, 3639992, 319, 3394206, 12203324, 4091851, 11641, 4657566], dense_arch_layer_sizes='512,256,128', over_arch_layer_sizes='1024,1024,512,256,1', embedding_dim=128, undersampling_rate=None, seed=None, pin_memory=True, eval_acc=False, mmap_mode=None, in_memory_binary_criteo_path='/data/scratch/RecSys/embedding_bag', learning_rate=1.0, shuffle_batches=True, validation_freq_within_epoch=None, change_lr=None, lr_change_point=0.8, lr_after_change_point=0.2, adagrad=False, sharder_type='colossalai', prefetch_num=1)
+dlrm_main/0 [0]:training batches: 1024, val batches: 0, test batches: 0
+dlrm_main/0 [0]:After model init:  GPU memory allocated: 0.01 GB, GPU memory reserved: 0.02 GB, CPU memory usage: 33.60 GB
+dlrm_main/0 [0]:DLRM: 6,743,520,001.
+dlrm_main/0 [0]:Number of model parameters: 6,743,520,001, storage overhead: 25.12 GB. Number of model buffers: 240, storage overhead: 0.00 GB.
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: ########################################################################################################################################################################################
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                              --- Planner Statistics ---                                                                              #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                      --- Evalulated 1 proposal(s), found 1 possible plan(s), ran for 0.01s ---                                                       #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #      Rank     HBM (GB)     DDR (GB)     Perf (ms)     Input (MB)     Output (MB)     Shards                                                                                          #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    ------   ----------   ----------   -----------   ------------   -------------   --------                                                                                          #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #         0     0.1 (0%)    25.1 (3%)         0.123           0.12             7.5     CW: 15                                                                                          #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # Input: MB/iteration, Output: MB/iteration, Shards: number of tables                                                                                                                  #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # HBM: estimated peak memory usage for shards, dense tensors, and features (KJT)                                                                                                       #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # Parameter Info:                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                    FQN     Sharding     Compute Kernel     Perf (ms)     Pooling Factor     Output     Features    Emb Dim     Hash Size     Ranks   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                  -----   ----------   ----------------   -----------   ----------------   --------   ----------   --------   -----------   -------   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_0           CW   colossalai_batch         0.008                1.0     pooled            1        128       8015999         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_1           CW   colossalai_batch         0.008                1.0     pooled            1        128       9997799         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_2           CW   colossalai_batch         0.008                1.0     pooled            1        128       6138289         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_3           CW   colossalai_batch         0.008                1.0     pooled            1        128         21886         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_4           CW   colossalai_batch         0.008                1.0     pooled            1        128        204008         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_5           CW   colossalai_batch         0.008                1.0     pooled            1        128          6148         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_6           CW   colossalai_batch         0.008                1.0     pooled            1        128        282795         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_7           CW   colossalai_batch         0.008                1.0     pooled            1        128          1316         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_8           CW   colossalai_batch         0.008                1.0     pooled            1        128       3639992         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #     model.sparse_arch.embedding_bag_collection.t_cat_9           CW   colossalai_batch         0.008                1.0     pooled            1        128           319         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    model.sparse_arch.embedding_bag_collection.t_cat_10           CW   colossalai_batch         0.008                1.0     pooled            1        128       3394206         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    model.sparse_arch.embedding_bag_collection.t_cat_11           CW   colossalai_batch         0.008                1.0     pooled            1        128      12203324         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    model.sparse_arch.embedding_bag_collection.t_cat_12           CW   colossalai_batch         0.008                1.0     pooled            1        128       4091851         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    model.sparse_arch.embedding_bag_collection.t_cat_13           CW   colossalai_batch         0.008                1.0     pooled            1        128         11641         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    model.sparse_arch.embedding_bag_collection.t_cat_14           CW   colossalai_batch         0.008                1.0     pooled            1        128       4657566         0   #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # Batch Size: 1024                                                                                                                                                                     #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # Compute Kernels:                                                                                                                                                                     #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    colossalai_batch: 15                                                                                                                                                              #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # Longest Critical Path: 0.123 ms on rank 0                                                                                                                                            #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # Peak Memory Pressure: 0.057 GB on rank 0                                                                                                                                             #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # Usable Memory:                                                                                                                                                                       #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    HBM: 68.0 GB, DDR: 850.0 GB                                                                                                                                                       #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    Percent of Total: 85%                                                                                                                                                             #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # Dense Storage (per rank):                                                                                                                                                            #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    HBM: 0.048 GB, DDR: 0.0 GB                                                                                                                                                        #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #                                                                                                                                                                                      #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: # KJT Storage (per rank):                                                                                                                                                              #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: #    HBM: 0.002 GB, DDR: 0.0 GB                                                                                                                                                        #
+dlrm_main/0 [0]:colossalai - torchrec.distributed.planner.stats - INFO: ########################################################################################################################################################################################
+dlrm_main/0 [0]:Cache warmup finished cost 0.0613132530124858 sec.
+dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   0%|          | 0/1024.0 [00:00<?, ?it/s]dlrm_main/0 [0]:After model parallel:  GPU memory allocated: 1.06 GB, GPU memory reserved: 1.24 GB, CPU memory usage: 65.69 GB
+dlrm_main/0 [0]:Plan: {'model.sparse_arch.embedding_bag_collection': {'t_cat_0': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[8015999, 128], placement=rank:0/cuda:0)])), 't_cat_1': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[9997799, 128], placement=rank:0/cuda:0)])), 't_cat_2': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[6138289, 128], placement=rank:0/cuda:0)])), 't_cat_3': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[21886, 128], placement=rank:0/cuda:0)])), 't_cat_4': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[204008, 128], placement=rank:0/cuda:0)])), 't_cat_5': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[6148, 128], placement=rank:0/cuda:0)])), 't_cat_6': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[282795, 128], placement=rank:0/cuda:0)])), 't_cat_7': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[1316, 128], placement=rank:0/cuda:0)])), 't_cat_8': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[3639992, 128], placement=rank:0/cuda:0)])), 't_cat_9': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[319, 128], placement=rank:0/cuda:0)])), 't_cat_10': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[3394206, 128], placement=rank:0/cuda:0)])), 't_cat_11': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[12203324, 128], placement=rank:0/cuda:0)])), 't_cat_12': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[4091851, 128], placement=rank:0/cuda:0)])), 't_cat_13': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[11641, 128], placement=rank:0/cuda:0)])), 't_cat_14': ParameterSharding(sharding_type='column_wise', compute_kernel='colossalai_batch', ranks=[0], sharding_spec=EnumerableShardingSpec(shards=[ShardMetadata(shard_offsets=[0, 0], shard_sizes=[4657566, 128], placement=rank:0/cuda:0)]))}}
+dlrm_main/0 [0]:colossalai - torchrec.distributed.train_pipeline - INFO: Module 'model.sparse_arch.embedding_bag_collection'' will be pipelined
+dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   0%|          | 1/1024.0 [00:02<42:37,  2.50s/it]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   0%|          | 2/1024.0 [00:03<31:10,  1.83s/it]dlrm_main/0 [0]:colossalai - torch.nn.parallel.distributed - INFO: Reducer buckets have been rebuilt in this iteration.
+dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   0%|          | 3/1024.0 [00:03<17:53,  1.05s/it]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   0%|          | 4/1024.0 [00:04<11:37,  1.46it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   0%|          | 5/1024.0 [00:04<08:03,  2.11it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   1%|          | 7/1024.0 [00:04<04:41,  3.62it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   1%|          | 8/1024.0 [00:04<03:57,  4.28it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   1%|          | 10/1024.0 [00:04<02:55,  5.78it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   1%|          | 12/1024.0 [00:04<02:29,  6.75it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   1%|▏         | 14/1024.0 [00:05<02:01,  8.29it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   2%|▏         | 16/1024.0 [00:05<01:42,  9.80it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   2%|▏         | 18/1024.0 [00:05<01:45,  9.50it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   2%|▏         | 20/1024.0 [00:05<01:42,  9.76it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   2%|▏         | 22/1024.0 [00:05<01:47,  9.31it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   2%|▏         | 24/1024.0 [00:05<01:40,  9.91it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   3%|▎         | 26/1024.0 [00:06<01:44,  9.53it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   3%|▎         | 28/1024.0 [00:06<01:44,  9.51it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   3%|▎         | 30/1024.0 [00:06<01:36, 10.25it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   3%|▎         | 32/1024.0 [00:06<01:34, 10.49it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   3%|▎         | 34/1024.0 [00:06<01:35, 10.40it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   4%|▎         | 36/1024.0 [00:07<01:34, 10.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   4%|▎         | 38/1024.0 [00:07<01:49,  8.97it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   4%|▍         | 40/1024.0 [00:07<01:44,  9.41it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   4%|▍         | 42/1024.0 [00:07<01:38,  9.94it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   4%|▍         | 44/1024.0 [00:08<01:37, 10.01it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   4%|▍         | 46/1024.0 [00:08<01:34, 10.40it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   5%|▍         | 48/1024.0 [00:08<01:22, 11.79it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   5%|▍         | 50/1024.0 [00:08<01:23, 11.70it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   5%|▌         | 52/1024.0 [00:08<01:20, 12.06it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   5%|▌         | 54/1024.0 [00:08<01:12, 13.35it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   5%|▌         | 56/1024.0 [00:08<01:07, 14.30it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   6%|▌         | 58/1024.0 [00:08<01:03, 15.10it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   6%|▌         | 60/1024.0 [00:09<01:01, 15.76it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   6%|▌         | 62/1024.0 [00:09<01:01, 15.68it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   6%|▋         | 64/1024.0 [00:09<01:07, 14.21it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   6%|▋         | 66/1024.0 [00:09<01:05, 14.72it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   7%|▋         | 68/1024.0 [00:09<01:01, 15.53it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   7%|▋         | 70/1024.0 [00:09<01:04, 14.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   7%|▋         | 72/1024.0 [00:09<01:00, 15.61it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   7%|▋         | 74/1024.0 [00:10<01:00, 15.71it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   7%|▋         | 76/1024.0 [00:10<01:04, 14.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   8%|▊         | 78/1024.0 [00:10<01:07, 14.05it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   8%|▊         | 80/1024.0 [00:10<01:03, 14.96it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   8%|▊         | 82/1024.0 [00:10<01:00, 15.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   8%|▊         | 84/1024.0 [00:10<00:58, 16.09it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   8%|▊         | 86/1024.0 [00:10<00:58, 16.17it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   9%|▊         | 88/1024.0 [00:10<00:55, 16.73it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   9%|▉         | 90/1024.0 [00:11<01:00, 15.47it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   9%|▉         | 92/1024.0 [00:11<00:58, 15.96it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   9%|▉         | 94/1024.0 [00:11<01:36,  9.67it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:   9%|▉         | 96/1024.0 [00:11<01:28, 10.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  10%|▉         | 98/1024.0 [00:11<01:17, 11.89it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  10%|▉         | 100/1024.0 [00:11<01:16, 12.11it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  10%|▉         | 102/1024.0 [00:12<01:09, 13.27it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  10%|█         | 104/1024.0 [00:12<01:09, 13.20it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  10%|█         | 106/1024.0 [00:12<01:03, 14.39it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  11%|█         | 108/1024.0 [00:12<01:00, 15.17it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  11%|█         | 110/1024.0 [00:12<00:57, 15.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  11%|█         | 112/1024.0 [00:12<00:55, 16.29it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  11%|█         | 114/1024.0 [00:12<00:56, 15.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  11%|█▏        | 116/1024.0 [00:13<01:03, 14.34it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  12%|█▏        | 118/1024.0 [00:13<01:00, 14.89it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  12%|█▏        | 120/1024.0 [00:13<00:58, 15.56it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  12%|█▏        | 122/1024.0 [00:13<00:56, 16.10it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  12%|█▏        | 124/1024.0 [00:13<00:59, 15.14it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  12%|█▏        | 126/1024.0 [00:13<00:58, 15.34it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  12%|█▎        | 128/1024.0 [00:13<01:04, 13.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  13%|█▎        | 130/1024.0 [00:13<01:07, 13.15it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  13%|█▎        | 132/1024.0 [00:14<01:02, 14.27it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  13%|█▎        | 134/1024.0 [00:14<00:58, 15.21it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  13%|█▎        | 136/1024.0 [00:14<00:56, 15.83it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  13%|█▎        | 138/1024.0 [00:14<00:54, 16.26it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  14%|█▎        | 140/1024.0 [00:14<00:53, 16.68it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  14%|█▍        | 142/1024.0 [00:14<00:59, 14.89it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  14%|█▍        | 144/1024.0 [00:14<00:56, 15.61it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  14%|█▍        | 146/1024.0 [00:14<00:56, 15.61it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  14%|█▍        | 148/1024.0 [00:15<01:00, 14.55it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  15%|█▍        | 150/1024.0 [00:15<00:58, 14.92it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  15%|█▍        | 152/1024.0 [00:15<00:56, 15.52it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  15%|█▌        | 154/1024.0 [00:15<00:59, 14.61it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  15%|█▌        | 156/1024.0 [00:15<01:02, 13.92it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  15%|█▌        | 158/1024.0 [00:15<00:59, 14.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  16%|█▌        | 160/1024.0 [00:15<00:56, 15.21it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  16%|█▌        | 162/1024.0 [00:16<00:54, 15.74it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  16%|█▌        | 164/1024.0 [00:16<00:54, 15.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  16%|█▌        | 166/1024.0 [00:16<00:52, 16.31it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  16%|█▋        | 168/1024.0 [00:16<01:00, 14.26it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  17%|█▋        | 170/1024.0 [00:16<00:58, 14.64it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  17%|█▋        | 172/1024.0 [00:16<00:55, 15.38it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  17%|█▋        | 174/1024.0 [00:16<00:58, 14.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  17%|█▋        | 176/1024.0 [00:16<00:55, 15.24it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  17%|█▋        | 178/1024.0 [00:17<00:59, 14.10it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  18%|█▊        | 180/1024.0 [00:17<00:57, 14.63it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  18%|█▊        | 182/1024.0 [00:17<01:02, 13.50it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  18%|█▊        | 184/1024.0 [00:17<00:57, 14.56it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  18%|█▊        | 186/1024.0 [00:17<00:54, 15.40it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  18%|█▊        | 188/1024.0 [00:17<00:52, 15.83it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  19%|█▊        | 190/1024.0 [00:17<00:52, 15.82it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  19%|█▉        | 192/1024.0 [00:18<00:52, 15.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  19%|█▉        | 194/1024.0 [00:18<00:57, 14.46it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  19%|█▉        | 196/1024.0 [00:18<00:56, 14.72it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  19%|█▉        | 198/1024.0 [00:18<00:53, 15.45it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  20%|█▉        | 200/1024.0 [00:18<00:52, 15.59it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  20%|█▉        | 202/1024.0 [00:18<00:57, 14.30it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  20%|█▉        | 204/1024.0 [00:18<00:55, 14.89it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  20%|██        | 206/1024.0 [00:19<00:59, 13.85it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  20%|██        | 208/1024.0 [00:19<01:00, 13.54it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  21%|██        | 210/1024.0 [00:19<00:56, 14.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  21%|██        | 212/1024.0 [00:19<00:55, 14.62it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  21%|██        | 214/1024.0 [00:19<00:53, 15.24it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  21%|██        | 216/1024.0 [00:19<00:52, 15.37it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  21%|██▏       | 218/1024.0 [00:19<00:52, 15.36it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  21%|██▏       | 220/1024.0 [00:19<00:56, 14.31it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  22%|██▏       | 222/1024.0 [00:20<00:53, 14.92it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  22%|██▏       | 224/1024.0 [00:20<00:51, 15.43it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  22%|██▏       | 226/1024.0 [00:20<00:55, 14.46it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  22%|██▏       | 228/1024.0 [00:20<00:54, 14.55it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  22%|██▏       | 230/1024.0 [00:20<00:54, 14.69it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  23%|██▎       | 232/1024.0 [00:20<00:56, 14.11it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  23%|██▎       | 234/1024.0 [00:20<00:57, 13.71it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  23%|██▎       | 236/1024.0 [00:21<00:54, 14.53it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  23%|██▎       | 238/1024.0 [00:21<00:51, 15.20it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  23%|██▎       | 240/1024.0 [00:21<00:50, 15.60it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  24%|██▎       | 242/1024.0 [00:21<00:51, 15.32it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  24%|██▍       | 244/1024.0 [00:21<00:51, 15.21it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  24%|██▍       | 246/1024.0 [00:21<00:55, 14.03it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  24%|██▍       | 248/1024.0 [00:21<00:52, 14.79it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  24%|██▍       | 250/1024.0 [00:21<00:50, 15.37it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  25%|██▍       | 252/1024.0 [00:22<00:53, 14.50it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  25%|██▍       | 254/1024.0 [00:22<00:50, 15.14it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  25%|██▌       | 256/1024.0 [00:22<00:53, 14.32it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  25%|██▌       | 258/1024.0 [00:22<00:50, 15.06it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  25%|██▌       | 260/1024.0 [00:22<00:53, 14.23it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  26%|██▌       | 262/1024.0 [00:22<00:50, 15.02it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  26%|██▌       | 264/1024.0 [00:22<00:48, 15.54it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  26%|██▌       | 266/1024.0 [00:23<00:47, 15.99it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  26%|██▌       | 268/1024.0 [00:23<00:46, 16.17it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  26%|██▋       | 270/1024.0 [00:23<00:45, 16.40it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  27%|██▋       | 272/1024.0 [00:23<00:49, 15.31it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  27%|██▋       | 274/1024.0 [00:23<00:47, 15.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  27%|██▋       | 276/1024.0 [00:23<00:46, 16.20it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  27%|██▋       | 278/1024.0 [00:23<00:45, 16.36it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  27%|██▋       | 280/1024.0 [00:23<00:49, 14.97it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  28%|██▊       | 282/1024.0 [00:24<00:48, 15.43it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  28%|██▊       | 284/1024.0 [00:24<00:51, 14.48it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  28%|██▊       | 286/1024.0 [00:24<00:53, 13.91it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  28%|██▊       | 288/1024.0 [00:24<00:50, 14.70it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  28%|██▊       | 290/1024.0 [00:24<00:50, 14.48it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  29%|██▊       | 292/1024.0 [00:24<00:49, 14.70it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  29%|██▊       | 294/1024.0 [00:24<00:49, 14.76it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  29%|██▉       | 296/1024.0 [00:25<00:47, 15.37it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  29%|██▉       | 298/1024.0 [00:25<00:49, 14.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  29%|██▉       | 300/1024.0 [00:25<00:49, 14.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  29%|██▉       | 302/1024.0 [00:25<00:49, 14.72it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  30%|██▉       | 304/1024.0 [00:25<00:53, 13.47it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  30%|██▉       | 306/1024.0 [00:25<00:51, 13.82it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  30%|███       | 308/1024.0 [00:25<00:50, 14.05it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  30%|███       | 310/1024.0 [00:26<00:54, 13.00it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  30%|███       | 312/1024.0 [00:26<00:55, 12.87it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  31%|███       | 314/1024.0 [00:26<00:53, 13.35it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  31%|███       | 316/1024.0 [00:26<00:50, 14.06it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  31%|███       | 318/1024.0 [00:26<00:47, 14.78it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  31%|███▏      | 320/1024.0 [00:26<00:47, 14.82it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  31%|███▏      | 322/1024.0 [00:26<00:46, 15.09it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  32%|███▏      | 324/1024.0 [00:27<00:51, 13.52it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  32%|███▏      | 326/1024.0 [00:27<00:49, 14.09it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  32%|███▏      | 328/1024.0 [00:27<00:48, 14.38it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  32%|███▏      | 330/1024.0 [00:27<00:52, 13.26it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  32%|███▏      | 332/1024.0 [00:27<00:50, 13.61it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  33%|███▎      | 334/1024.0 [00:27<00:51, 13.39it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  33%|███▎      | 336/1024.0 [00:27<00:48, 14.27it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  33%|███▎      | 338/1024.0 [00:28<00:52, 13.16it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  33%|███▎      | 340/1024.0 [00:28<00:48, 14.10it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  33%|███▎      | 342/1024.0 [00:28<00:47, 14.41it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  34%|███▎      | 344/1024.0 [00:28<00:45, 14.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  34%|███▍      | 346/1024.0 [00:28<00:43, 15.52it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  34%|███▍      | 348/1024.0 [00:28<00:44, 15.22it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  34%|███▍      | 350/1024.0 [00:28<00:46, 14.56it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  34%|███▍      | 352/1024.0 [00:28<00:43, 15.28it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  35%|███▍      | 354/1024.0 [00:29<00:42, 15.80it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  35%|███▍      | 356/1024.0 [00:29<00:41, 15.99it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  35%|███▍      | 358/1024.0 [00:29<00:44, 14.87it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  35%|███▌      | 360/1024.0 [00:29<00:44, 15.08it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  35%|███▌      | 362/1024.0 [00:29<00:48, 13.74it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  36%|███▌      | 364/1024.0 [00:29<00:48, 13.53it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  36%|███▌      | 366/1024.0 [00:29<00:45, 14.48it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  36%|███▌      | 368/1024.0 [00:30<00:43, 15.24it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  36%|███▌      | 370/1024.0 [00:30<00:42, 15.32it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  36%|███▋      | 372/1024.0 [00:30<00:41, 15.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  37%|███▋      | 374/1024.0 [00:30<00:40, 16.14it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  37%|███▋      | 376/1024.0 [00:30<00:42, 15.12it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  37%|███▋      | 378/1024.0 [00:30<00:41, 15.62it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  37%|███▋      | 380/1024.0 [00:30<00:40, 16.04it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  37%|███▋      | 382/1024.0 [00:30<00:43, 14.93it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  38%|███▊      | 384/1024.0 [00:31<00:42, 15.03it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  38%|███▊      | 386/1024.0 [00:31<00:41, 15.28it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  38%|███▊      | 388/1024.0 [00:31<00:44, 14.36it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  38%|███▊      | 390/1024.0 [00:31<00:45, 13.87it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  38%|███▊      | 392/1024.0 [00:31<00:43, 14.70it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  38%|███▊      | 394/1024.0 [00:31<00:41, 15.25it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  39%|███▊      | 396/1024.0 [00:31<00:40, 15.69it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  39%|███▉      | 398/1024.0 [00:32<00:39, 15.99it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  39%|███▉      | 400/1024.0 [00:32<00:38, 16.29it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  39%|███▉      | 402/1024.0 [00:32<00:42, 14.70it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  39%|███▉      | 404/1024.0 [00:32<00:40, 15.30it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  40%|███▉      | 406/1024.0 [00:32<00:40, 15.26it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  40%|███▉      | 408/1024.0 [00:32<00:42, 14.49it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  40%|████      | 410/1024.0 [00:32<00:40, 15.11it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  40%|████      | 412/1024.0 [00:33<00:44, 13.90it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  40%|████      | 414/1024.0 [00:33<00:41, 14.68it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  41%|████      | 416/1024.0 [00:33<00:44, 13.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  41%|████      | 418/1024.0 [00:33<00:41, 14.59it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  41%|████      | 420/1024.0 [00:33<00:40, 14.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  41%|████      | 422/1024.0 [00:33<00:39, 15.40it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  41%|████▏     | 424/1024.0 [00:33<00:38, 15.60it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  42%|████▏     | 426/1024.0 [00:33<00:37, 16.01it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  42%|████▏     | 428/1024.0 [00:34<00:39, 15.03it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  42%|████▏     | 430/1024.0 [00:34<00:37, 15.67it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  42%|████▏     | 432/1024.0 [00:34<00:36, 16.07it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  42%|████▏     | 434/1024.0 [00:34<00:37, 15.91it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  43%|████▎     | 436/1024.0 [00:34<00:39, 14.91it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  43%|████▎     | 438/1024.0 [00:34<00:37, 15.48it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  43%|████▎     | 440/1024.0 [00:34<00:40, 14.51it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  43%|████▎     | 442/1024.0 [00:35<00:43, 13.46it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  43%|████▎     | 444/1024.0 [00:35<00:40, 14.35it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  44%|████▎     | 446/1024.0 [00:35<00:38, 15.03it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  44%|████▍     | 448/1024.0 [00:35<00:37, 15.54it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  44%|████▍     | 450/1024.0 [00:35<00:35, 16.06it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  44%|████▍     | 452/1024.0 [00:35<00:36, 15.88it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  44%|████▍     | 454/1024.0 [00:35<00:38, 14.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  45%|████▍     | 456/1024.0 [00:35<00:36, 15.54it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  45%|████▍     | 458/1024.0 [00:36<00:36, 15.62it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  45%|████▍     | 460/1024.0 [00:36<00:38, 14.71it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  45%|████▌     | 462/1024.0 [00:36<00:38, 14.73it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  45%|████▌     | 464/1024.0 [00:36<00:37, 14.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  46%|████▌     | 466/1024.0 [00:36<00:40, 13.72it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  46%|████▌     | 468/1024.0 [00:36<00:41, 13.41it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  46%|████▌     | 470/1024.0 [00:36<00:38, 14.33it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  46%|████▌     | 472/1024.0 [00:36<00:36, 15.11it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  46%|████▋     | 474/1024.0 [00:37<00:36, 14.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  46%|████▋     | 476/1024.0 [00:37<00:35, 15.56it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  47%|████▋     | 478/1024.0 [00:37<00:34, 15.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  47%|████▋     | 480/1024.0 [00:37<00:37, 14.63it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  47%|████▋     | 482/1024.0 [00:37<00:37, 14.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  47%|████▋     | 484/1024.0 [00:37<00:35, 15.23it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  47%|████▋     | 486/1024.0 [00:37<00:38, 14.02it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  48%|████▊     | 488/1024.0 [00:38<00:36, 14.51it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  48%|████▊     | 490/1024.0 [00:38<00:38, 14.02it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  48%|████▊     | 492/1024.0 [00:38<00:35, 14.94it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  48%|████▊     | 494/1024.0 [00:38<00:36, 14.39it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  48%|████▊     | 496/1024.0 [00:38<00:35, 14.83it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  49%|████▊     | 498/1024.0 [00:38<00:33, 15.50it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  49%|████▉     | 500/1024.0 [00:38<00:32, 16.08it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  49%|████▉     | 502/1024.0 [00:38<00:31, 16.51it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  49%|████▉     | 504/1024.0 [00:39<00:30, 16.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  49%|████▉     | 506/1024.0 [00:39<00:34, 15.21it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  50%|████▉     | 508/1024.0 [00:39<00:33, 15.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  50%|████▉     | 510/1024.0 [00:39<00:33, 15.56it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  50%|█████     | 512/1024.0 [00:39<00:32, 15.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  50%|█████     | 514/1024.0 [00:39<00:36, 13.87it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  50%|█████     | 516/1024.0 [00:39<00:35, 14.35it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  51%|█████     | 518/1024.0 [00:40<00:36, 13.90it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  51%|█████     | 520/1024.0 [00:40<00:37, 13.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  51%|█████     | 522/1024.0 [00:40<00:34, 14.54it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  51%|█████     | 524/1024.0 [00:40<00:32, 15.20it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  51%|█████▏    | 526/1024.0 [00:40<00:31, 15.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  52%|█████▏    | 528/1024.0 [00:40<00:30, 16.34it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  52%|█████▏    | 530/1024.0 [00:40<00:29, 16.68it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  52%|█████▏    | 532/1024.0 [00:40<00:32, 15.34it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  52%|█████▏    | 534/1024.0 [00:41<00:30, 15.89it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  52%|█████▏    | 536/1024.0 [00:41<00:30, 16.19it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  53%|█████▎    | 538/1024.0 [00:41<00:32, 15.18it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  53%|█████▎    | 540/1024.0 [00:41<00:31, 15.36it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  53%|█████▎    | 542/1024.0 [00:41<00:30, 16.04it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  53%|█████▎    | 544/1024.0 [00:41<00:32, 14.69it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  53%|█████▎    | 546/1024.0 [00:41<00:33, 14.10it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  54%|█████▎    | 548/1024.0 [00:42<00:32, 14.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  54%|█████▎    | 550/1024.0 [00:42<00:31, 15.28it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  54%|█████▍    | 552/1024.0 [00:42<00:29, 15.99it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  54%|█████▍    | 554/1024.0 [00:42<00:28, 16.49it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  54%|█████▍    | 556/1024.0 [00:42<00:27, 16.88it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  54%|█████▍    | 558/1024.0 [00:42<00:30, 15.43it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  55%|█████▍    | 560/1024.0 [00:42<00:29, 15.82it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  55%|█████▍    | 562/1024.0 [00:42<00:29, 15.69it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  55%|█████▌    | 564/1024.0 [00:43<00:31, 14.66it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  55%|█████▌    | 566/1024.0 [00:43<00:31, 14.38it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  55%|█████▌    | 568/1024.0 [00:43<00:33, 13.53it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  56%|█████▌    | 570/1024.0 [00:43<00:31, 14.50it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  56%|█████▌    | 572/1024.0 [00:43<00:32, 14.02it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  56%|█████▌    | 574/1024.0 [00:43<00:30, 14.52it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  56%|█████▋    | 576/1024.0 [00:43<00:29, 15.32it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  56%|█████▋    | 578/1024.0 [00:43<00:27, 15.97it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  57%|█████▋    | 580/1024.0 [00:44<00:27, 16.20it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  57%|█████▋    | 582/1024.0 [00:44<00:26, 16.61it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  57%|█████▋    | 584/1024.0 [00:44<00:29, 14.73it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  57%|█████▋    | 586/1024.0 [00:44<00:29, 14.85it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  57%|█████▋    | 588/1024.0 [00:44<00:29, 14.75it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  58%|█████▊    | 590/1024.0 [00:44<00:28, 15.49it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  58%|█████▊    | 592/1024.0 [00:44<00:29, 14.73it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  58%|█████▊    | 594/1024.0 [00:45<00:27, 15.38it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  58%|█████▊    | 596/1024.0 [00:45<00:30, 13.93it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  58%|█████▊    | 598/1024.0 [00:45<00:31, 13.65it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  59%|█████▊    | 600/1024.0 [00:45<00:29, 14.46it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  59%|█████▉    | 602/1024.0 [00:45<00:28, 14.65it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  59%|█████▉    | 604/1024.0 [00:45<00:28, 14.76it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  59%|█████▉    | 606/1024.0 [00:45<00:26, 15.58it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  59%|█████▉    | 608/1024.0 [00:45<00:25, 16.07it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  60%|█████▉    | 610/1024.0 [00:46<00:29, 14.25it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  60%|█████▉    | 612/1024.0 [00:46<00:27, 15.00it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  60%|█████▉    | 614/1024.0 [00:46<00:26, 15.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  60%|██████    | 616/1024.0 [00:46<00:29, 13.66it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  60%|██████    | 618/1024.0 [00:46<00:29, 13.94it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  61%|██████    | 620/1024.0 [00:46<00:27, 14.70it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  61%|██████    | 622/1024.0 [00:46<00:28, 13.90it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  61%|██████    | 624/1024.0 [00:47<00:31, 12.72it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  61%|██████    | 626/1024.0 [00:47<00:29, 13.70it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  61%|██████▏   | 628/1024.0 [00:47<00:27, 14.48it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  62%|██████▏   | 630/1024.0 [00:47<00:26, 15.05it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  62%|██████▏   | 632/1024.0 [00:47<00:25, 15.38it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  62%|██████▏   | 634/1024.0 [00:47<00:25, 15.09it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  62%|██████▏   | 636/1024.0 [00:47<00:27, 14.30it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  62%|██████▏   | 638/1024.0 [00:48<00:26, 14.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  62%|██████▎   | 640/1024.0 [00:48<00:25, 15.19it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  63%|██████▎   | 642/1024.0 [00:48<00:26, 14.46it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  63%|██████▎   | 644/1024.0 [00:48<00:25, 14.92it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  63%|██████▎   | 646/1024.0 [00:48<00:27, 13.82it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  63%|██████▎   | 648/1024.0 [00:48<00:26, 14.23it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  63%|██████▎   | 650/1024.0 [00:48<00:28, 13.06it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  64%|██████▎   | 652/1024.0 [00:49<00:27, 13.37it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  64%|██████▍   | 654/1024.0 [00:49<00:25, 14.28it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  64%|██████▍   | 656/1024.0 [00:49<00:24, 14.97it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  64%|██████▍   | 658/1024.0 [00:49<00:23, 15.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  64%|██████▍   | 660/1024.0 [00:49<00:24, 14.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  65%|██████▍   | 662/1024.0 [00:49<00:26, 13.66it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  65%|██████▍   | 664/1024.0 [00:49<00:24, 14.53it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  65%|██████▌   | 666/1024.0 [00:50<00:23, 15.05it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  65%|██████▌   | 668/1024.0 [00:50<00:22, 15.50it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  65%|██████▌   | 670/1024.0 [00:50<00:26, 13.54it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  66%|██████▌   | 672/1024.0 [00:50<00:24, 14.42it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  66%|██████▌   | 674/1024.0 [00:50<00:26, 13.08it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  66%|██████▌   | 676/1024.0 [00:50<00:26, 13.00it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  66%|██████▌   | 678/1024.0 [00:50<00:24, 14.03it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  66%|██████▋   | 680/1024.0 [00:51<00:24, 14.16it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  67%|██████▋   | 682/1024.0 [00:51<00:23, 14.36it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  67%|██████▋   | 684/1024.0 [00:51<00:22, 15.07it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  67%|██████▋   | 686/1024.0 [00:51<00:21, 15.55it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  67%|██████▋   | 688/1024.0 [00:51<00:22, 14.64it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  67%|██████▋   | 690/1024.0 [00:51<00:21, 15.23it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  68%|██████▊   | 692/1024.0 [00:51<00:21, 15.57it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  68%|██████▊   | 694/1024.0 [00:52<00:24, 13.69it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  68%|██████▊   | 696/1024.0 [00:52<00:22, 14.46it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  68%|██████▊   | 698/1024.0 [00:52<00:21, 14.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  68%|██████▊   | 700/1024.0 [00:52<00:23, 14.05it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  69%|██████▊   | 702/1024.0 [00:52<00:25, 12.52it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  69%|██████▉   | 704/1024.0 [00:52<00:24, 13.12it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  69%|██████▉   | 706/1024.0 [00:52<00:23, 13.66it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  69%|██████▉   | 708/1024.0 [00:53<00:22, 14.01it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  69%|██████▉   | 710/1024.0 [00:53<00:23, 13.60it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  70%|██████▉   | 712/1024.0 [00:53<00:21, 14.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  70%|██████▉   | 714/1024.0 [00:53<00:22, 13.92it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  70%|██████▉   | 716/1024.0 [00:53<00:20, 14.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  70%|███████   | 718/1024.0 [00:53<00:19, 15.32it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  70%|███████   | 720/1024.0 [00:53<00:20, 14.54it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  71%|███████   | 722/1024.0 [00:53<00:20, 15.09it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  71%|███████   | 724/1024.0 [00:54<00:21, 14.13it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  71%|███████   | 726/1024.0 [00:54<00:20, 14.80it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  71%|███████   | 728/1024.0 [00:54<00:20, 14.22it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  71%|███████▏  | 730/1024.0 [00:54<00:20, 14.25it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  71%|███████▏  | 732/1024.0 [00:54<00:19, 14.89it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  72%|███████▏  | 734/1024.0 [00:54<00:18, 15.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  72%|███████▏  | 736/1024.0 [00:54<00:19, 15.14it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  72%|███████▏  | 738/1024.0 [00:55<00:19, 14.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  72%|███████▏  | 740/1024.0 [00:55<00:20, 14.13it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  72%|███████▏  | 742/1024.0 [00:55<00:18, 14.86it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  73%|███████▎  | 744/1024.0 [00:55<00:19, 14.68it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  73%|███████▎  | 746/1024.0 [00:55<00:18, 14.88it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  73%|███████▎  | 748/1024.0 [00:55<00:19, 14.00it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  73%|███████▎  | 750/1024.0 [00:55<00:18, 14.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  73%|███████▎  | 752/1024.0 [00:56<00:20, 13.42it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  74%|███████▎  | 754/1024.0 [00:56<00:20, 13.25it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  74%|███████▍  | 756/1024.0 [00:56<00:18, 14.16it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  74%|███████▍  | 758/1024.0 [00:56<00:18, 14.16it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  74%|███████▍  | 760/1024.0 [00:56<00:17, 14.72it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  74%|███████▍  | 762/1024.0 [00:56<00:17, 15.33it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  75%|███████▍  | 764/1024.0 [00:56<00:16, 15.67it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  75%|███████▍  | 766/1024.0 [00:57<00:20, 12.85it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  75%|███████▌  | 768/1024.0 [00:57<00:25, 10.09it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  75%|███████▌  | 770/1024.0 [00:57<00:22, 11.16it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  75%|███████▌  | 772/1024.0 [00:57<00:21, 11.61it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  76%|███████▌  | 774/1024.0 [00:57<00:19, 12.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  76%|███████▌  | 776/1024.0 [00:57<00:17, 13.80it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  76%|███████▌  | 778/1024.0 [00:58<00:18, 13.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  76%|███████▌  | 780/1024.0 [00:58<00:18, 13.28it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  76%|███████▋  | 782/1024.0 [00:58<00:17, 14.18it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  77%|███████▋  | 784/1024.0 [00:58<00:16, 14.88it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  77%|███████▋  | 786/1024.0 [00:58<00:15, 15.41it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  77%|███████▋  | 788/1024.0 [00:58<00:15, 15.44it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  77%|███████▋  | 790/1024.0 [00:58<00:14, 15.99it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  77%|███████▋  | 792/1024.0 [00:58<00:15, 15.05it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  78%|███████▊  | 794/1024.0 [00:59<00:14, 15.67it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  78%|███████▊  | 796/1024.0 [00:59<00:20, 11.15it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  78%|███████▊  | 798/1024.0 [00:59<00:22, 10.11it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  78%|███████▊  | 800/1024.0 [00:59<00:20, 11.10it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  78%|███████▊  | 802/1024.0 [00:59<00:19, 11.38it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  79%|███████▊  | 804/1024.0 [01:00<00:18, 11.97it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  79%|███████▊  | 806/1024.0 [01:00<00:17, 12.17it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  79%|███████▉  | 808/1024.0 [01:00<00:16, 12.76it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  79%|███████▉  | 810/1024.0 [01:00<00:15, 13.87it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  79%|███████▉  | 812/1024.0 [01:00<00:14, 14.67it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  79%|███████▉  | 814/1024.0 [01:00<00:13, 15.27it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  80%|███████▉  | 816/1024.0 [01:00<00:13, 15.02it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  80%|███████▉  | 818/1024.0 [01:01<00:15, 13.67it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  80%|████████  | 820/1024.0 [01:01<00:14, 14.37it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  80%|████████  | 822/1024.0 [01:01<00:14, 14.15it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  80%|████████  | 824/1024.0 [01:01<00:13, 14.79it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  81%|████████  | 826/1024.0 [01:01<00:14, 14.08it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  81%|████████  | 828/1024.0 [01:01<00:13, 14.64it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  81%|████████  | 830/1024.0 [01:01<00:14, 13.24it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  81%|████████▏ | 832/1024.0 [01:02<00:15, 12.24it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  81%|████████▏ | 834/1024.0 [01:02<00:14, 13.43it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  82%|████████▏ | 836/1024.0 [01:02<00:13, 13.84it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  82%|████████▏ | 838/1024.0 [01:02<00:12, 14.70it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  82%|████████▏ | 840/1024.0 [01:02<00:11, 15.35it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  82%|████████▏ | 842/1024.0 [01:02<00:11, 15.79it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  82%|████████▏ | 844/1024.0 [01:02<00:12, 14.77it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  83%|████████▎ | 846/1024.0 [01:02<00:11, 15.24it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  83%|████████▎ | 848/1024.0 [01:03<00:11, 15.68it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  83%|████████▎ | 850/1024.0 [01:03<00:12, 13.95it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  83%|████████▎ | 852/1024.0 [01:03<00:11, 14.68it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  83%|████████▎ | 854/1024.0 [01:03<00:11, 14.79it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  84%|████████▎ | 856/1024.0 [01:03<00:12, 13.81it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  84%|████████▍ | 858/1024.0 [01:03<00:13, 12.63it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  84%|████████▍ | 860/1024.0 [01:03<00:12, 13.16it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  84%|████████▍ | 862/1024.0 [01:04<00:11, 14.08it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  84%|████████▍ | 864/1024.0 [01:04<00:10, 14.80it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  85%|████████▍ | 866/1024.0 [01:04<00:10, 15.43it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  85%|████████▍ | 868/1024.0 [01:04<00:09, 15.76it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  85%|████████▍ | 870/1024.0 [01:04<00:10, 14.19it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  85%|████████▌ | 872/1024.0 [01:04<00:10, 14.79it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  85%|████████▌ | 874/1024.0 [01:04<00:09, 15.51it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  86%|████████▌ | 876/1024.0 [01:05<00:12, 11.83it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  86%|████████▌ | 878/1024.0 [01:05<00:11, 12.97it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  86%|████████▌ | 880/1024.0 [01:05<00:11, 12.49it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  86%|████████▌ | 882/1024.0 [01:05<00:10, 13.62it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  86%|████████▋ | 884/1024.0 [01:05<00:10, 13.28it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  87%|████████▋ | 886/1024.0 [01:05<00:09, 14.24it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  87%|████████▋ | 888/1024.0 [01:05<00:09, 14.85it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  87%|████████▋ | 890/1024.0 [01:06<00:08, 15.33it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  87%|████████▋ | 892/1024.0 [01:06<00:08, 15.71it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  87%|████████▋ | 894/1024.0 [01:06<00:08, 16.08it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  88%|████████▊ | 896/1024.0 [01:06<00:08, 14.82it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  88%|████████▊ | 898/1024.0 [01:06<00:08, 15.51it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  88%|████████▊ | 900/1024.0 [01:06<00:07, 15.86it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  88%|████████▊ | 902/1024.0 [01:06<00:07, 16.26it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  88%|████████▊ | 904/1024.0 [01:06<00:08, 14.92it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  88%|████████▊ | 906/1024.0 [01:07<00:07, 15.43it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  89%|████████▊ | 908/1024.0 [01:07<00:08, 14.49it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  89%|████████▉ | 910/1024.0 [01:07<00:08, 13.48it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  89%|████████▉ | 912/1024.0 [01:07<00:07, 14.47it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  89%|████████▉ | 914/1024.0 [01:07<00:07, 15.06it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  89%|████████▉ | 916/1024.0 [01:07<00:06, 15.59it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  90%|████████▉ | 918/1024.0 [01:07<00:06, 15.35it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  90%|████████▉ | 920/1024.0 [01:08<00:06, 15.18it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  90%|█████████ | 922/1024.0 [01:08<00:07, 13.90it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  90%|█████████ | 924/1024.0 [01:08<00:06, 14.67it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  90%|█████████ | 926/1024.0 [01:08<00:06, 15.34it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  91%|█████████ | 928/1024.0 [01:08<00:06, 14.39it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  91%|█████████ | 930/1024.0 [01:08<00:06, 14.47it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  91%|█████████ | 932/1024.0 [01:08<00:06, 15.07it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  91%|█████████ | 934/1024.0 [01:09<00:06, 14.17it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  91%|█████████▏| 936/1024.0 [01:09<00:06, 12.64it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  92%|█████████▏| 938/1024.0 [01:09<00:06, 13.27it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  92%|█████████▏| 940/1024.0 [01:09<00:05, 14.21it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  92%|█████████▏| 942/1024.0 [01:09<00:05, 14.91it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  92%|█████████▏| 944/1024.0 [01:09<00:05, 14.80it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  92%|█████████▏| 946/1024.0 [01:09<00:05, 14.74it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  93%|█████████▎| 948/1024.0 [01:10<00:05, 13.43it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  93%|█████████▎| 950/1024.0 [01:10<00:05, 13.76it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  93%|█████████▎| 952/1024.0 [01:10<00:04, 14.55it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  93%|█████████▎| 954/1024.0 [01:10<00:05, 13.61it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  93%|█████████▎| 956/1024.0 [01:10<00:04, 14.22it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  94%|█████████▎| 958/1024.0 [01:10<00:04, 13.55it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  94%|█████████▍| 960/1024.0 [01:10<00:04, 14.29it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  94%|█████████▍| 962/1024.0 [01:11<00:04, 13.82it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  94%|█████████▍| 964/1024.0 [01:11<00:04, 14.64it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  94%|█████████▍| 966/1024.0 [01:11<00:03, 15.16it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  95%|█████████▍| 968/1024.0 [01:11<00:03, 15.49it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  95%|█████████▍| 970/1024.0 [01:11<00:03, 15.27it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  95%|█████████▍| 972/1024.0 [01:11<00:03, 15.62it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  95%|█████████▌| 974/1024.0 [01:11<00:04, 11.02it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  95%|█████████▌| 976/1024.0 [01:12<00:03, 12.32it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  96%|█████████▌| 978/1024.0 [01:12<00:03, 13.35it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  96%|█████████▌| 980/1024.0 [01:12<00:03, 13.91it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  96%|█████████▌| 982/1024.0 [01:12<00:03, 13.52it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  96%|█████████▌| 984/1024.0 [01:12<00:02, 14.36it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  96%|█████████▋| 986/1024.0 [01:12<00:02, 13.26it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  96%|█████████▋| 988/1024.0 [01:12<00:02, 12.96it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  97%|█████████▋| 990/1024.0 [01:13<00:02, 13.94it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  97%|█████████▋| 992/1024.0 [01:13<00:02, 14.63it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  97%|█████████▋| 994/1024.0 [01:13<00:01, 15.24it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  97%|█████████▋| 996/1024.0 [01:13<00:01, 15.64it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  97%|█████████▋| 998/1024.0 [01:13<00:01, 16.11it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  98%|█████████▊| 1000/1024.0 [01:13<00:01, 14.23it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  98%|█████████▊| 1002/1024.0 [01:13<00:01, 14.87it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  98%|█████████▊| 1004/1024.0 [01:13<00:01, 15.56it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  98%|█████████▊| 1006/1024.0 [01:14<00:01, 14.47it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  98%|█████████▊| 1008/1024.0 [01:14<00:01, 14.62it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  99%|█████████▊| 1010/1024.0 [01:14<00:00, 15.16it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  99%|█████████▉| 1012/1024.0 [01:14<00:00, 13.25it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  99%|█████████▉| 1014/1024.0 [01:14<00:00, 12.98it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  99%|█████████▉| 1016/1024.0 [01:14<00:00, 14.04it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0:  99%|█████████▉| 1018/1024.0 [01:14<00:00, 14.87it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0: 100%|█████████▉| 1020/1024.0 [01:15<00:00, 15.47it/s]dlrm_main/0 [0]:
+dlrm_main/0 [0]:Epoch 0: 100%|█████████▉| 1022/1024.0 [01:15<00:00, 15.34it/s]
+dlrm_main/0 [0]:Epoch 0: 100%|█████████▉| 1022/1024.0 [01:15<00:00, 13.59it/s]
+dlrm_main/0 [0]:Training:  GPU memory allocated: 1.06 GB, GPU memory reserved: 3.12 GB, CPU memory usage: 66.66 GB
+dlrm_main/0 [0]:CUDA->CPU BWD 6383.352947208632 MB/s 6348.232576 M elem
+dlrm_main/0 [0]:cuda_to_cpu_elapse 3.9779925243055914 sec
+dlrm_main/0 [0]:CPU->CUDA BWD 18466.54028850618 MB/s 6368.456704 M elem
+dlrm_main/0 [0]:cpu_to_cuda_elpase 1.3794585459982045 sec
+dlrm_main/0 [0]:1_unique_indices: 0.27737098321085796
+dlrm_main/0 [0]:2_cpu_row_idx: 0.8563135179574601
+dlrm_main/0 [0]:3_3_non_zero: 0.09281873918371275
+dlrm_main/0 [0]:3_4_1_evict_in_index_select: 2.31469509479939
+dlrm_main/0 [0]:3_4_2_evict_in_gpu_to_cpu_copy: 1.3794585459982045
+dlrm_main/0 [0]:3_4_3_evict_in_index_copy: 0.07358238252345473
+dlrm_main/0 [0]:3_4_evict_in_elapse: 3.7921076079655904
+dlrm_main/0 [0]:3_5_evict_in_elapse_final: 0.055822933121817186
+dlrm_main/0 [0]:3_prepare_rows_on_cuda: 13.37213132204488
+dlrm_main/0 [0]:4_cpu_to_gpu_row_idxs: 0.11051909305388108
+dlrm_main/0 [0]:3_1_0_backup_freqs: 0.06187818382750265
+dlrm_main/0 [0]:3_1_1_find_evict_gpu_idxs_elapsed: 0.24329746593139134
+dlrm_main/0 [0]:3_1_2_find_evict_index_copy: 0.02634408080484718
+dlrm_main/0 [0]:3_1_evict_prepare: 1.2382280934834853
+dlrm_main/0 [0]:3_2_1_evict_out_index_select: 0.11134881188627332
+dlrm_main/0 [0]:3_2_2_evict_out_gpu_to_cpu_copy: 3.9779925243055914
+dlrm_main/0 [0]:3_2_2_evict_out_index_select: 3.8601631725323386
+dlrm_main/0 [0]:3_2_evict_out_elapse: 8.010151960974326
+torchx 2022-09-30 15:55:00 INFO     Job finished: SUCCEEDED
+local_cwd://torchx/dlrm_main-jzw4q2vn63gd5
