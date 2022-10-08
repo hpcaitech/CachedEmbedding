@@ -35,14 +35,14 @@ def choose_data_size(size: str):
     global NUM_EMBEDDINGS_PER_FEATURE
     global CAT_FEATURE_COUNT
     global DEFAULT_CAT_NAMES
-    if size == 'middle':
+    if size == '52M':
         pass
-    elif size == 'small':
+    elif size == '4M':
         # 4210897
         CHOSEN_TABLES = [5, 8, 37, 54, 71, 72, 73, 74, 85, 86, 89, 95, 96, 97, 107, 131, 163, 185, 196, 204, 211]
         NUM_EMBEDDINGS_PER_FEATURE = '204008, 282795, 539726, 153492, 11644, 11645, 13858, 5632, 60121, \
             11711, 11645, 43335, 4843, 67919, 6539, 17076, 11579, 866124, 711855, 302001, 873349'
-    elif size == 'big':
+    elif size == '512M':
         # 512196316
         CHOSEN_TABLES = [301, 302, 303, 305, 306, 307, 309, 310, 311, 312, 313, 316, 317, 318, 319, 320, 321, 322, 323,
                          325, 326, 327, 328, 330, 335, 336, 337, 338, 340, 341, 343, 344, 345, 346, 347, 348, 349, 350,
@@ -57,7 +57,7 @@ def choose_data_size(size: str):
                             5999139, 5775261, 5999681, 4999929, 5963607, 5999967, 2999835, 5997068, 5998595, 5999996, 5992524, 5999997, 5999932, \
                                 5999878, 5999929, 5999857, 5999981, 5999981, 5999796, 5999995, 5994671, 5999329, 5997068, 5999981, 5973566, 5999407, 5966699'
     else:
-        pass # middle
+        raise NotImplementedError()
     CAT_FEATURE_COUNT = len(CHOSEN_TABLES)
     DEFAULT_CAT_NAMES = ["cat_{}".format(i) for i in range(len(CHOSEN_TABLES))]
     

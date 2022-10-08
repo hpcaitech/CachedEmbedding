@@ -19,7 +19,7 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
 }
 
 export DATAPATH=/data/scratch/RecSys/embedding_bag
-export SCALE="middle" # "small ""middle" "big"
+export SCALE="52M" # "4M ""52M" "512M"
 export EVAL_ACC=0
 export EMB_DIM=128
 

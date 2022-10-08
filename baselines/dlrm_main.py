@@ -274,8 +274,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--synth_size",
         type=str,
-        default="middle",
-        help="choose scale(total sparse embedding num) in subset of synth dataset. small, middle, big."
+        default="50M",
+        help="choose scale(total sparse embedding num) in subset of synth dataset. 4M, 50M, 512M."
     )
     return parser.parse_args(argv)
     
