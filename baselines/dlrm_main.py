@@ -20,6 +20,7 @@ from torchrec import EmbeddingBagCollection
 from torchrec.datasets import criteo
 from torchrec.datasets.utils import Batch
 from torchrec.distributed import TrainPipelineSparseDist
+from torchrec.distributed.train_pipeline import TrainPipelineSparseDistPrefetch, TrainPipelinePrefetch
 from torchrec.distributed.embeddingbag import EmbeddingBagCollectionSharder
 from torchrec.distributed.model_parallel import DistributedModelParallel
 from torchrec.distributed.types import ModuleSharder
@@ -47,7 +48,10 @@ from torchrec.distributed.embeddingbag import (
     EmbeddingBagCollectionSharder,
     ShardedEmbeddingBagCollection,
 )
-
+try:
+    from torchrec.distributed.colossalai_embedding_kernel import CAIBatchedDenseEmbeddingBag
+except:
+    print('install CAI version torchrec from https://github.com/hpcaitech/torchrec')
 # OSS import
 try:
     # pyre-ignore[21]
@@ -59,7 +63,7 @@ try:
         TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,
         KAGGLE_TOTAL_TRAINING_SAMPLES,
     )
-    from data import avazu
+    from data import avazu, synth
 
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
@@ -250,10 +254,22 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Flag to determine if adagrad optimizer should be used.",
     )
     parser.add_argument(
-        "--sharder_type",
+        "--kernel_type",
         type=str,
         default="fused",
         help="embedding sharder type",
+    )
+    parser.add_argument(
+        "--shard_type",
+        type=str,
+        default="tw",
+        help="embedding tensor parallel type",
+    )
+    parser.add_argument(
+        "--prefetch_num",
+        type=int,
+        default=1,
+        help="Number of batch prefetched for caching",
     )
     return parser.parse_args(argv)
 
@@ -303,7 +319,9 @@ def _evaluate(
     )
     auroc = metrics.AUROC(compute_on_step=False).to(device)
     accuracy = metrics.Accuracy(compute_on_step=False).to(device)
-
+    
+    train_pipeline._connected = False
+    
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     with torch.no_grad():
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
@@ -326,7 +344,7 @@ def _evaluate(
 
 
 def _train(
-    train_pipeline: TrainPipelineSparseDist,
+    train_pipeline: TrainPipelineSparseDistPrefetch,
     iterator: Iterator[Batch],
     next_iterator: Iterator[Batch],
     within_epoch_val_dataloader: DataLoader,
@@ -338,6 +356,7 @@ def _train(
     validation_freq_within_epoch: Optional[int],
     limit_train_batches: Optional[int],
     limit_val_batches: Optional[int],
+    batch_size: int,
     prof=None,
 ) -> None:
     """
@@ -397,12 +416,11 @@ def _train(
     samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
-    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}"):
+    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer / batch_size):
         try:
             train_pipeline.progress(combined_iterator)
-
-            prof.step()
-
+            if prof:
+                prof.step()
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point
             ):  # progress made through the epoch
@@ -412,7 +430,6 @@ def _train(
                 for g in optimizer.param_groups:
                     g["lr"] = lr
                 change_lr = False
-
             if validation_freq_within_epoch and it % validation_freq_within_epoch == 0:
                 _evaluate(
                     limit_val_batches,
@@ -422,6 +439,7 @@ def _train(
                     "val",
                 )
                 train_pipeline._model.train()
+        
         except StopIteration:
             print(f"{get_mem_info('Training:  ')}")
             break
@@ -459,57 +477,57 @@ def train_val_test(
 
     train_iterator = iter(train_dataloader)
     test_iterator = iter(test_dataloader)
-    with profile(
-        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
-        profile_memory=True,
-        on_trace_ready=tensorboard_trace_handler(args.profile_dir),
-    ) as prof:
-        for epoch in range(args.epochs):
-            val_iterator = iter(val_dataloader)
-            _train(
-                train_pipeline,
-                train_iterator,
-                val_iterator,
-                val_dataloader,
-                epoch,
-                args.epochs,
-                args.change_lr,
-                args.lr_change_point,
-                args.lr_after_change_point,
-                args.validation_freq_within_epoch,
-                args.limit_train_batches,
-                args.limit_val_batches,
-                prof,
-            )
-            train_iterator = iter(train_dataloader)
-
-            if args.eval_acc:
-                val_next_iterator = (
-                    test_iterator if epoch == args.epochs - 1 else train_iterator
-                )
-
-                val_accuracy, val_auroc = _evaluate(
-                    args.limit_val_batches,
-                    train_pipeline,
-                    val_iterator,
-                    val_next_iterator,
-                    "val",
-                )
-
-                train_val_test_results.val_accuracies.append(val_accuracy)
-                train_val_test_results.val_aurocs.append(val_auroc)
-
+    if args.profile_dir == "":
+        prof = None
+    else:
+        prof =  profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
+            profile_memory=True,
+            on_trace_ready=tensorboard_trace_handler(args.profile_dir),
+        )
+    for epoch in range(args.epochs):
+        val_iterator = iter(val_dataloader)
+        _train(
+            train_pipeline,
+            train_iterator,
+            val_iterator,
+            val_dataloader,
+            epoch,
+            args.epochs,
+            args.change_lr,
+            args.lr_change_point,
+            args.lr_after_change_point,
+            args.validation_freq_within_epoch,
+            args.limit_train_batches,
+            args.limit_val_batches,
+            args.batch_size,
+            prof,
+        )
+        train_iterator = iter(train_dataloader)
         if args.eval_acc:
-            test_accuracy, test_auroc = _evaluate(
-                args.limit_test_batches,
-                train_pipeline,
-                test_iterator,
-                iter(test_dataloader),
-                "test",
+            val_next_iterator = (
+                test_iterator if epoch == args.epochs - 1 else train_iterator
             )
-            train_val_test_results.test_accuracy = test_accuracy
-            train_val_test_results.test_auroc = test_auroc
+            val_accuracy, val_auroc = _evaluate(
+                args.limit_val_batches,
+                train_pipeline,
+                val_iterator,
+                val_next_iterator,
+                "val",
+            )
+            train_val_test_results.val_accuracies.append(val_accuracy)
+            train_val_test_results.val_aurocs.append(val_auroc)
+    if args.eval_acc:
+        test_accuracy, test_auroc = _evaluate(
+            args.limit_test_batches,
+            train_pipeline,
+            test_iterator,
+            iter(test_dataloader),
+            "test",
+        )
+        train_val_test_results.test_accuracy = test_accuracy
+        train_val_test_results.test_auroc = test_auroc
 
     return train_val_test_results
 
@@ -561,6 +579,10 @@ def main(argv: List[str]) -> None:
         TOTAL_TRAINING_SAMPLES = avazu.TOTAL_TRAINING_SAMPLES
         setattr(args, "num_embeddings_per_feature", avazu.NUM_EMBEDDINGS_PER_FEATURE)
         data_module = avazu
+    elif "embedding_bag" in args.in_memory_binary_criteo_path:
+        TOTAL_TRAINING_SAMPLES = 65536 * 16
+        setattr(args, "num_embeddings_per_feature", synth.NUM_EMBEDDINGS_PER_FEATURE)
+        data_module = synth
     else:
         raise NotImplementedError()
 
@@ -640,21 +662,46 @@ def main(argv: List[str]) -> None:
     }
     sharding_types = None
     compute_kernels = None
-    if args.sharder_type == "colossalai":
+
+    if args.shard_type == "table":
         sharding_types = [ShardingType.TABLE_WISE.value]
+    elif args.shard_type == "tablecolumn":
+        sharding_types = [ShardingType.TABLE_COLUMN_WISE.value]
+    elif args.shard_type == "column":
+        sharding_types = [ShardingType.COLUMN_WISE.value]
+    elif args.shard_type == "row":
+        sharding_types = [ShardingType.ROW_WISE.value]
+    elif args.shard_type == "tablerow":
+        sharding_types = [ShardingType.TABLE_ROW_WISE.value]
+    else:
+        sharding_types = [ShardingType.TABLE_WISE.value, ShardingType.TABLE_COLUMN_WISE.value, ShardingType.COLUMN_WISE.value, ShardingType.ROW_WISE.value ]
+
+    print(f'sharding_types {sharding_types}')
+    
+    if args.kernel_type == "colossalai":
+        # ShardingType.DATA_PARALLEL.value,
+        # ShardingType.TABLE_WISE.value,
+        # ShardingType.COLUMN_WISE.value,
+        # ShardingType.TABLE_COLUMN_WISE.value,
+        # sharding_types = [ShardingType.TABLE_WISE.value]
         compute_kernels = [EmbeddingComputeKernel.CAI_BATCH.value]
-    elif args.sharder_type == "dense":
+    elif args.kernel_type == "dense":
         compute_kernels = [EmbeddingComputeKernel.DENSE.value]
-    elif args.sharder_type == "uvm":
+    elif args.kernel_type == "uvm":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM.value]
-    elif args.sharder_type == "uvm_lru":
+    elif args.kernel_type == "uvm_lru":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM_CACHING.value]
-    elif args.sharder_type == "uvm_lfu":
+    elif args.kernel_type == "uvm_lfu":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM_CACHING.value]
         fused_params["cache_algorithm"] = CacheAlgorithm.LFU
     else:
         if dist.get_rank() == 0:
             print("No constraints are applied")
+    
+    if  args.kernel_type != "colossalai":
+        print(f"{args.kernel_type} must be used with prefetch as 1")
+        args.prefetch_num = 1
+        
     constraints = build_constraints(
         data_module.DEFAULT_CAT_NAMES, sharding_types, compute_kernels
     )
@@ -673,7 +720,7 @@ def main(argv: List[str]) -> None:
         world_size=env.world_size,
         compute_device="cuda",
         hbm_cap=hbm_cap * 1024**3,  # GPU mem
-        ddr_cap=1000 * 1024**3,  # CPU mem
+        ddr_cap=512 * 1024**3,  # CPU mem
         # batch_size=args.batch_size
         # intra_host_bw=1000 * 1024**3 / 1000,
     )  # Device to Device bandwidth
@@ -689,6 +736,7 @@ def main(argv: List[str]) -> None:
         topology=topology,
         batch_size=args.batch_size,
         constraints=constraints,
+        debug=True,
     )
     plan = planner.collective_plan(train_model, sharders, env.process_group)
 
@@ -699,6 +747,7 @@ def main(argv: List[str]) -> None:
     print(f"{get_mem_info('After model parallel:  ')}")
     if dist.get_rank() == 0:
         print(f"Plan: {model.plan}")
+
 
     def optimizer_with_params():
         if args.adagrad:
@@ -712,15 +761,31 @@ def main(argv: List[str]) -> None:
     )
     optimizer = CombinedOptimizer([model.fused_optimizer, dense_optimizer])
 
-    train_pipeline = TrainPipelineSparseDist(
-        model,
-        optimizer,
-        device,
-    )
+    if args.prefetch_num > 1:
+        train_pipeline = TrainPipelineSparseDistPrefetch(
+            model,
+            optimizer,
+            device,
+            prefetch_num=args.prefetch_num,
+            sparse_embedding_kernel=model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
+                0]._emb_modules[0]
+        )
+    else:
+        train_pipeline = TrainPipelineSparseDist(
+            model,
+            optimizer,
+            device,
+        )
+
     train_val_test(
         args, train_pipeline, train_dataloader, val_dataloader, test_dataloader
     )
 
+    kernel = model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
+            0]._emb_modules[0]
+    
+    if isinstance(kernel, CAIBatchedDenseEmbeddingBag):
+        kernel._emb_module.cache_weight_mgr.print_comm_stats()
 
 if __name__ == "__main__":
     main(sys.argv[1:])
