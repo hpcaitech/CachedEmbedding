@@ -271,8 +271,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         default=1,
         help="Number of batch prefetched for caching",
     )
+    parser.add_argument(
+        "--synth_size",
+        type=str,
+        default="middle",
+        help="choose scale(total sparse embedding num) in subset of synth dataset. small, middle, big."
+    )
     return parser.parse_args(argv)
-
+    
 
 def _evaluate(
     limit_batches: Optional[int],
@@ -446,7 +452,8 @@ def _train(
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"{get_mem_info('Training:  ')}")
             break
-
+        if it > samples_per_trainer / batch_size:
+            break
 
 def train_val_test(
     args: argparse.Namespace,
@@ -581,6 +588,7 @@ def main(argv: List[str]) -> None:
         data_module = avazu
     elif "embedding_bag" in args.in_memory_binary_criteo_path:
         TOTAL_TRAINING_SAMPLES = 65536 * 16
+        synth.choose_data_size(args.synth_size)
         setattr(args, "num_embeddings_per_feature", synth.NUM_EMBEDDINGS_PER_FEATURE)
         data_module = synth
     else:

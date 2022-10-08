@@ -22,12 +22,11 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
 export DATAPATH=/data/scratch/RecSys/criteo_kaggle_data/
 # export DATAPATH=/data/criteo_kaggle_data/
 
-export GPUNUM=1
-export PREFETCH_NUM=16
-export EVAL_ACC=0
-export KERNELTYPE="colossalai"
-export SHARDTYPE="table"
-# export SHARDTYPE="uvm_lfu"
+# export GPUNUM=1
+# export PREFETCH_NUM=16
+export EVAL_ACC=1
+# export KERNELTYPE="colossalai"
+# export SHARDTYPE="table"
 export EMB_DIM=128
 
 if [[ ${EVAL_ACC} == 1 ]];  then
@@ -36,20 +35,9 @@ else
 export EVAL_ACC_FLAG=""
 fi
 
-# local batch size
-# 4
-# export BATCHSIZE=1024
-# export BATCHSIZE=1024
-
-# export BATCHSIZE=4096
-# 2
-# export BATCHSIZE=8192
-# 1
-
-
-for EMB_DIM in 32 #64 96
+for EMB_DIM in 128 #64 96
 do
-for PREFETCH_NUM in 2 #1 8 16 32
+for PREFETCH_NUM in 4 #1 8 16 32
 do
 for GPUNUM in 2
 do
@@ -57,7 +45,7 @@ for BATCHSIZE in 1024 #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512
 do
 for KERNELTYPE in   "uvm_lfu" #"colossalai" #"uvm_lfu" #"colossalai"
 do
-for SHARDTYPE in "table" "column" "row" "tablecolumn" "tablerow" 
+for SHARDTYPE in "table" # "column" "row" "tablecolumn" "tablerow" 
 # for SHARDTYPE in "tablerow" 
 do
 # For TorchRec baseline
@@ -72,7 +60,7 @@ mkdir -p ${LOG_DIR}
 torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/${PLAN} dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
     --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim ${EMB_DIM} --pin_memory \
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,${EMB_DIM}" --shuffle_batches \
-    --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "tensorboard_log/torchrec_kaggle/${PLAN}" --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee ./${LOG_DIR}/torchrec_${PLAN}.txt
+    --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "" --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee ./${LOG_DIR}/torchrec_${PLAN}.txt
 done
 done
 done

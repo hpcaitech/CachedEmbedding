@@ -16,11 +16,11 @@ for i in range(TABLLE_NUM):
     KEYS.append("table_{}".format(i))
 EMBEDDING_DIM = 128
 # Full dataset is too big
-CHOSEN_TABLES = [0, 2, 3, 4, 5, 7, 8, 9, 10, 12, 15, 18, 22, 27, 28]
-
+# CHOSEN_TABLES = [0, 2, 3, 4, 5, 7, 8, 9, 10, 12, 15, 18, 22, 27, 28]
+# CHOSEN_TABLES = [5, 8, 37, 54, 71,72,73,74,85,86,89,95,96,97,107,131,163, 185, 196, 204, 211, ]
+CHOSEN_TABLES = [i for i in range(300,418)]
 TEST_ITER = 100
 TEST_BATCH_SIZE = 16384
-
 WARMUP_ITERS = 5
 ##############################################
 
@@ -178,6 +178,13 @@ def test(iter_num=1, batch_size=4096):
 
 
 # test(TEST_ITER, TEST_BATCH_SIZE)
+num_embeddings_per_table = None
 for i in range(16):
-    indices_per_table, offsets_per_table, lengths_per_table, num_embeddings_per_table = load_file(FILE_LIST[i])
+    indices_per_table, offsets_per_table, lengths_per_table, num_embeddings_per_table1 = load_file(FILE_LIST[i])
+    if num_embeddings_per_table == None:
+        num_embeddings_per_table = num_embeddings_per_table1
+    else:
+        for i, num in enumerate(num_embeddings_per_table1):
+            num_embeddings_per_table[i] = max(num_embeddings_per_table[i], num)
     print(num_embeddings_per_table)
+    print(sum(num_embeddings_per_table))
