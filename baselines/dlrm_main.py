@@ -586,6 +586,10 @@ def main(argv: List[str]) -> None:
     else:
         raise NotImplementedError()
 
+    _num_embeddings_per_feature = args.num_embeddings_per_feature.split(",")
+    total_num_embeddings = sum([int(num) for num in _num_embeddings_per_feature])
+    print("total sparse indices num: ", total_num_embeddings)
+    
     rank = int(os.environ["LOCAL_RANK"])
     if torch.cuda.is_available():
         device: torch.device = torch.device(f"cuda:{rank}")
