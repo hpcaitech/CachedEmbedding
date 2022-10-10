@@ -22,7 +22,6 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
 export GPUNUM=1
 
 
-
 for EMB_DIM in 128 #64 96
 do
 for PREFETCH_NUM in 4 #1 8 16 32

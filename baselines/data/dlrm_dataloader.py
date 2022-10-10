@@ -29,7 +29,7 @@ from petastorm import make_batch_reader
 from pyarrow.parquet import ParquetDataset
 from .avazu import AvazuIterDataPipe
 from .synth import get_synth_data_loader
-
+from .custom import get_custom_data_loader
 STAGES = ["train", "val", "test"]
 KAGGLE_NUM_EMBEDDINGS_PER_FEATURE = '1460,583,10131227,2202608,305,24,12517,633,3,93145,5683,8351593,3194,27,14992,' \
                                     '5461306,10,5652,2173,4,7046547,18,15,286181,105,142572'  # For criteo kaggle
@@ -314,3 +314,5 @@ def get_dataloader(args: argparse.Namespace, backend: str, stage: str) -> DataLo
     elif "embedding_bag" in args.in_memory_binary_criteo_path:
         # dlrm dataset: https://github.com/facebookresearch/dlrm_datasets
         return get_synth_data_loader(args, stage)
+    elif "custom" in args.in_memory_binary_criteo_path:
+        return get_custom_data_loader(args, stage)
