@@ -262,7 +262,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--shard_type",
         type=str,
-        default="tw",
+        default="table",
         help="embedding tensor parallel type",
     )
     parser.add_argument(
