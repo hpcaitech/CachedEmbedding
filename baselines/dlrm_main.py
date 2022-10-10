@@ -63,7 +63,7 @@ try:
         TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,
         KAGGLE_TOTAL_TRAINING_SAMPLES,
     )
-    from data import avazu, synth
+    from data import avazu, synth, custom
 
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
@@ -591,6 +591,10 @@ def main(argv: List[str]) -> None:
         synth.choose_data_size(args.synth_size)
         setattr(args, "num_embeddings_per_feature", synth.NUM_EMBEDDINGS_PER_FEATURE)
         data_module = synth
+    elif "custom" in args.in_memory_binary_criteo_path:
+        TOTAL_TRAINING_SAMPLES = custom.TOTAL_TRAINING_SAMPLES
+        setattr(args, "num_embeddings_per_feature", custom.NUM_EMBEDDINGS_PER_FEATURE)
+        data_module = custom
     else:
         raise NotImplementedError()
 
