@@ -1,7 +1,8 @@
 #!/bin/bash
 set -x
 
-export PYTHONPATH=$HOME/codes/torchrec:$PYTHONPATH
+export DATAPATH=/data/scratch/RecSys/criteo_kaggle_data/
+# export DATAPATH=/data/criteo_kaggle_data/
 
 set_n_least_used_CUDA_VISIBLE_DEVICES() {
     local n=${1:-"9999"}
@@ -18,22 +19,9 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
     echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 }
 
+export GPUNUM=1
 
-export DATAPATH=/data/scratch/RecSys/criteo_kaggle_data/
-# export DATAPATH=/data/criteo_kaggle_data/
 
-# export GPUNUM=1
-# export PREFETCH_NUM=16
-export EVAL_ACC=1
-# export KERNELTYPE="colossalai"
-# export SHARDTYPE="table"
-export EMB_DIM=128
-
-if [[ ${EVAL_ACC} == 1 ]];  then
-EVAL_ACC_FLAG="--eval_acc"
-else
-export EVAL_ACC_FLAG=""
-fi
 
 for EMB_DIM in 128 #64 96
 do
@@ -43,15 +31,14 @@ for GPUNUM in 2
 do
 for BATCHSIZE in 1024 #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
 do
-for KERNELTYPE in   "uvm_lfu" #"colossalai" #"uvm_lfu" #"colossalai"
+for BATCHSIZE in 16384 #16384 8192 4096 2048 1024 512     
 do
 for SHARDTYPE in "table" # "column" "row" "tablecolumn" "tablerow" 
 # for SHARDTYPE in "tablerow" 
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
-export PLAN=g${GPUNUM}_bs_${BATCHSIZE}_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}
-rm -rf ./tensorboard_log/torchrec_kaggle/
+rm -rf ./tensorboard_log/torchrec_kaggle/w${GPUNUM}_${BATCHSIZE}_${SHARDTYPE}
 # env CUDA_LAUNCH_BLOCKING=1 
 # timeout -s SIGKILL 30m 
 LOG_DIR=./logs/${KERNELTYPE}_${SHARDTYPE}_logs
@@ -64,10 +51,6 @@ torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/${PLAN} dist.ddp -j 1x$
 done
 done
 done
-done
-done
-done
-
 # exit(0)
 # torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/w2_16k dist.ddp -j 1x2 --script baselines/dlrm_main.py -- \
 #     --in_memory_binary_criteo_path /data/criteo_kaggle_data --kaggle --embedding_dim 128 --pin_memory \
