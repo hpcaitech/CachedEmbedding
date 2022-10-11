@@ -703,6 +703,8 @@ def main(argv: List[str]) -> None:
         compute_kernels = [EmbeddingComputeKernel.CAI_BATCH.value]
     elif args.kernel_type == "dense":
         compute_kernels = [EmbeddingComputeKernel.DENSE.value]
+    elif args.kernel_type == "fused":
+        compute_kernels = [EmbeddingComputeKernel.FUSED.value]
     elif args.kernel_type == "uvm":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM.value]
     elif args.kernel_type == "uvm_lru":
