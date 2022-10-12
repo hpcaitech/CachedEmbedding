@@ -408,21 +408,31 @@ def _train(
     if limit_train_batches is not None and epoch > 0:
         limit_train_batches -= TRAIN_PIPELINE_STAGES - 1
 
+    if limit_train_batches is not None:
+        limit_train_batches = int(limit_train_batches / batch_size / dist.get_world_size())
+        print(f'limit_train_batches {limit_train_batches} batch_size {batch_size} world_size {dist.get_world_size()}')
+    
     # Because TrainPipelineSparseDist buffer batches internally, we load in
     # TRAIN_PIPELINE_STAGES - 1 batches from the next_iterator into the buffers so that
     # when train_val_test switches to the next phase, train_pipeline will start
     # producing results for the TRAIN_PIPELINE_STAGES - 1 buffered batches (as opposed
     # to the last TRAIN_PIPELINE_STAGES - 1 batches from iterator).
+
+    # bs * #iter * world_size = args.limit_train_batches
+
     combined_iterator = itertools.chain(
         iterator
         if limit_train_batches is None
         else itertools.islice(iterator, limit_train_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
-    samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
-
+    if limit_train_batches is not None:
+        samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
+    else:
+        samples_per_trainer = limit_train_batches
+    
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
-    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer / batch_size):
+    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=limit_train_batches):
         try:
             train_pipeline.progress(combined_iterator)
             if prof:
@@ -447,10 +457,10 @@ def _train(
                 train_pipeline._model.train()
         
         except StopIteration:
-            print(f"{get_mem_info('Training:  ')}")
+            print(f"StopIteration {get_mem_info('Training:  ')}")
             break
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
-            print(f"{get_mem_info('Training:  ')}")
+            print(f"RuntimeError {get_mem_info('Training:  ')}")
             break
         if it > samples_per_trainer / batch_size:
             break
@@ -600,7 +610,7 @@ def main(argv: List[str]) -> None:
 
     _num_embeddings_per_feature = args.num_embeddings_per_feature.split(",")
     total_num_embeddings = sum([int(num) for num in _num_embeddings_per_feature])
-    print("total sparse indices num: ", total_num_embeddings)
+    print("embedding table row num: ", total_num_embeddings)
     
     rank = int(os.environ["LOCAL_RANK"])
     if torch.cuda.is_available():
