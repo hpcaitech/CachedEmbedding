@@ -19,17 +19,17 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
     echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 }
 
-export LOG_DIR="./logs_1tb/"
+export LOG_DIR="/data2/users/lcfjr/logs_1tb/a"
 mkdir -p ${LOG_DIR}
 
-export GPUNUM=1
+export GPUNUM=2
 export PREFETCH_NUM=8
 export EVAL_ACC=0
 export KERNELTYPE="colossalai" #"colossalai"
 export SHARDTYPE="table"
 export BATCHSIZE=1024
 # export SHARDTYPE="uvm_lfu"
-# export EMB_DIM=128
+export EMB_DIM=128
 
 if [[ ${EVAL_ACC} == 1 ]];  then
 EVAL_ACC_FLAG="--eval_acc"
@@ -37,16 +37,26 @@ else
 export EVAL_ACC_FLAG=""
 fi
 
+
+# For TorchRec baseline
+# ${BATCHSIZE}*${GPUNUM} is the global batch size
+for PREFETCH_NUM in 8 1
+do
+for BATCHSIZE in 8192 4096 2048 1024
+do
+for GPUNUM in 1 2 4
+do
+set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
 export PLAN=k_${KERNELTYPE}_g_${GPUNUM}_bs_${BATCHSIZE}_sd_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}
 
-set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
-# For TorchRec baseline
-torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w1_16k dist.ddp -j 1x1 --script baselines/dlrm_main.py -- \
-    --in_memory_binary_criteo_path ${DATASETPATH} --embedding_dim 128 --pin_memory \
+torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w1_16k dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
+    --in_memory_binary_criteo_path ${DATASETPATH} --embedding_dim ${EMB_DIM} --pin_memory \
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
     --learning_rate 1. --batch_size ${BATCHSIZE} --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} \
-    --profile_dir "" ${EVAL_ACC_FLAG} 2>&1 | tee ./${LOG_DIR}/torchrec_${PLAN}.txt
-
+    --profile_dir "" ${EVAL_ACC_FLAG} --limit_train_batches 10240000 2>&1 | tee ${LOG_DIR}/torchrec_${PLAN}.txt
+done
+done
+done
 # torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w2_16k dist.ddp -j 1x2 --script baselines/dlrm_main.py -- \
 #     --in_memory_binary_criteo_path ${DATASETPATH} --embedding_dim 128 --pin_memory \
 #     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
