@@ -12,8 +12,8 @@ from ..utils import get_time_elapsed
 from ..datasets.utils import KJTAllToAll
 from ..utils import prepare_tablewise_config
 import colossalai
-from colossalai.nn.parallel.layers import ParallelFreqAwareEmbeddingBag, EvictionStrategy, \
-    TablewiseEmbeddingBagConfig, ParallelFreqAwareEmbeddingBagTablewise
+from colossalai.nn.parallel.layers import ParallelCachedEmbeddingBag, EvictionStrategy, \
+    TablewiseEmbeddingBagConfig, ParallelCachedEmbeddingBagTablewise
 from colossalai.core import global_context as gpc
 from colossalai.context.parallel_mode import ParallelMode
 import numpy as np
@@ -55,7 +55,7 @@ class FusedSparseModules(nn.Module):
                 world_size = torch.distributed.get_world_size()
                 embedding_bag_config_list = prepare_tablewise_config(
                     num_embeddings_per_feature, 0.01, id_freq_map, dataset, world_size)
-                self.embed = ParallelFreqAwareEmbeddingBagTablewise(
+                self.embed = ParallelCachedEmbeddingBagTablewise(
                     embedding_bag_config_list,
                     embedding_dim,
                     sparse=sparse,
@@ -67,7 +67,7 @@ class FusedSparseModules(nn.Module):
                 )
                 self.shape_hook = sparse_embedding_shape_hook_for_tablewise
             else:
-                self.embed = ParallelFreqAwareEmbeddingBag(
+                self.embed = ParallelCachedEmbeddingBag(
                     sum(num_embeddings_per_feature),
                     embedding_dim,
                     sparse=sparse,

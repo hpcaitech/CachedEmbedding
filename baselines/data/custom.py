@@ -3,7 +3,7 @@ import torch
 from torch import distributed as dist
 import numpy as np
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple, Union
-from colossalai.nn.parallel.layers.cache_embedding import FreqAwareEmbeddingBag
+from colossalai.nn.parallel.layers.cache_embedding import CachedEmbeddingBag
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from fbgemm_gpu.split_table_batched_embeddings_ops import SplitTableBatchedEmbeddingBagsCodegen, EmbeddingLocation, ComputeDevice, CacheAlgorithm
 import time
