@@ -30,6 +30,7 @@ export SHARDTYPE="table"
 export BATCHSIZE=1024
 # export SHARDTYPE="uvm_lfu"
 export EMB_DIM=128
+export CACHERATIO=0.1
 
 if [[ ${EVAL_ACC} == 1 ]];  then
 EVAL_ACC_FLAG="--eval_acc"
@@ -59,14 +60,14 @@ export BATCHSIZE=${batch_size_list[i]}
 export GPUNUM=${gpu_num_list[i]}
 
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
-export PLAN=k_${KERNELTYPE}_g_${GPUNUM}_bs_${BATCHSIZE}_sd_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}
+export PLAN=k_${KERNELTYPE}_g_${GPUNUM}_bs_${BATCHSIZE}_sd_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}_cache_${${CACHERATIO}}
 
 echo "training batchsize" ${BATCHSIZE} "gpunum" ${GPUNUM}
 torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w1_16k dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
     --in_memory_binary_criteo_path ${DATASETPATH} --embedding_dim ${EMB_DIM} --pin_memory \
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
     --learning_rate 1. --batch_size ${BATCHSIZE} --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} \
-    --profile_dir "" ${EVAL_ACC_FLAG} --limit_train_batches 102400000 2>&1 | tee ${LOG_DIR}/torchrec_${PLAN}.txt
+    --profile_dir "" ${EVAL_ACC_FLAG} --cache_ratio ${CACHERATIO} --limit_train_batches 102400000 2>&1 | tee ${LOG_DIR}/torchrec_${PLAN}.txt
 done
 done
 # done
