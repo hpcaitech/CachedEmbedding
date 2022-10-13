@@ -49,6 +49,7 @@ gpu_num_list=(8 4 2 1)
 # for PREFETCH_NUM in 8 #1
 # do
 for ((i=0;i<${#batch_size_list[@]};i++)); do
+
 for KERNELTYPE in "colossalai"
 do
 for CACHERATIO in 0.05
@@ -62,9 +63,11 @@ export BATCHSIZE=${batch_size_list[i]}
 export GPUNUM=${gpu_num_list[i]}
 
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
+
 export PLAN=k_${KERNELTYPE}_g_${GPUNUM}_bs_${BATCHSIZE}_sd_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}_cache_${CACHERATIO}
 echo "training batchsize" ${BATCHSIZE} "gpunum" ${GPUNUM}
 
+echo "training batchsize" ${BATCHSIZE} "gpunum" ${GPUNUM}
 torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w1_16k dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
     --in_memory_binary_criteo_path ${DATASETPATH} --embedding_dim ${EMB_DIM} --pin_memory \
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
