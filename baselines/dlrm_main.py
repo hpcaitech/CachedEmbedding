@@ -277,6 +277,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         default="50M",
         help="choose scale(total sparse embedding num) in subset of synth dataset. 4M, 50M, 512M."
     )
+    parser.add_argument(
+        "--cache_ratio",
+        type=float,
+        default=0.05,
+        help="cache ratio for colossalai.",
+    )
     return parser.parse_args(argv)
     
 
@@ -683,7 +689,7 @@ def main(argv: List[str]) -> None:
         "optimizer": OptimType.EXACT_ROWWISE_ADAGRAD
         if args.adagrad
         else OptimType.EXACT_SGD,
-        "cache_load_factor": 0.01,
+        "cache_load_factor": args.cache_ratio,
         # "cache_algorithm": CacheAlgorithm.LFU,
     }
     sharding_types = None
@@ -711,6 +717,7 @@ def main(argv: List[str]) -> None:
         # ShardingType.TABLE_COLUMN_WISE.value,
         # sharding_types = [ShardingType.TABLE_WISE.value]
         compute_kernels = [EmbeddingComputeKernel.CAI_BATCH.value]
+        fused_params["cache_ratio"] = 0.05
     elif args.kernel_type == "dense":
         compute_kernels = [EmbeddingComputeKernel.DENSE.value]
     elif args.kernel_type == "fused":
