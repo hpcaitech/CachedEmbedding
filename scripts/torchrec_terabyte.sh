@@ -42,16 +42,19 @@ fi
 # For TorchRec baseline
 # ${BATCHSIZE}*${GPUNUM} is the global batch size
 
-batch_size_list=(1024 2048 4096 8192)
-gpu_num_list=(8 4 2 1)
-
+# batch_size_list=(1024 2048 4096 8192)
+# gpu_num_list=(8 4 2 1)
+batch_size_list=(2048 4096 )
+gpu_num_list=(4 2 )
 # (1024, 8) (2048, 4) (4096, 2) (8192, 1)
 # for PREFETCH_NUM in 8 #1
 # do
 for ((i=0;i<${#batch_size_list[@]};i++)); do
 for KERNELTYPE in "colossalai"
 do
-for CACHERATIO in 0.05
+for CACHERATIO in 0.1
+do
+for SHARDTYPE in "column" "row" "tablecolumn" "tablerow" 
 do
 # for BATCHSIZE in 2048 #8192 #4096 2048 1024
 # do
@@ -71,6 +74,7 @@ torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w1_16k dist.ddp -j 1x
     --learning_rate 1. --batch_size ${BATCHSIZE} --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} \
     --profile_dir "" ${EVAL_ACC_FLAG} --cache_ratio ${CACHERATIO} --limit_train_batches 102400000 2>&1 | tee ${LOG_DIR}/torchrec_${PLAN}.txt
 
+done
 done
 done
 done
