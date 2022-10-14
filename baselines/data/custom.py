@@ -16,7 +16,7 @@ from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torch.utils.data import DataLoader, IterableDataset
 import os
 
-NUM_ROWS = int(2**25) # samples num
+NUM_ROWS = int(2**23) # samples num
 CAT_FEATURE_COUNT = 8
 E = int(1e7) # unique embeddings num
 s = 0.25 # long-tail skew

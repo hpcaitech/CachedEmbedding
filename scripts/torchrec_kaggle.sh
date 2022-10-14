@@ -26,11 +26,11 @@ for EMB_DIM in 128 #64 96
 do
 for PREFETCH_NUM in 4 #1 8 16 32
 do
-for GPUNUM in 2
+for GPUNUM in 1
 do
 for KERNELTYPE in "colossalai"
 do
-for BATCHSIZE in 16384 #16384 8192 4096 2048 1024 512     
+for BATCHSIZE in 4096 #16384 8192 4096 2048 1024 512     
 do
 for SHARDTYPE in "table" # "column" "row" "tablecolumn" "tablerow" 
 # for SHARDTYPE in "tablerow" 
