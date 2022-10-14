@@ -18,9 +18,9 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
     echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 }
 
-# export DATAPATH=/data/scratch/RecSys/embedding_bag
-export DATAPATH=custom
-export SCALE="52M" # "4M ""52M" "512M"
+export DATAPATH=/data/scratch/RecSys/embedding_bag
+# export DATAPATH=custom
+export SCALE="512M" # "4M ""52M" "512M"
 export EVAL_ACC=0
 export EMB_DIM=128
 
@@ -41,11 +41,11 @@ fi
 # 1
 
 mkdir -p logs
-for PREFETCH_NUM in 1 #8 16 32
+for PREFETCH_NUM in 1 32 4 8 16 #8 16 32
 do
 for GPUNUM in 1 # 1 # 2
 do
-for BATCHSIZE in 1024 #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
+for BATCHSIZE in 256 #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
 do
 for SHARDTYPE in  "table"
 do
