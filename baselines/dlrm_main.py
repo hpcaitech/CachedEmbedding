@@ -63,7 +63,7 @@ try:
         TERABYTE_NUM_EMBEDDINGS_PER_FEATURE,
         KAGGLE_TOTAL_TRAINING_SAMPLES,
     )
-    from data import avazu, synth
+    from data import avazu, synth, custom
 
     # pyre-ignore[21]
     # @manual=//pytorch/benchmark/torchrec_dlrm/modules:dlrm_train
@@ -262,7 +262,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--shard_type",
         type=str,
-        default="tw",
+        default="table",
         help="embedding tensor parallel type",
     )
     parser.add_argument(
@@ -271,8 +271,20 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         default=1,
         help="Number of batch prefetched for caching",
     )
+    parser.add_argument(
+        "--synth_size",
+        type=str,
+        default="50M",
+        help="choose scale(total sparse embedding num) in subset of synth dataset. 4M, 50M, 512M."
+    )
+    parser.add_argument(
+        "--cache_ratio",
+        type=float,
+        default=0.05,
+        help="cache ratio for colossalai.",
+    )
     return parser.parse_args(argv)
-
+    
 
 def _evaluate(
     limit_batches: Optional[int],
@@ -439,14 +451,15 @@ def _train(
                     "val",
                 )
                 train_pipeline._model.train()
-        
+
         except StopIteration:
             print(f"{get_mem_info('Training:  ')}")
             break
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"{get_mem_info('Training:  ')}")
             break
-
+        if it > samples_per_trainer / batch_size:
+            break
 
 def train_val_test(
     args: argparse.Namespace,
@@ -581,14 +594,19 @@ def main(argv: List[str]) -> None:
         data_module = avazu
     elif "embedding_bag" in args.in_memory_binary_criteo_path:
         TOTAL_TRAINING_SAMPLES = 65536 * 16
+        synth.choose_data_size(args.synth_size)
         setattr(args, "num_embeddings_per_feature", synth.NUM_EMBEDDINGS_PER_FEATURE)
         data_module = synth
+    elif "custom" in args.in_memory_binary_criteo_path:
+        TOTAL_TRAINING_SAMPLES = custom.TOTAL_TRAINING_SAMPLES
+        setattr(args, "num_embeddings_per_feature", custom.NUM_EMBEDDINGS_PER_FEATURE)
+        data_module = custom
     else:
         raise NotImplementedError()
 
     _num_embeddings_per_feature = args.num_embeddings_per_feature.split(",")
     total_num_embeddings = sum([int(num) for num in _num_embeddings_per_feature])
-    print("total sparse indices num: ", total_num_embeddings)
+    print("embedding table row num: ", total_num_embeddings)
     
     rank = int(os.environ["LOCAL_RANK"])
     if torch.cuda.is_available():
@@ -661,7 +679,7 @@ def main(argv: List[str]) -> None:
         "optimizer": OptimType.EXACT_ROWWISE_ADAGRAD
         if args.adagrad
         else OptimType.EXACT_SGD,
-        "cache_load_factor": 0.01,
+        "cache_load_factor": args.cache_ratio,
         # "cache_algorithm": CacheAlgorithm.LFU,
     }
     sharding_types = None
@@ -689,8 +707,11 @@ def main(argv: List[str]) -> None:
         # ShardingType.TABLE_COLUMN_WISE.value,
         # sharding_types = [ShardingType.TABLE_WISE.value]
         compute_kernels = [EmbeddingComputeKernel.CAI_BATCH.value]
+        fused_params["cache_ratio"] = 0.05
     elif args.kernel_type == "dense":
         compute_kernels = [EmbeddingComputeKernel.DENSE.value]
+    elif args.kernel_type == "fused":
+        compute_kernels = [EmbeddingComputeKernel.FUSED.value]
     elif args.kernel_type == "uvm":
         compute_kernels = [EmbeddingComputeKernel.FUSED_UVM.value]
     elif args.kernel_type == "uvm_lru":

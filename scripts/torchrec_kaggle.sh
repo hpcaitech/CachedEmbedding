@@ -22,39 +22,34 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
 export GPUNUM=1
 
 
-
-# local batch size
-# 4
-export BATCHSIZE=1024
-
-# export BATCHSIZE=1024
-
-# export BATCHSIZE=4096
-# 2
-# export BATCHSIZE=8192
-# 1
-# export BATCHSIZE=16384
-
-# export SHARDTYPE="colossalai"
-# 01:37
-export SHARDTYPE="uvm_lfu"
-
-mkdir -p logs
-
+for EMB_DIM in 128 #64 96
+do
+for PREFETCH_NUM in 4 #1 8 16 32
+do
 for GPUNUM in 1
 do
-for BATCHSIZE in 16384 #16384 8192 4096 2048 1024 512     
+for KERNELTYPE in "colossalai"
 do
-for SHARDTYPE in  "colossalai" #"uvm" "colossalai"
+for BATCHSIZE in 4096 #16384 8192 4096 2048 1024 512     
+do
+for SHARDTYPE in "table" # "column" "row" "tablecolumn" "tablerow" 
+# for SHARDTYPE in "tablerow" 
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
 rm -rf ./tensorboard_log/torchrec_kaggle/w${GPUNUM}_${BATCHSIZE}_${SHARDTYPE}
 # env CUDA_LAUNCH_BLOCKING=1 
-timeout -s SIGKILL 30m torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/w${GPUNUM}_${BATCHSIZE} dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
-    --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim 128 --pin_memory \
-    --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
-    --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "tensorboard_log/torchrec_kaggle/w${GPUNUM}_${BATCHSIZE}_${SHARDTYPE}" --sharder_type ${SHARDTYPE} --eval_acc 2>&1 | tee logs/torchrec_${GPUNUM}_${BATCHSIZE}_${SHARDTYPE}.txt
+# timeout -s SIGKILL 30m 
+LOG_DIR=./logs/${KERNELTYPE}_${SHARDTYPE}_logs
+mkdir -p ${LOG_DIR}
+
+torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/${PLAN} dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
+    --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim ${EMB_DIM} --pin_memory \
+    --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,${EMB_DIM}" --shuffle_batches \
+    --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "" --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee ./${LOG_DIR}/torchrec_${PLAN}.txt
+done
+done
+done
 done
 done
 done
