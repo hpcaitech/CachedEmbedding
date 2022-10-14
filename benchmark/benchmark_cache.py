@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
 
-from colossalai.nn.parallel.layers import FreqAwareEmbeddingBag, EvictionStrategy
+from colossalai.nn.parallel.layers import CachedEmbeddingBag, EvictionStrategy
 from recsys.datasets.criteo import get_id_freq_map
 from data_utils import get_dataloader, NUM_EMBED, CRITEO_PATH
 
@@ -39,7 +39,7 @@ def benchmark_cache_embedding(batch_size,
     torch.cuda.reset_peak_memory_stats()
     device = torch.device('cuda:0')
     with Timer() as timer:
-        model = FreqAwareEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True, evict_strategy=EvictionStrategy.LFU if use_lfu else EvictionStrategy.DATASET).to(device)
+        model = CachedEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True, evict_strategy=EvictionStrategy.LFU if use_lfu else EvictionStrategy.DATASET).to(device)
         print(f"model init: {timer.elapsed:.2f}s")
         with Timer() as timer:
             model.preprocess(cuda_row_num, id_freq_map, warmup_ratio=warmup_ratio, buffer_size=buf_size)

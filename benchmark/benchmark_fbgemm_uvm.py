@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from colossalai.nn.parallel.layers.cache_embedding import FreqAwareEmbeddingBag
+from colossalai.nn.parallel.layers.cache_embedding import CachedEmbeddingBag
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from fbgemm_gpu.split_table_batched_embeddings_ops import SplitTableBatchedEmbeddingBagsCodegen, EmbeddingLocation, ComputeDevice, CacheAlgorithm
 import time
@@ -95,7 +95,7 @@ def test(iter_num=1, batch_size=4096):
     indices_per_table, offsets_per_table, lengths_per_table, num_embeddings_per_table = load_file(
         FILE_LIST[0])
     table_idx_offset_list = np.cumsum([0] + num_embeddings_per_table)
-    fae = FreqAwareEmbeddingBag(
+    fae = CachedEmbeddingBag(
         num_embeddings=sum(num_embeddings_per_table),
         embedding_dim=EMBEDDING_DIM,
         sparse=True,

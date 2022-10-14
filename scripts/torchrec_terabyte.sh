@@ -49,7 +49,10 @@ gpu_num_list=(8 4 2 1)
 # for PREFETCH_NUM in 8 #1
 # do
 for ((i=0;i<${#batch_size_list[@]};i++)); do
-for KERNELTYPE in "fused" "colossalai"
+
+for KERNELTYPE in "colossalai"
+do
+for CACHERATIO in 0.05
 do
 # for BATCHSIZE in 2048 #8192 #4096 2048 1024
 # do
@@ -60,7 +63,9 @@ export BATCHSIZE=${batch_size_list[i]}
 export GPUNUM=${gpu_num_list[i]}
 
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
-export PLAN=k_${KERNELTYPE}_g_${GPUNUM}_bs_${BATCHSIZE}_sd_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}_cache_${${CACHERATIO}}
+
+export PLAN=k_${KERNELTYPE}_g_${GPUNUM}_bs_${BATCHSIZE}_sd_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}_cache_${CACHERATIO}
+echo "training batchsize" ${BATCHSIZE} "gpunum" ${GPUNUM}
 
 echo "training batchsize" ${BATCHSIZE} "gpunum" ${GPUNUM}
 torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w1_16k dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
@@ -68,8 +73,11 @@ torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w1_16k dist.ddp -j 1x
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
     --learning_rate 1. --batch_size ${BATCHSIZE} --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} \
     --profile_dir "" ${EVAL_ACC_FLAG} --cache_ratio ${CACHERATIO} --limit_train_batches 102400000 2>&1 | tee ${LOG_DIR}/torchrec_${PLAN}.txt
+
 done
 done
+done
+
 # done
 # done
 # done
