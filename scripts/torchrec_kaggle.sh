@@ -28,7 +28,7 @@ for PREFETCH_NUM in 4 #1 8 16 32
 do
 for GPUNUM in 2
 do
-for BATCHSIZE in 1024 #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
+for KERNELTYPE in "colossalai"
 do
 for BATCHSIZE in 16384 #16384 8192 4096 2048 1024 512     
 do
@@ -47,6 +47,9 @@ torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/${PLAN} dist.ddp -j 1x$
     --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim ${EMB_DIM} --pin_memory \
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,${EMB_DIM}" --shuffle_batches \
     --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "" --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee ./${LOG_DIR}/torchrec_${PLAN}.txt
+done
+done
+done
 done
 done
 done
