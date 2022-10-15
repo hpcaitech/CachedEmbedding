@@ -105,7 +105,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         "--batch_size", type=int, default=32, help="batch size to use for training"
     )
     parser.add_argument(
-        "--limit_train_batches",
+        "--limit_train_samples",
         type=int,
         default=None,
         help="number of train batches",
@@ -366,7 +366,7 @@ def _train(
     lr_change_point: float,
     lr_after_change_point: float,
     validation_freq_within_epoch: Optional[int],
-    limit_train_batches: Optional[int],
+    limit_train_samples: Optional[int],
     limit_val_batches: Optional[int],
     batch_size: int,
     prof=None,
@@ -398,7 +398,7 @@ def _train(
             Applied only if change_lr is set to True.
         validation_freq_within_epoch (Optional[int]): Frequency at which validation
             will be run within an epoch.
-        limit_train_batches (Optional[int]): Number of train batches.
+        limit_train_samples (Optional[int]): Number of train batches.
         limit_val_batches (Optional[int]): Number of validation batches.
 
 
@@ -411,28 +411,41 @@ def _train(
     # For the first epoch, train_pipeline has no buffered batches, but for all other
     # epochs, train_pipeline will have TRAIN_PIPELINE_STAGES - 1 from iterator already
     # present in its buffer.
-    if limit_train_batches is not None and epoch > 0:
-        limit_train_batches -= TRAIN_PIPELINE_STAGES - 1
+    if limit_train_samples is not None and epoch > 0:
+        limit_train_samples -= TRAIN_PIPELINE_STAGES - 1
+
+    if limit_train_samples is not None:
+        limit_train_batches = int(limit_train_samples / batch_size / dist.get_world_size())
+        print(f'limit_train_samples {limit_train_batches} batch_size {batch_size} world_size {dist.get_world_size()}')
+    else:
+        limit_train_batches = None
 
     # Because TrainPipelineSparseDist buffer batches internally, we load in
     # TRAIN_PIPELINE_STAGES - 1 batches from the next_iterator into the buffers so that
     # when train_val_test switches to the next phase, train_pipeline will start
     # producing results for the TRAIN_PIPELINE_STAGES - 1 buffered batches (as opposed
     # to the last TRAIN_PIPELINE_STAGES - 1 batches from iterator).
+
+    # bs * #iter * world_size = args.limit_train_samples
+
     combined_iterator = itertools.chain(
         iterator
         if limit_train_batches is None
-        else itertools.islice(iterator, limit_train_batches),
+        else itertools.islice(iterator, limit_train_samples),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
-    samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
-
+    if limit_train_samples is None:
+        samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
+    else:
+        samples_per_trainer = limit_train_samples
+    
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
-    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer / batch_size):
+    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer):
         try:
             train_pipeline.progress(combined_iterator)
             if prof:
                 prof.step()
+            # FIXME(jiaruifang) I have not tested the lr change strategy
             if change_lr and (
                 (it * (epoch + 1) / samples_per_trainer) > lr_change_point
             ):  # progress made through the epoch
@@ -451,14 +464,14 @@ def _train(
                     "val",
                 )
                 train_pipeline._model.train()
-
+        
         except StopIteration:
-            print(f"{get_mem_info('Training:  ')}")
+            print(f"StopIteration {get_mem_info('Training:  ')}")
             break
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
-            print(f"{get_mem_info('Training:  ')}")
+            print(f"RuntimeError {get_mem_info('Training:  ')}")
             break
-        if it > samples_per_trainer / batch_size:
+        if it > samples_per_trainer:
             break
 
 def train_val_test(
@@ -512,7 +525,7 @@ def train_val_test(
             args.lr_change_point,
             args.lr_after_change_point,
             args.validation_freq_within_epoch,
-            args.limit_train_batches,
+            args.limit_train_samples,
             args.limit_val_batches,
             args.batch_size,
             prof,

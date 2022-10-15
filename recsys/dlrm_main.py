@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument("--memory_fraction", type=float, default=None)
     parser.add_argument("--num_embeddings", type=int, default=10000)
     parser.add_argument(
-        "--limit_train_batches",
+        "--limit_train_samples",
         type=int,
         default=None,
         help="number of train batches",
