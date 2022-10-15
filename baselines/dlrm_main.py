@@ -438,7 +438,9 @@ def _train(
     #     samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
     # else:
     #     samples_per_trainer = limit_train_samples
-    
+    if limit_train_batches is None:
+        limit_train_batches = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
+        
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=limit_train_batches):
         try:
