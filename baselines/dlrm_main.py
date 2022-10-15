@@ -431,23 +431,23 @@ def _train(
     combined_iterator = itertools.chain(
         iterator
         if limit_train_batches is None
-        else itertools.islice(iterator, limit_train_samples),
+        else itertools.islice(iterator, limit_train_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
-    if limit_train_samples is None:
-        samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
-    else:
-        samples_per_trainer = limit_train_samples
+    # if limit_train_samples is None:
+    #     samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
+    # else:
+    #     samples_per_trainer = limit_train_samples
     
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
-    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=samples_per_trainer):
+    for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=limit_train_batches):
         try:
             train_pipeline.progress(combined_iterator)
             if prof:
                 prof.step()
             # FIXME(jiaruifang) I have not tested the lr change strategy
             if change_lr and (
-                (it * (epoch + 1) / samples_per_trainer) > lr_change_point
+                (it * (epoch + 1) / limit_train_batches) > lr_change_point
             ):  # progress made through the epoch
                 print(f"Changing learning rate to: {lr_after_change_point}")
                 optimizer = train_pipeline._optimizer
@@ -471,7 +471,7 @@ def _train(
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"RuntimeError {get_mem_info('Training:  ')}")
             break
-        if it > samples_per_trainer:
+        if it > limit_train_batches:
             break
 
 def train_val_test(
