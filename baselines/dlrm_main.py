@@ -473,8 +473,8 @@ def _train(
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"RuntimeError {get_mem_info('Training:  ')}")
             break
-        if it > limit_train_batches:
-            break
+        # if it > limit_train_batches:
+        #     break
 
 
 def train_val_test(
