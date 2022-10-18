@@ -33,15 +33,16 @@ Please refer to `scripts/preprocess` dir to see the details.
 ### Usage
 
 1. Installation Dependencies
-Install ColossalAI (commit id e8d8eda5e7a0619bd779e35065397679e1536dcd)
+
+Install [ColossalAI](https://github.com/hpcaitech/ColossalAI) (commit id e8d8eda5e7a0619bd779e35065397679e1536dcd)
 
 https://github.com/hpcaitech/ColossalAI
 
-Install our customized torchrec (commit id e8d8eda5e7a0619bd779e35065397679e1536dcd)
+Install our customized [torchrec](https://github.com/hpcaitech/torchrec) (commit id e8d8eda5e7a0619bd779e35065397679e1536dcd)
 
 https://github.com/hpcaitech/torchrec
 
-Or, build a docker image from [docker](./docker).
+Or, build a docker image using [docker/Dockerfile](./docker/Dockerfile).
 Or, use prebuilt docker image on dockerhub.
 
 ```
