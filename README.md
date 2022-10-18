@@ -32,7 +32,7 @@ Please refer to `scripts/preprocess` dir to see the details.
 
 ### Usage
 
-1. Installation from Docker.
+1. Installation dependencies.
 
 Install ColossalAI (commit id e8d8eda5e7a0619bd779e35065397679e1536dcd)
 
