@@ -21,18 +21,18 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
 
 export GPUNUM=1
 
-
 for EMB_DIM in 128 #64 96
 do
 for PREFETCH_NUM in 4 #1 8 16 32
 do
-for GPUNUM in 1
+for GPUNUM in 8
 do
-for KERNELTYPE in "colossalai"
+for KERNELTYPE in "colossalai" # "fused" # "colossalai"
 do
 for BATCHSIZE in 4096 #16384 8192 4096 2048 1024 512     
 do
 for SHARDTYPE in "table" # "column" "row" "tablecolumn" "tablerow" 
+
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
@@ -42,8 +42,8 @@ LOG_DIR=./logs/${KERNELTYPE}_${SHARDTYPE}_logs
 mkdir -p ${LOG_DIR}
 
 torchx run -s local_cwd -cfg log_dir=log/torchrec_kaggle/${PLAN} dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
-    --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim ${EMB_DIM} --pin_memory \
-    --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,${EMB_DIM}" --shuffle_batches \
+    --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim ${EMB_DIM} --pin_memory --cache_ratio 0.20 \
+    --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,${EMB_DIM}" --shuffle_batches --eval_acc \
     --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "" --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee ./${LOG_DIR}/torchrec_${PLAN}.txt
 done
 done

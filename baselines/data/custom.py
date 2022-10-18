@@ -16,19 +16,30 @@ from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torch.utils.data import DataLoader, IterableDataset
 import os
 
-NUM_ROWS = int(2**23) # samples num
-CAT_FEATURE_COUNT = 8
-E = int(1e7) # unique embeddings num
-s = 0.25 # long-tail skew
+NUM_ROWS = int(2**25)  # samples num
+E = [int(1e6), int(1e6), int(1e6), int(1e6), int(1e6), int(1e6), int(1e6), int(1e6)]  # unique embeddings num
+s = 0.25  # long-tail skew
 
-NUM_EMBEDDINGS_PER_FEATURE = (str(E) + ', ') * (CAT_FEATURE_COUNT - 1)
-NUM_EMBEDDINGS_PER_FEATURE += str(E)
+CAT_FEATURE_COUNT = len(E)
+NUM_EMBEDDINGS_PER_FEATURE = ""
+for e in E:
+    NUM_EMBEDDINGS_PER_FEATURE += (str(e) + ',')
+NUM_EMBEDDINGS_PER_FEATURE = NUM_EMBEDDINGS_PER_FEATURE[:-1]
+DEFAULT_CAT_NAMES = ["cat_{}".format(i) for i in range(CAT_FEATURE_COUNT)]
 DEFAULT_LABEL_NAME = "click"
 DEFAULT_INT_NAMES = ['rand_dense']
-DEFAULT_CAT_NAMES = ["cat_{}".format(i) for i in range(CAT_FEATURE_COUNT)]
-
-
 TOTAL_TRAINING_SAMPLES = NUM_ROWS
+
+
+def update_settings():
+    global CAT_FEATURE_COUNT, DEFAULT_CAT_NAMES, NUM_EMBEDDINGS_PER_FEATURE
+    CAT_FEATURE_COUNT = len(E)
+    DEFAULT_CAT_NAMES = ["cat_{}".format(i) for i in range(CAT_FEATURE_COUNT)]
+    NUM_EMBEDDINGS_PER_FEATURE = ""
+    for e in E:
+        NUM_EMBEDDINGS_PER_FEATURE += (str(e) + ',')
+    NUM_EMBEDDINGS_PER_FEATURE = NUM_EMBEDDINGS_PER_FEATURE[:-1]
+
 
 class CustomIterDataPipe(IterableDataset):
     def __init__(
@@ -57,28 +68,26 @@ class CustomIterDataPipe(IterableDataset):
         self.offset_per_key: List[int] = [batch_size * i for i in range(CAT_FEATURE_COUNT + 1)]
         self.index_per_key: Dict[str, int] = {key: i for (i, key) in enumerate(self.keys)}
         self.stride = batch_size
-        # random generation
-        self.min_sample = (1 / E) ** s
-        self.max_sample = 1.
-        
+        # for random generation
+        self.min_sample_list = [(1 / e) ** s for e in E]
+        self.max_sample_list = [1.0 for e in E]
+        # for iter
         self.iter_count = 0
+
     def __len__(self) -> int:
         return self.num_batches
-    
-    def _sampler(self, rand_float):
-        sample_float = rand_float * (self.max_sample - self.min_sample) + self.min_sample
-        return torch.floor(1 / (sample_float ** (1 / s))).long() - 1
-    def _generate_indices(self, length):
-        indices = self._sampler(torch.rand(length,))
-        return indices
-    
+
     def __iter__(self) -> Iterator[Batch]:
         while self.iter_count < self.num_batches:
-            indices = self._generate_indices(self.batch_size * CAT_FEATURE_COUNT)
-            # print(indices)
+            indices = []
+            for min_sample, max_sample in zip(self.min_sample_list, self.max_sample_list):
+                # long-tail random idx generation
+                rand_float = torch.rand(self.batch_size, dtype=torch.float64)
+                sample_float = rand_float * (max_sample - min_sample) + min_sample
+                indices.append(torch.floor(1 / (sample_float ** (1 / s))).long() - 1)
             self.iter_count += 1
-            yield self._make_batch(indices)
-            
+            yield self._make_batch(torch.cat(indices))
+
     def _make_batch(self, indices):
         ret = Batch(
             dense_features=torch.rand(self.stride, 1),
@@ -95,10 +104,11 @@ class CustomIterDataPipe(IterableDataset):
             labels=torch.randint(2, (self.stride,))
         )
         return ret
-    
+
+
 def get_custom_data_loader(
-    args: argparse.Namespace,
-    stage: str) -> DataLoader:
+        args: argparse.Namespace,
+        stage: str) -> DataLoader:
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     if stage == "train":

@@ -284,7 +284,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="cache ratio for colossalai.",
     )
     return parser.parse_args(argv)
-    
+
 
 def _evaluate(
     limit_batches: Optional[int],
@@ -331,9 +331,9 @@ def _evaluate(
     )
     auroc = metrics.AUROC(compute_on_step=False).to(device)
     accuracy = metrics.Accuracy(compute_on_step=False).to(device)
-    
+
     train_pipeline._connected = False
-    
+
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     with torch.no_grad():
         for _ in tqdm(iter(int, 1), desc=f"Evaluating {stage} set"):
@@ -440,7 +440,7 @@ def _train(
     #     samples_per_trainer = limit_train_samples
     if limit_train_batches is None:
         limit_train_batches = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
-        
+
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=limit_train_batches):
         try:
@@ -466,15 +466,16 @@ def _train(
                     "val",
                 )
                 train_pipeline._model.train()
-        
+
         except StopIteration:
             print(f"StopIteration {get_mem_info('Training:  ')}")
             break
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"RuntimeError {get_mem_info('Training:  ')}")
             break
-        if it > limit_train_batches:
-            break
+        # if it > limit_train_batches:
+        #     break
+
 
 def train_val_test(
     args: argparse.Namespace,
@@ -508,7 +509,7 @@ def train_val_test(
     if args.profile_dir == "":
         prof = None
     else:
-        prof =  profile(
+        prof = profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             schedule=schedule(wait=0, warmup=20, active=2, repeat=1),
             profile_memory=True,
@@ -622,7 +623,7 @@ def main(argv: List[str]) -> None:
     _num_embeddings_per_feature = args.num_embeddings_per_feature.split(",")
     total_num_embeddings = sum([int(num) for num in _num_embeddings_per_feature])
     print("embedding table row num: ", total_num_embeddings)
-    
+
     rank = int(os.environ["LOCAL_RANK"])
     if torch.cuda.is_available():
         device: torch.device = torch.device(f"cuda:{rank}")
@@ -711,10 +712,11 @@ def main(argv: List[str]) -> None:
     elif args.shard_type == "tablerow":
         sharding_types = [ShardingType.TABLE_ROW_WISE.value]
     else:
-        sharding_types = [ShardingType.TABLE_WISE.value, ShardingType.TABLE_COLUMN_WISE.value, ShardingType.COLUMN_WISE.value, ShardingType.ROW_WISE.value ]
+        sharding_types = [ShardingType.TABLE_WISE.value, ShardingType.TABLE_COLUMN_WISE.value,
+                          ShardingType.COLUMN_WISE.value, ShardingType.ROW_WISE.value]
 
     print(f'sharding_types {sharding_types}')
-    
+
     if args.kernel_type == "colossalai":
         # ShardingType.DATA_PARALLEL.value,
         # ShardingType.TABLE_WISE.value,
@@ -737,11 +739,11 @@ def main(argv: List[str]) -> None:
     else:
         if dist.get_rank() == 0:
             print("No constraints are applied")
-    
-    if  args.kernel_type != "colossalai":
+
+    if args.kernel_type != "colossalai":
         print(f"{args.kernel_type} must be used with prefetch as 1")
         args.prefetch_num = 1
-        
+
     constraints = build_constraints(
         data_module.DEFAULT_CAT_NAMES, sharding_types, compute_kernels
     )
@@ -788,7 +790,6 @@ def main(argv: List[str]) -> None:
     if dist.get_rank() == 0:
         print(f"Plan: {model.plan}")
 
-
     def optimizer_with_params():
         if args.adagrad:
             return lambda params: torch.optim.Adagrad(params, lr=args.learning_rate)
@@ -822,10 +823,11 @@ def main(argv: List[str]) -> None:
     )
 
     kernel = model._dmp_wrapped_module.module.model.sparse_arch.embedding_bag_collection._lookups[
-            0]._emb_modules[0]
-    
+        0]._emb_modules[0]
+
     if isinstance(kernel, CAIBatchedDenseEmbeddingBag):
         kernel._emb_module.cache_weight_mgr.print_comm_stats()
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
