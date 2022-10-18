@@ -32,8 +32,7 @@ Please refer to `scripts/preprocess` dir to see the details.
 
 ### Usage
 
-1. Installation Dependencies from Source.
-
+1. Installation Dependencies
 Install ColossalAI (commit id e8d8eda5e7a0619bd779e35065397679e1536dcd)
 
 https://github.com/hpcaitech/ColossalAI
@@ -42,14 +41,14 @@ Install our customized torchrec (commit id e8d8eda5e7a0619bd779e35065397679e1536
 
 https://github.com/hpcaitech/torchrec
 
-
-2. Installation Dependencies from Docker
+Or, build a docker image from [docker](./docker).
+Or, use prebuilt docker image on dockerhub.
 
 ```
 docker pull hpcaitech/cacheembedding:0.2.2
 ```
 
-lauch a docker container 
+lauch a docker container.
 
 ```
 bash ./docker/launch.sh
