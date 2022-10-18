@@ -32,7 +32,6 @@ do
 for BATCHSIZE in 4096 #16384 8192 4096 2048 1024 512     
 do
 for SHARDTYPE in "table" # "column" "row" "tablecolumn" "tablerow" 
-
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
