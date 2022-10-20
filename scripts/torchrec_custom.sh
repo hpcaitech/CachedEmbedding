@@ -18,9 +18,8 @@ set_n_least_used_CUDA_VISIBLE_DEVICES() {
     echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 }
 
-export DATAPATH=/data/scratch/RecSys/embedding_bag
-# export DATAPATH=custom
-export SCALE="512M" # "4M ""52M" "512M"
+# export DATAPATH=/data/scratch/RecSys/embedding_bag
+export DATAPATH=custom
 export EVAL_ACC=0
 export EMB_DIM=128
 
@@ -30,39 +29,29 @@ else
 export EVAL_ACC_FLAG=""
 fi
 
-# local batch size
-# 4
-# export BATCHSIZE=1024
-# export BATCHSIZE=1024
-
-# export BATCHSIZE=4096
-# 2
-# export BATCHSIZE=8192
-# 1
 
 mkdir -p logs
-for PREFETCH_NUM in 1 32 4 8 16 #8 16 32
+for PREFETCH_NUM in 1 # 32 4 8 16
 do
-for GPUNUM in 1 # 1 # 2
+for GPUNUM in 4 # 4 8 # 1 # 2
 do
-for BATCHSIZE in 256 #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
+for BATCHSIZE in 8192 #2048 4096 1024 #8192 512 ##16384 8192 4096 2048 1024 512     
 do
-for SHARDTYPE in  "table"
+for SHARDTYPE in  "row" "tablerow"  # "tablecolumn" "column" "row" "tablerow" "table"
 do
-for KERNELTYPE in "colossalai" # "uvm_lfu" # "colossalai" # "uvm_lfu" # "colossalai"
+for KERNELTYPE in "colossalai" # "fused" # "uvm_lfu" # "colossalai" # "uvm_lfu" # "colossalai"
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
-export PLAN=g${GPUNUM}_bs_${BATCHSIZE}_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}
-rm -rf ./tensorboard_log/torchrec_synth/
+export PLAN=g${GPUNUM}_bs_${BATCHSIZE}_${SHARDTYPE}_pf_${PREFETCH_NUM}_eb_${EMB_DIM}_${KERNELTYPE}_custom
+rm -rf ./tensorboard_log/torchrec_custom/
 # env CUDA_LAUNCH_BLOCKING=1 
 # timeout -s SIGKILL 30m 
-torchx run -s local_cwd -cfg log_dir=log/torchrec_synth/${PLAN} dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
-    --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim ${EMB_DIM} --pin_memory \
+torchx run -s local_cwd -cfg log_dir=log/torchrec_custom/${PLAN} dist.ddp -j 1x${GPUNUM} --script baselines/dlrm_main.py -- \
+    --in_memory_binary_criteo_path ${DATAPATH} --kaggle --embedding_dim ${EMB_DIM} --pin_memory --cache_ratio 0.20 \
     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,${EMB_DIM}" --shuffle_batches \
     --learning_rate 1. --batch_size ${BATCHSIZE} --profile_dir "" --shard_type ${SHARDTYPE} --kernel_type ${KERNELTYPE}  \
-    --synth_size ${SCALE} \
-    --synth_size ${SCALE} --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee logs/torchrec_${PLAN}.txt
+    --prefetch_num ${PREFETCH_NUM} ${EVAL_ACC_FLAG} 2>&1 | tee logs/torchrec_${PLAN}.txt
 done
 done
 done
