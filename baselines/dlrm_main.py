@@ -432,7 +432,7 @@ def _train(
         else itertools.islice(iterator, limit_train_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
-    if limit_train_batches is not None:
+    if limit_train_batches is None:
         samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
     else:
         samples_per_trainer = limit_train_batches
@@ -780,8 +780,8 @@ def main(argv: List[str]) -> None:
     )
 
     print(f"{get_mem_info('After model parallel:  ')}")
-    if dist.get_rank() == 0:
-        print(f"Plan: {model.plan}")
+    # if dist.get_rank() == 0:
+    #     print(f"Plan: {model.plan}")
 
 
     def optimizer_with_params():
