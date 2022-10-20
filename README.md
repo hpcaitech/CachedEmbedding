@@ -1,15 +1,20 @@
-## FreqAwareCache Embedding : larger embedding tables, smaller GPU memory budget.
+## CachedEmbedding : larger embedding tables, smaller GPU memory budget.
 
 The embedding tables in deep learning recommendation system models are becoming extremly large and cannot be fit in GPU memory.
-This project provides an efficient way to train large recommendation system models whose embedding tables can not fit in GPU memory.
-The entire training is completed on GPU in a synchronized parameter updating manner.
+This project provides an efficient way to train the extremely large recommendation system models.
+The entire training runs on GPU in a synchronized parameter updating manner.
 
-This project applies the FreqAwareCache Embedding, which extends the vanilla
+This project applies the CachedEmbedding, which extends the vanilla
 [PyTorch EmbeddingBag](https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html#torch.nn.EmbeddingBag) 
-with **Freqency-Aware Cache Embedding** method from [ColossalAI](https://github.com/hpcaitech/ColossalAI).
-The FreqAwareCache Embedding use a [software cache approach](https://colossalai.readthedocs.io/en/latest/colossalai/colossalai.nn.parallel.layers.html) to dynamically manage the extremely large embedding table in the CPU and GPU memory space.
-It can also leverage the id's frequency statistics of the target dataset to reduce CPU-GPU communication volume.
+with the help from [ColossalAI](https://github.com/hpcaitech/ColossalAI).
+The CachedEmbedding use a [software cache approach](https://colossalai.readthedocs.io/en/latest/colossalai/colossalai.nn.parallel.layers.html) to dynamically manage the extremely large embedding table in the CPU and GPU memory space.
 For example, this repo can train DLRM model including a **91.10 GB** embedding table on Criteo 1TB dataset allocating just **3.75 GB** CUDA memory  on a single GPU!
+
+In order to reduce the overhead time of the Cache, we designed a "far-sighted" Cache mechanism. 
+Instead of only performing cache operations on the first mini-batch, wefetches several mini-batches that will be used later, and performs Cache query operations together.
+It also uses a pipeline method to overlap the overhead of data loading and model training, which is shown in the following figures.
+
+<img src="./pics/prefetch.png" width=800/>
 
 Despite the extra cache indexing and CPU-GPU overhead, the end-to-end performance of our system drops very little compared to the torchrec.
 However, torchrec usually requires an order of magnitude more CUDA memory requirements.
@@ -27,10 +32,26 @@ Please refer to `scripts/preprocess` dir to see the details.
 
 ### Usage
 
-1. Installation
+1. Installation Dependencies
+
+Install [ColossalAI](https://github.com/hpcaitech/ColossalAI) (commit id e8d8eda5e7a0619bd779e35065397679e1536dcd)
+
+https://github.com/hpcaitech/ColossalAI
+
+Install our customized [torchrec](https://github.com/hpcaitech/torchrec) (commit id e8d8eda5e7a0619bd779e35065397679e1536dcd)
+
+https://github.com/hpcaitech/torchrec
+
+Or, build a docker image using [docker/Dockerfile](./docker/Dockerfile).
+Or, use prebuilt docker image on dockerhub.
 
 ```
-docker pull hpcaitech/fawembedding:0.1.0
+docker pull hpcaitech/cacheembedding:0.2.2
+```
+
+lauch a docker container.
+
+```
 bash ./docker/launch.sh
 ```
 
@@ -41,8 +62,10 @@ All the commands to run DLRM on three datasets are presented in `scripts/run.sh`
 bash scripts/run.sh
 ```
 
+Set `--prefetch_num` to use prefetching.
+
 ### Model  
-Currently, this repo only contains DLRM models, and we are working on testing more recommendation models.
+Currently, this repo only contains facebook DLRM models, and we are working on testing more recommendation models.
 
 ### Performance
 

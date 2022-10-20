@@ -32,21 +32,16 @@ def benchmark_cache_embedding(batch_size,
           f"cached rows: {cuda_row_num},  cached_ratio {cuda_row_num / NUM_EMBED}")
     data_iter = iter(dataloader)
 
-    buf_size = 0
-    if use_limit_buf:
-        buf_size = int(np.ceil(cuda_row_num * 0.1))
-
     torch.cuda.reset_peak_memory_stats()
     device = torch.device('cuda:0')
+    
     with Timer() as timer:
-        model = CachedEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True, evict_strategy=EvictionStrategy.LFU if use_lfu else EvictionStrategy.DATASET).to(device)
+        model = CachedEmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True, \
+            evict_strategy=EvictionStrategy.LFU if use_lfu else EvictionStrategy.DATASET).to(device)
+        # model = torch.nn.EmbeddingBag(NUM_EMBED, embedding_dim, sparse=True, include_last_offset=True).to(device)
         print(f"model init: {timer.elapsed:.2f}s")
-        with Timer() as timer:
-            model.preprocess(cuda_row_num, id_freq_map, warmup_ratio=warmup_ratio, buffer_size=buf_size)
-        print(f"reorder: {timer.elapsed:.2f}s")
 
     grad = None
-    avg_hit_rate = None
     print(
         f'after reorder max_memory_allocated {torch.cuda.max_memory_allocated()/1e9} GB, max_memory_reserved {torch.cuda.max_memory_allocated()/1e9} GB'
     )
@@ -71,26 +66,13 @@ def benchmark_cache_embedding(batch_size,
 
                     model.zero_grad()
                     # prof.step()
-                    running_hits = model.num_hits_history[-1]    # sum(model.num_hits_history)
-                    running_miss = model.num_miss_history[-1]    # sum(model.num_miss_history)
-                    hit_rate = running_hits / (running_hits + running_miss)
-                    t.set_postfix_str(f"hit_rate={hit_rate*100:.2f}%, "
-                                      f"swap in bandwidth={model.swap_in_bandwidth:.2f} MB/s, "
-                                      f"swap out bandwidth={model.swap_out_bandwidth:.2f} MB/s")
+
                     t.update()
                     if it == 200:
                         break
 
-    hit_hist = np.array(model.num_hits_history)
-    miss_hist = np.array(model.num_miss_history)
-    hist = hit_hist / (hit_hist + miss_hist)
-    avg_hit_rate = np.mean(hist)
-    print(f"average hit rate: {avg_hit_rate}")
-    model.cache_weight_mgr.print_comm_stats()
-    print(
-        f'training max_memory_allocated {torch.cuda.max_memory_allocated()/1e9} GB, max_memory_reserved {torch.cuda.max_memory_allocated()/1e9} GB'
-    )
-    print(f'overall training time {timer.elapsed:.2f}s')
+    if hasattr(model, 'cache_weight_mgr'):
+        model.cache_weight_mgr.print_comm_stats()
 
 
 if __name__ == "__main__":
