@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, IterableDataset
 import os
 
 NUM_ROWS = int(2**25)  # samples num
-E = [int(1e6), int(1e6), int(1e6), int(1e6), int(1e6), int(1e6), int(1e6), int(1e6)]  # unique embeddings num
+E = [int(1e7), int(1e7), int(1e7), int(1e7), int(1e7), int(1e7), int(1e7), int(1e7)]  # unique embeddings num
 s = 0.25  # long-tail skew
 
 CAT_FEATURE_COUNT = len(E)

@@ -713,7 +713,7 @@ def main(argv: List[str]) -> None:
         sharding_types = [ShardingType.TABLE_ROW_WISE.value]
     else:
         sharding_types = [ShardingType.TABLE_WISE.value, ShardingType.TABLE_COLUMN_WISE.value,
-                          ShardingType.COLUMN_WISE.value, ShardingType.ROW_WISE.value]
+                          ShardingType.COLUMN_WISE.value, ShardingType.ROW_WISE.value, ShardingType.TABLE_ROW_WISE.value]
 
     print(f'sharding_types {sharding_types}')
 
