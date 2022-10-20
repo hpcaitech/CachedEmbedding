@@ -434,12 +434,12 @@ def _train(
         else itertools.islice(iterator, limit_train_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
-    # if limit_train_samples is None:
-    #     samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
-    # else:
-    #     samples_per_trainer = limit_train_samples
+
     if limit_train_batches is None:
-        limit_train_batches = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
+        samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
+    else:
+        samples_per_trainer = limit_train_batches
+    
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=limit_train_batches):
@@ -787,8 +787,8 @@ def main(argv: List[str]) -> None:
     )
 
     print(f"{get_mem_info('After model parallel:  ')}")
-    if dist.get_rank() == 0:
-        print(f"Plan: {model.plan}")
+    # if dist.get_rank() == 0:
+    #     print(f"Plan: {model.plan}")
 
     def optimizer_with_params():
         if args.adagrad:
