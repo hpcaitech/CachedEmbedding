@@ -16,9 +16,13 @@ from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from torch.utils.data import DataLoader, IterableDataset
 import os
 
+# customizable factors:
 NUM_ROWS = int(2**25)  # samples num
-E = [int(1e7), int(1e7), int(1e7), int(1e7), int(1e7), int(1e7), int(1e7), int(1e7)]  # unique embeddings num
+E = [int(3e7), int(1e7), int(2e7), int(1e7), int(1e7), int(3e6), int(8e6), int(
+    1e7), int(1e6), int(1e6), int(1e6), int(1e6), int(5e6), int(4000), int(250), int(250)]  # unique embeddings num
 s = 0.25  # long-tail skew
+POOLING_FACTOR = 2 # indices num per table per sample
+
 
 CAT_FEATURE_COUNT = len(E)
 NUM_EMBEDDINGS_PER_FEATURE = ""
@@ -60,12 +64,12 @@ class CustomIterDataPipe(IterableDataset):
         self.hashes = hashes
         self.path_manager_key = path_manager_key
         self.keys: List[str] = DEFAULT_CAT_NAMES
-        self._num_ids_in_batch: int = CAT_FEATURE_COUNT * batch_size
-        self.lengths: torch.Tensor = torch.ones((self._num_ids_in_batch,), dtype=torch.int32)
-        self.offsets: torch.Tensor = torch.arange(0, self._num_ids_in_batch + 1, dtype=torch.int32)
+        self._num_ids_group_in_batch: int = CAT_FEATURE_COUNT * batch_size
+        self.lengths: torch.Tensor = torch.ones((self._num_ids_group_in_batch,), dtype=torch.int32) * POOLING_FACTOR
+        self.offsets: torch.Tensor = torch.arange(0, self._num_ids_group_in_batch + 1, dtype=torch.int32) * POOLING_FACTOR
         self.num_batches = NUM_ROWS // self.batch_size // self.world_size
-        self.length_per_key: List[int] = CAT_FEATURE_COUNT * [batch_size]
-        self.offset_per_key: List[int] = [batch_size * i for i in range(CAT_FEATURE_COUNT + 1)]
+        self.length_per_key: List[int] = CAT_FEATURE_COUNT * [batch_size * POOLING_FACTOR]
+        self.offset_per_key: List[int] = [batch_size * i * POOLING_FACTOR for i in range(CAT_FEATURE_COUNT + 1)]
         self.index_per_key: Dict[str, int] = {key: i for (i, key) in enumerate(self.keys)}
         self.stride = batch_size
         # for random generation
@@ -82,7 +86,7 @@ class CustomIterDataPipe(IterableDataset):
             indices = []
             for min_sample, max_sample in zip(self.min_sample_list, self.max_sample_list):
                 # long-tail random idx generation
-                rand_float = torch.rand(self.batch_size, dtype=torch.float64)
+                rand_float = torch.rand(self.batch_size * POOLING_FACTOR, dtype=torch.float64)
                 sample_float = rand_float * (max_sample - min_sample) + min_sample
                 indices.append(torch.floor(1 / (sample_float ** (1 / s))).long() - 1)
             self.iter_count += 1
@@ -104,7 +108,6 @@ class CustomIterDataPipe(IterableDataset):
             labels=torch.randint(2, (self.stride,))
         )
         return ret
-
 
 def get_custom_data_loader(
         args: argparse.Namespace,

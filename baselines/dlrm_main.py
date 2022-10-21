@@ -761,8 +761,8 @@ def main(argv: List[str]) -> None:
     topology = Topology(
         world_size=env.world_size,
         compute_device="cuda",
-        hbm_cap=hbm_cap * 1024**3,  # GPU mem
-        ddr_cap=512 * 1024**3,  # CPU mem
+        hbm_cap=hbm_cap * 1024**3 * 1000000,  # GPU mem
+        ddr_cap=512 * 1024**3 * 1000000,  # CPU mem
         # batch_size=args.batch_size
         # intra_host_bw=1000 * 1024**3 / 1000,
     )  # Device to Device bandwidth
