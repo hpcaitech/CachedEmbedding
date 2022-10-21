@@ -23,12 +23,13 @@ export LOG_DIR="/data2/users/lcfjr/logs_1tb/b"
 mkdir -p ${LOG_DIR}
 
 export GPUNUM=2
+
+# prefetch mini-batch number.
 export PREFETCH_NUM=4
 export EVAL_ACC=0
-export KERNELTYPE="fused" #"colossalai"
+export KERNELTYPE="fused"
 export SHARDTYPE="table"
 export BATCHSIZE=1024
-# export SHARDTYPE="uvm_lfu"
 export EMB_DIM=128
 export CACHERATIO=0.1
 
@@ -39,25 +40,17 @@ export EVAL_ACC_FLAG=""
 fi
 
 
-# For TorchRec baseline
-# ${BATCHSIZE}*${GPUNUM} is the global batch size
 
 batch_size_list=(8192)
 gpu_num_list=(1)
 
-# (1024, 8) (2048, 4) (4096, 2) (8192, 1)
-# for PREFETCH_NUM in 8 #1
-# do
+
 for ((i=0;i<${#batch_size_list[@]};i++)); do
 
 for KERNELTYPE in "colossalai"
 do
 for CACHERATIO in 0.05
 do
-# for BATCHSIZE in 2048 #8192 #4096 2048 1024
-# do
-# for GPUNUM in 4 #1 2 4 8
-# do
 
 export BATCHSIZE=${batch_size_list[i]}
 export GPUNUM=${gpu_num_list[i]}
@@ -77,21 +70,3 @@ torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w1_16k dist.ddp -j 1x
 done
 done
 done
-
-# done
-# done
-# done
-# torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w2_16k dist.ddp -j 1x2 --script baselines/dlrm_main.py -- \
-#     --in_memory_binary_criteo_path ${DATASETPATH} --embedding_dim 128 --pin_memory \
-#     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
-#     --learning_rate 1. --batch_size 8192  --profile_dir "tensorboard_log/torchrec_terabyte/w2_16k"
-
-# torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w4_16k dist.ddp -j 1x4 --script baselines/dlrm_main.py -- \
-#     --in_memory_binary_criteo_path ${DATASETPATH} --embedding_dim 128 --pin_memory \
-#     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
-#     --learning_rate 1. --batch_size 4096  --profile_dir "tensorboard_log/torchrec_terabyte/w4_16k"
-
-# torchx run -s local_cwd -cfg log_dir=log/torchrec_terabyte/w8_16k dist.ddp -j 1x8 --script baselines/dlrm_main.py -- \
-#     --in_memory_binary_criteo_path ${DATASETPATH} --embedding_dim 128 --pin_memory \
-#     --over_arch_layer_sizes "1024,1024,512,256,1" --dense_arch_layer_sizes "512,256,128" --shuffle_batches \
-#     --learning_rate 1. --batch_size 2048  --profile_dir "tensorboard_log/torchrec_terabyte/w8_16k"

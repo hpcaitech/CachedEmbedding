@@ -434,10 +434,7 @@ def _train(
         else itertools.islice(iterator, limit_train_batches),
         itertools.islice(next_iterator, TRAIN_PIPELINE_STAGES - 1),
     )
-    # if limit_train_samples is None:
-    #     samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
-    # else:
-    #     samples_per_trainer = limit_train_samples
+
     if limit_train_batches is None:
         limit_train_batches = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
 
@@ -473,8 +470,9 @@ def _train(
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"RuntimeError {get_mem_info('Training:  ')}")
             break
-        # if it > limit_train_batches:
-        #     break
+        # # if it > limit_train_batches:
+        # #     break
+
 
 
 def train_val_test(
