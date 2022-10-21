@@ -283,6 +283,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         default=0.05,
         help="cache ratio for colossalai.",
     )
+    parser.add_argument(
+        "--pooling_factor",
+        type=int,
+        default=1,
+        help="Number of indices per table per sample for Custom dataset."
+    )
     return parser.parse_args(argv)
 
 
@@ -614,6 +620,7 @@ def main(argv: List[str]) -> None:
     elif "custom" in args.in_memory_binary_criteo_path:
         TOTAL_TRAINING_SAMPLES = custom.TOTAL_TRAINING_SAMPLES
         setattr(args, "num_embeddings_per_feature", custom.NUM_EMBEDDINGS_PER_FEATURE)
+        custom.POOLING_FACTOR = args.pooling_factor
         data_module = custom
     else:
         raise NotImplementedError()
