@@ -436,10 +436,7 @@ def _train(
     )
 
     if limit_train_batches is None:
-        samples_per_trainer = TOTAL_TRAINING_SAMPLES / dist.get_world_size() * epochs
-    else:
-        samples_per_trainer = limit_train_batches
-    
+        limit_train_batches = TOTAL_TRAINING_SAMPLES / dist.get_world_size() / batch_size * epochs
 
     # Infinite iterator instead of while-loop to leverage tqdm progress bar.
     for it in tqdm(itertools.count(), desc=f"Epoch {epoch}", total=limit_train_batches):
@@ -473,8 +470,9 @@ def _train(
         except RuntimeError:  # petastorm dataloader StopIteration will raise RuntimeError in train_pipeline
             print(f"RuntimeError {get_mem_info('Training:  ')}")
             break
-        # if it > limit_train_batches:
-        #     break
+        # # if it > limit_train_batches:
+        # #     break
+
 
 
 def train_val_test(
@@ -713,7 +711,7 @@ def main(argv: List[str]) -> None:
         sharding_types = [ShardingType.TABLE_ROW_WISE.value]
     else:
         sharding_types = [ShardingType.TABLE_WISE.value, ShardingType.TABLE_COLUMN_WISE.value,
-                          ShardingType.COLUMN_WISE.value, ShardingType.ROW_WISE.value]
+                          ShardingType.COLUMN_WISE.value, ShardingType.ROW_WISE.value, ShardingType.TABLE_ROW_WISE.value]
 
     print(f'sharding_types {sharding_types}')
 
@@ -761,8 +759,8 @@ def main(argv: List[str]) -> None:
     topology = Topology(
         world_size=env.world_size,
         compute_device="cuda",
-        hbm_cap=hbm_cap * 1024**3,  # GPU mem
-        ddr_cap=512 * 1024**3,  # CPU mem
+        hbm_cap=hbm_cap * 1024**3 * 1000000,  # GPU mem
+        ddr_cap=512 * 1024**3 * 1000000,  # CPU mem
         # batch_size=args.batch_size
         # intra_host_bw=1000 * 1024**3 / 1000,
     )  # Device to Device bandwidth
@@ -787,8 +785,8 @@ def main(argv: List[str]) -> None:
     )
 
     print(f"{get_mem_info('After model parallel:  ')}")
-    # if dist.get_rank() == 0:
-    #     print(f"Plan: {model.plan}")
+    if dist.get_rank() == 0:
+        print(f"Plan: {model.plan}")
 
     def optimizer_with_params():
         if args.adagrad:

@@ -23,15 +23,16 @@ export GPUNUM=1
 
 for EMB_DIM in 128 #64 96
 do
-for PREFETCH_NUM in 4 #1 8 16 32
+for PREFETCH_NUM in 1 #1 8 16 32
 do
-for GPUNUM in 8
+for GPUNUM in 1 2 4 8
 do
 for KERNELTYPE in "colossalai" # "fused" # "colossalai"
 do
-for BATCHSIZE in 4096 #16384 8192 4096 2048 1024 512     
+for BATCHSIZE in 8192 #16384 8192 4096 2048 1024 512     
 do
-for SHARDTYPE in "table" # "column" "row" "tablecolumn" "tablerow" 
+for SHARDTYPE in "table" # "column" "row" "tablecolumn" "tablerow" "table"
+# for SHARDTYPE in "tablerow" 
 do
 # For TorchRec baseline
 set_n_least_used_CUDA_VISIBLE_DEVICES ${GPUNUM}
